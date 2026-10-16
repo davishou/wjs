@@ -248,8 +248,9 @@ table.dt { width: 100%; border-collapse: separate; border-spacing: 0; font-size:
 .facts div { background: var(--surface-2); border-radius: var(--radius); padding: 10px 12px; }
 .facts dt { color: var(--muted); font-size: .8rem; } .facts dd { margin: 0; font-weight: 700; font-family: var(--font-num); }
 .themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-.themes button { text-align: left; border: 2px solid var(--line); background: var(--surface); border-radius: var(--radius-lg); padding: 14px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
-.themes button.on { border-color: var(--primary); }
+.themes button { text-align: left; border: 2px solid var(--line); background: var(--surface); color: var(--ink); font-family: var(--font); border-radius: var(--radius-lg); padding: 14px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+.themes button.on { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary); }
+.themes button strong { font-family: var(--font-head); font-size: 1.05rem; }
 .themes small { color: var(--muted); }
 .sw { display: flex; gap: 4px; margin-bottom: 6px; } .sw i { width: 28px; height: 28px; border-radius: 6px; border: 1px solid rgba(0,0,0,.12); }
 
