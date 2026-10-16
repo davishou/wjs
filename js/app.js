@@ -356,12 +356,26 @@
     const p = S.pivot, E = S.E;
     const box = $('#pvTable');
     if (p.mode === 'detail') return renderDetail();
-    const res = E.pivot({ rows: p.rows, cols: p.col, measures: p.measures, filter: pivotFilter() });
+    let res;
+    try { res = E.pivot({ rows: p.rows, cols: p.col, measures: p.measures, filter: pivotFilter() }); } catch (err) {
+      if (err.message !== 'TOO_BIG') throw err;
+      lastPivot = null;
+      $('#pvMeta').textContent = '';
+      box.innerHTML = `<div class="empty"><strong>組合太大，無法一次顯示</strong><br>這個組合會產生約 ${nf0.format(err.groups)} 列 × ${nf0.format(err.cols)} 欄。<br>請減少一層分組、把「欄（橫向展開）」改成項目較少的欄位（例如年份、區域），或先加入篩選縮小範圍。</div>`;
+      return;
+    }
     lastPivot = res;
     const q = $('#pvSearch').value.trim().toLowerCase();
     let rows = res.rows;
     if (q) rows = rows.filter((r) => r.labels.some((l) => String(l).toLowerCase().includes(q)));
-    const usedCols = res.usedCols || [0];
+    let usedCols = res.usedCols || [0];
+    // 橫向欄位太多時，畫面只顯示金額最大的 40 欄（合計與匯出仍包含全部）
+    const MAXC = 40; let colNote = '';
+    if (usedCols.length > MAXC) {
+      const top = new Set(usedCols.slice().sort((a, b) => Math.abs(res.colTotals[b][0] || 0) - Math.abs(res.colTotals[a][0] || 0)).slice(0, MAXC));
+      colNote = ` · 橫向共 ${nf0.format(usedCols.length)} 欄，畫面只顯示「${MEASURES.find((x) => x.key === res.measures[0]).label}」最高的 ${MAXC} 欄，合計與匯出 CSV 包含全部`;
+      usedCols = usedCols.filter((c) => top.has(c));
+    }
     const ms = res.measures;
     const multiCol = !!res.colDim;
     // 排序
@@ -374,7 +388,7 @@
       rows = sortRows(rows, { key, dir }, g);
     }
     lastPivotRows = rows;
-    $('#pvMeta').textContent = `${nf0.format(rows.length)} 組 · 從 ${nf0.format(res.matched)} 筆資料計算 · ${Math.round(res.ms)} 毫秒`;
+    $('#pvMeta').textContent = `${nf0.format(rows.length)} 組 · 從 ${nf0.format(res.matched)} 筆資料計算 · ${Math.round(res.ms)} 毫秒` + colNote;
     const sortCls = (key) => (S.pvSort && S.pvSort.key === key ? 'sorted' + (S.pvSort.dir > 0 ? ' asc' : '') : '');
     const label = (d, v) => (res.rowDims[d] === 'rep' ? repName(v) : v === '' ? '（空白）' : v);
     // 表頭
@@ -401,7 +415,7 @@
     foot += '</tr>';
     if (!res.rowDims.length) { rows = [{ labels: [], codes: [], vals: res.colTotals, rowTotal: res.grand }]; foot = ''; }
     table(box, cols, rows, {
-      headHtml: head, foot, limit: 300,
+      headHtml: head, foot, limit: Math.max(30, Math.min(300, Math.floor(12000 / Math.max(1, cols.length)))),
       empty: '沒有符合條件的資料，試著放寬篩選或期間。',
       onSort: (k) => { S.pvSort = toggleSort(S.pvSort, k); renderPivotResult(); },
       onRow: res.rowDims.length ? (r) => drillPivot(res, r) : null,

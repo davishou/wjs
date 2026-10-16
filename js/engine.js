@@ -128,7 +128,6 @@
       const amt = ds.num.amt, sold = ds.num.sold, profit = ds.num.profit, qty = ds.num.qty, src = ds.src;
       const ms = spec.measures;
       const W = 8; // 0銷貨 1退貨 2毛利S 3毛利R 4賣出S 5賣出R 6數量 7筆數
-      const nCols = colDim ? colDim.labels.length : 1;
       const keyArr = rowDims.map((d) => d.codes);
       const colCodes = colDim ? colDim.codes : null;
       // 1) 指派群組編號
@@ -156,11 +155,23 @@
         }
       }
       const G = groupFirst.length;
+      // 只保留有資料的欄，並重新編號（避免欄位很多時占用大量記憶體）
+      let nCols = 1, cmap = null, ucols = null;
+      if (colDim) {
+        const seen = new Uint8Array(colDim.labels.length);
+        for (let j = 0; j < m; j++) seen[colCodes[idx[j]]] = 1;
+        cmap = new Int32Array(colDim.labels.length).fill(-1); ucols = [];
+        for (let c = 0; c < seen.length; c++) if (seen[c]) { cmap[c] = ucols.length; ucols.push(c); }
+        nCols = Math.max(1, ucols.length);
+      }
+      if (G * nCols * W > 24e6) {
+        const e = new Error('TOO_BIG'); e.groups = G; e.cols = nCols; throw e;
+      }
       // 2) 累加
       const cells = new Float64Array(G * nCols * W);
       const tot = new Float64Array(nCols * W);
       for (let j = 0; j < m; j++) {
-        const i = idx[j]; const c = colCodes ? colCodes[i] : 0;
+        const i = idx[j]; const c = colCodes ? cmap[colCodes[i]] : 0;
         const o = (gid[j] * nCols + c) * W, t = c * W;
         const a = amt[i], pf = profit[i], sd = sold[i];
         if (src[i] === 0) { cells[o] += a; cells[o + 2] += pf; cells[o + 4] += sd; tot[t] += a; tot[t + 2] += pf; tot[t + 4] += sd; } else { cells[o + 1] += a; cells[o + 3] += pf; cells[o + 5] += sd; tot[t + 1] += a; tot[t + 3] += pf; tot[t + 5] += sd; }
@@ -191,9 +202,9 @@
           return res;
         };
         distinct[mk] = {
-          cell: cnt((j, i) => gid[j] * nCols + (colCodes ? colCodes[i] : 0), G * nCols),
+          cell: cnt((j, i) => gid[j] * nCols + (colCodes ? cmap[colCodes[i]] : 0), G * nCols),
           row: colDim ? cnt((j) => gid[j], G) : null,
-          col: cnt((j, i) => (colCodes ? colCodes[i] : 0), nCols),
+          col: cnt((j, i) => (colCodes ? cmap[colCodes[i]] : 0), nCols),
           all: colDim ? cnt(() => 0, 1)[0] : null,
         };
       }
@@ -225,7 +236,7 @@
         out[g] = { codes, labels: codes.map((c, d) => rowDims[d].labels[c]), vals, rowTotal };
       }
       let usedCols = null;
-      if (colDim) { usedCols = []; for (let c = 0; c < nCols; c++) if (tot[c * W + 7] > 0) usedCols.push(c); }
+      if (colDim) { usedCols = []; for (let c = 0; c < nCols; c++) usedCols.push(c); }
       const colTotals = [];
       for (let c = 0; c < nCols; c++) colTotals.push(calc(tot, c * W, (mk) => distinct[mk].col[c]));
       let grand;
@@ -246,7 +257,7 @@
       });
       return {
         rows: out, rowDims: spec.rows, colDim: spec.cols, measures: ms,
-        colLabels: colDim ? colDim.labels : null, usedCols, colTotals, grand,
+        colLabels: colDim ? ucols.map((c) => colDim.labels[c]) : null, usedCols, colTotals, grand,
         matched: m, ms: performance.now() - t0,
       };
     }
