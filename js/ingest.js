@@ -144,7 +144,8 @@
 
   function trim(a, n) { return a.length === n ? a : a.slice(0, n); }
 
-  async function ingestXlsx(blob, onStatus) {
+  // blob：File/Blob 或 Uint8Array（解密後的內容）；name：檔名
+  async function ingestXlsx(blob, onStatus, name) {
     const t0 = Date.now();
     onStatus({ stage: '開啟檔案', pct: 0 });
     const zip = await X.openZip(blob);
@@ -166,7 +167,7 @@
     const ds = {
       version: 1,
       createdAt: new Date().toISOString(),
-      sourceName: blob.name || '',
+      sourceName: name || blob.name || '',
       n, nSales: nS, nReturns: nR,
       str: {}, num: {},
       src: trim(B.src, n),

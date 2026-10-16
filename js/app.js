@@ -39,7 +39,7 @@
 
   // ---------- 狀態 ----------
   const S = {
-    E: null, raw: null,
+    E: null, raw: null, vault: null, locked: false, // vault.key 只放記憶體，不會存下來
     view: 'overview',
     ref: store.get('ref', null),
     pivot: store.get('pivot', { src: 'all', rows: ['region'], col: 'year', measures: ['sales', 'returns', 'net', 'margin'], filters: {}, from: 0, to: 0, mode: 'agg' }),
@@ -672,7 +672,7 @@
       w.onmessage = (e) => {
         const d = e.data;
         if (d.type === 'progress') onProgress && onProgress(d);
-        else if (d.type === 'error') reject(new Error(d.message));
+        else if (d.type === 'error') { const er = new Error(d.message); er.code = d.code; reject(er); }
         else resolve(d);
       };
       w.onerror = (e) => reject(new Error(e.message || '背景處理失敗'));
@@ -684,26 +684,121 @@
     $('i', p).style.width = Math.round(pct * 100) + '%'; $('p', p).textContent = text;
   }
 
+  // ---------- 密碼對話框 ----------
+  // fields: [{ name, label, placeholder, autocomplete }]；check: { name, label, checked, hides: [欄位名] }
+  // validate(values) 回傳錯誤訊息（可為 async）；關閉時清空輸入框，密碼不留在畫面上。
+  function ask({ title, desc, fields, check, submit = '確定', error = '', validate }) {
+    return new Promise((resolve) => {
+      const dlg = $('#dlg'), form = $('#dlgForm');
+      form.innerHTML = `<h2>${esc(title)}</h2>${desc ? `<div class="desc">${desc}</div>` : ''}` +
+        fields.map((f) => `<div data-f="${f.name}"><label class="field-label" for="dlg_${f.name}">${esc(f.label)}</label>` +
+          `<input type="password" id="dlg_${f.name}" name="${f.name}" placeholder="${esc(f.placeholder || '')}" autocomplete="${f.autocomplete || 'off'}"></div>` +
+          (check && check.after === f.name ? `<label class="check"><input type="checkbox" id="dlg_check" ${check.checked ? 'checked' : ''}>${esc(check.label)}</label>` : '')).join('') +
+        `<p class="form-err" id="dlgErr" role="alert">${esc(error)}</p>` +
+        `<div class="actions"><button type="button" class="btn" value="cancel" id="dlgCancel">取消</button><button class="btn primary" id="dlgOk">${esc(submit)}</button></div>`;
+      const cb = $('#dlg_check', form);
+      const sync = () => { if (cb) check.hides.forEach((n) => { $(`[data-f="${n}"]`, form).hidden = cb.checked; }); };
+      if (cb) cb.addEventListener('change', sync);
+      sync();
+      let done = false;
+      const finish = (v) => {
+        if (done) return; done = true;
+        $$('input[type="password"]', form).forEach((i) => { i.value = ''; });
+        if (dlg.open) dlg.close();
+        form.innerHTML = '';
+        resolve(v);
+      };
+      $('#dlgCancel', form).onclick = () => finish(null);
+      dlg.oncancel = (e) => { e.preventDefault(); finish(null); };
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const v = {};
+        fields.forEach((f) => { v[f.name] = $(`#dlg_${f.name}`, form).value; });
+        if (cb) v[check.name] = cb.checked;
+        const ok = $('#dlgOk', form), old = ok.textContent;
+        ok.disabled = true; ok.textContent = '處理中…';
+        const msg = validate ? await validate(v) : '';
+        ok.disabled = false; ok.textContent = old;
+        if (msg) { $('#dlgErr', form).textContent = msg; return; }
+        finish(v);
+      };
+      dlg.showModal();
+      const first = fields.find((f) => !$(`[data-f="${f.name}"]`, form).hidden);
+      if (first) $(`#dlg_${first.name}`, form).focus();
+    });
+  }
+  const MIN_PW = 4;
+  const newPwError = (a, b) => (a.length < MIN_PW ? `開啟密碼至少 ${MIN_PW} 個字` : a !== b ? '兩次輸入的密碼不一樣' : '');
+  const VAULT_NOTE = '<p>資料會加密保存在這台裝置上，之後<strong>每次開啟軟體都要輸入開啟密碼</strong>。</p><p>密碼忘記時無法找回，只能清除資料後重新匯入。</p>';
+
+  // 匯入時要的密碼：Excel 的開啟密碼（檔案有加密時）、軟體的開啟密碼（這台裝置還沒設定時）
+  function askImportPasswords(fileName, needXls, needApp, error) {
+    const fields = [];
+    if (needXls) fields.push({ name: 'xls', label: 'Excel 開啟密碼', autocomplete: 'off' });
+    if (needApp) fields.push({ name: 'app', label: '設定軟體開啟密碼', placeholder: `至少 ${MIN_PW} 個字`, autocomplete: 'new-password' }, { name: 'app2', label: '再輸入一次', autocomplete: 'new-password' });
+    const desc = (needXls ? `<p>「${esc(fileName)}」有開啟密碼。密碼只用來在瀏覽器內解密，不會儲存或傳送，也不會產生沒加密的副本。</p>` : '') + (needApp ? VAULT_NOTE : '');
+    return ask({
+      title: needXls ? '輸入 Excel 密碼' : '設定開啟密碼', desc, fields, error, submit: '開始匯入',
+      check: needXls && needApp ? { name: 'same', after: 'xls', label: '軟體開啟密碼也用這組', checked: true, hides: ['app', 'app2'] } : null,
+      validate: (v) => {
+        if (needXls && !v.xls) return '請輸入 Excel 密碼';
+        if (needApp && !(needXls && v.same)) return newPwError(v.app, v.app2);
+        return '';
+      },
+    }).then((v) => (v ? { xlsPw: needXls ? v.xls : null, appPw: needApp ? (needXls && v.same ? v.xls : v.app) : null, same: !!(needXls && needApp && v.same) } : null));
+  }
+
+  async function isCfbFile(file) {
+    const h = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+    return h[0] === 0xd0 && h[1] === 0xcf && h[2] === 0x11 && h[3] === 0xe0;
+  }
+
   async function importXlsx(file) {
     if (!file) return;
-    if (!/\.xls[xm]?$/i.test(file.name)) { toast('請選擇 .xlsx 檔案'); return; }
+    if (/\.xls$/i.test(file.name)) { toast('舊版 .xls 格式無法讀取，請在 Excel「另存新檔」為 .xlsx 再匯入', 5000); return; }
+    if (!/\.xls[xm]$/i.test(file.name)) { toast('請選擇 .xlsx 檔案'); return; }
     go('data');
-    const t0 = performance.now();
-    showProgress(0, '準備讀取 ' + file.name);
-    try {
-      const d = await runWorker({ type: 'ingest', file }, [], (s) => showProgress(s.pct || 0, `${s.stage}… ${s.rows ? nf0.format(s.rows) + ' 筆' : ''}`));
-      showProgress(1, '儲存到這台裝置…');
-      await loadBuffer(d.buf, { name: file.name, save: true });
-      showProgress(1, `完成：${nf0.format(S.E.ds.nSales)} 筆進貨、${nf0.format(S.E.ds.nReturns)} 筆退貨，花了 ${((performance.now() - t0) / 1000).toFixed(1)} 秒`);
-      toast('資料已更新');
-    } catch (err) {
-      showProgress(0, '讀取失敗：' + err.message);
-      worker && worker.terminate(); worker = null;
+    const encrypted = await isCfbFile(file);
+    let xlsPw = null, appPw = null, same = false;
+    if (encrypted || !S.vault) {
+      const r = await askImportPasswords(file.name, encrypted, !S.vault, '');
+      if (!r) { toast('已取消匯入'); return; }
+      ({ xlsPw, appPw, same } = r);
+    }
+    for (;;) {
+      const t0 = performance.now();
+      showProgress(0, '準備讀取 ' + file.name);
+      try {
+        const d = await runWorker({ type: 'ingest', file, password: xlsPw }, [], (s) => showProgress(s.pct || 0, `${s.stage}… ${s.rows ? nf0.format(s.rows) + ' 筆' : ''}`));
+        xlsPw = null;
+        showProgress(1, '加密並儲存到這台裝置…');
+        if (appPw) { S.vault = await Dataset.Vault.create(appPw); appPw = null; }
+        await loadBuffer(d.buf, { name: file.name, save: true });
+        showProgress(1, `完成：${nf0.format(S.E.ds.nSales)} 筆進貨、${nf0.format(S.E.ds.nReturns)} 筆退貨，花了 ${((performance.now() - t0) / 1000).toFixed(1)} 秒`);
+        toast('資料已更新，已加密保存在這台裝置');
+        return;
+      } catch (err) {
+        worker && worker.terminate(); worker = null;
+        if (err.code === 'BAD_PASSWORD' || err.code === 'NEED_PASSWORD') {
+          showProgress(0, 'Excel 密碼不正確');
+          const r = await askImportPasswords(file.name, true, false, err.code === 'BAD_PASSWORD' ? 'Excel 密碼不正確，請再試一次。' : '');
+          if (!r) { xlsPw = appPw = null; showProgress(0, '已取消匯入'); return; }
+          xlsPw = r.xlsPw;
+          if (same) appPw = r.xlsPw; // 開啟密碼選擇「也用這組」時，跟著改成正確的 Excel 密碼
+          continue;
+        }
+        xlsPw = appPw = null;
+        showProgress(0, '讀取失敗：' + err.message);
+        return;
+      }
     }
   }
 
   async function loadBuffer(buf, { save } = {}) {
-    if (save) await Dataset.idbSet('data', buf);
+    if (save) {
+      if (!S.vault) throw new Error('尚未設定開啟密碼');
+      await Dataset.Vault.save(S.vault, buf); // 只存加密後的內容
+    }
     const raw = Dataset.deserialize(buf);
     S.raw = buf;
     S.E = new Engine(Dataset.hydrate(raw));
@@ -718,6 +813,10 @@
 
   function renderData() {
     $$('#themePick button').forEach((b) => b.classList.toggle('on', b.dataset.theme === document.documentElement.dataset.theme));
+    $('#lockState').textContent = S.vault
+      ? '已啟用：資料加密保存在這台裝置上，每次開啟軟體都要輸入開啟密碼。'
+      : '尚未設定：匯入 Excel（電腦）或開啟資料包（手機，會沿用資料包的密碼）時會設定。';
+    $('#changePw').hidden = $('#lockNow').hidden = !S.vault;
     const f = $('#dataFacts');
     if (!S.E) { f.innerHTML = '<div><dt>目前狀態</dt><dd>尚未載入資料</dd></div>'; return; }
     const ds = S.E.ds;
@@ -740,7 +839,7 @@
     drop.addEventListener('drop', (e) => importXlsx(e.dataTransfer.files[0]));
     // 整個視窗也可拖放
     window.addEventListener('dragover', (e) => e.preventDefault());
-    window.addEventListener('drop', (e) => { if (!drop.contains(e.target)) { e.preventDefault(); const f2 = e.dataTransfer.files[0]; if (f2) (/\.dvp$/i.test(f2.name) ? openPackFile(f2) : importXlsx(f2)); } });
+    window.addEventListener('drop', (e) => { if (S.locked) { e.preventDefault(); return; } if (!drop.contains(e.target)) { e.preventDefault(); const f2 = e.dataTransfer.files[0]; if (f2) (/\.dvp$/i.test(f2.name) ? openPackFile(f2) : importXlsx(f2)); } });
     $('#themePick').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setTheme(b.dataset.theme); });
     $('#packExport').addEventListener('click', async () => {
       if (!S.raw) { toast('請先載入資料'); return; }
@@ -766,7 +865,24 @@
       const b = $('#clearData');
       if (!b.dataset.sure) { b.dataset.sure = '1'; b.textContent = '確定要清除？再按一次'; setTimeout(() => { delete b.dataset.sure; b.textContent = '清除這台裝置上的資料'; }, 5000); return; }
       delete b.dataset.sure; b.textContent = '清除這台裝置上的資料';
-      await Dataset.idbDel('data'); S.E = null; S.raw = null; $('#brandSub').textContent = '尚未載入資料'; renderData(); toast('已清除這台裝置上的資料');
+      await Dataset.Vault.clear(); S.E = null; S.raw = null; S.vault = null; $('#brandSub').textContent = '尚未載入資料'; renderData(); toast('已清除這台裝置上的資料');
+    });
+    $('#lockNow').addEventListener('click', () => location.reload()); // 金鑰只在記憶體中，重新載入就會上鎖
+    $('#changePw').addEventListener('click', async () => {
+      if (!S.vault || !S.raw) return;
+      const v = await ask({
+        title: '更改開啟密碼', submit: '更改',
+        fields: [{ name: 'cur', label: '目前的開啟密碼', autocomplete: 'current-password' }, { name: 'pw', label: '新的開啟密碼', placeholder: `至少 ${MIN_PW} 個字`, autocomplete: 'new-password' }, { name: 'pw2', label: '再輸入一次', autocomplete: 'new-password' }],
+        validate: async (x) => {
+          const e = newPwError(x.pw, x.pw2); if (e) return e;
+          try { await Dataset.Vault.open(x.cur); } catch (er) { return er.code === 'BAD_PASSWORD' ? '目前的開啟密碼不正確' : er.message; }
+          return '';
+        },
+      });
+      if (!v) return;
+      S.vault = await Dataset.Vault.create(v.pw);
+      await Dataset.Vault.save(S.vault, S.raw);
+      toast('開啟密碼已更改');
     });
   }
 
@@ -774,8 +890,19 @@
     if (Dataset.packNeedsPassword(buf) && !pw) { toast('這個資料包有密碼，請先輸入密碼'); $('#openPw').focus(); return false; }
     toast('正在開啟資料包…');
     const d = await runWorker({ type: 'unpack', buf, password: pw }, [buf]);
+    // 開啟密碼沿用資料包的密碼；資料包沒有密碼時，請使用者設定一組
+    let appPw = pw;
+    if (!appPw) {
+      const v = await ask({ title: '設定開啟密碼', desc: VAULT_NOTE, submit: '確定',
+        fields: [{ name: 'pw', label: '設定軟體開啟密碼', placeholder: `至少 ${MIN_PW} 個字`, autocomplete: 'new-password' }, { name: 'pw2', label: '再輸入一次', autocomplete: 'new-password' }],
+        validate: (x) => newPwError(x.pw, x.pw2) });
+      if (!v) { toast('已取消'); return false; }
+      appPw = v.pw;
+    }
+    S.vault = await Dataset.Vault.create(appPw); appPw = null;
     await loadBuffer(d.buf, { save: true });
-    toast('資料包已載入'); go('overview');
+    $('#openPw').value = '';
+    toast(pw ? '資料包已載入。之後開啟軟體，請輸入資料包的密碼' : '資料包已載入', 5000); go('overview');
     return true;
   }
   async function openPackFile(file) {
@@ -788,6 +915,65 @@
       if (!r.ok) throw new Error('網站上還沒有資料包（' + r.status + '）');
       return await openPackBuffer(await r.arrayBuffer(), pw);
     } catch (e) { toast(e.message); return false; }
+  }
+
+  // ---------- 開鎖畫面 ----------
+  // mode = 'unlock'：輸入密碼解開；'setup'：舊版未加密的資料，先設定密碼再加密保存
+  function lockScreen(mode, legacyBuf) {
+    return new Promise((resolve) => {
+      S.locked = true;
+      const lock = $('#lock'), shell = $('.shell');
+      const pw = $('#lockPw'), pw2 = $('#lockPw2'), err = $('#lockErr'), go1 = $('#lockGo');
+      const setup = mode === 'setup';
+      $('#lockSub').innerHTML = setup ? '為了保護資料，請設定開啟密碼。設定後資料會加密保存，<strong>每次開啟軟體都要輸入</strong>。' : '資料已上鎖，請輸入開啟密碼。';
+      $('#lockPwLabel').textContent = setup ? '設定開啟密碼' : '開啟密碼';
+      pw.autocomplete = setup ? 'new-password' : 'current-password';
+      pw.placeholder = setup ? `至少 ${MIN_PW} 個字` : '';
+      $('#lockPw2Wrap').hidden = !setup;
+      go1.textContent = setup ? '設定並開啟' : '開啟';
+      $('#lockForgot').textContent = setup ? '不想設定？' : '忘記密碼？';
+      $('#lockForgotBox').hidden = true;
+      shell.hidden = true; lock.hidden = false;
+      pw.focus();
+      const done = () => {
+        pw.value = pw2.value = ''; err.textContent = '';
+        lock.hidden = true; shell.hidden = false; S.locked = false;
+        $('#lockForm').onsubmit = null;
+        resolve();
+      };
+      $('#lockForm').onsubmit = async (e) => {
+        e.preventDefault();
+        err.textContent = '';
+        if (setup) { const m = newPwError(pw.value, pw2.value); if (m) { err.textContent = m; return; } }
+        else if (!pw.value) { err.textContent = '請輸入開啟密碼'; return; }
+        go1.disabled = true; const label = go1.textContent; go1.textContent = setup ? '加密中…' : '解鎖中…';
+        try {
+          if (setup) {
+            S.vault = await Dataset.Vault.create(pw.value);
+            await loadBuffer(legacyBuf, { save: true });
+          } else {
+            const r = await Dataset.Vault.open(pw.value);
+            S.vault = r.vault;
+            await loadBuffer(r.buf);
+          }
+          done();
+        } catch (er) {
+          err.textContent = er.code === 'BAD_PASSWORD' ? '密碼不正確，請再試一次' : '無法開啟：' + er.message;
+          pw.select();
+        } finally { go1.disabled = false; go1.textContent = label; }
+      };
+      $('#lockForgot').onclick = () => { const b = $('#lockForgotBox'); b.hidden = !b.hidden; };
+      const reset = $('#lockReset');
+      reset.textContent = '清除資料，重新開始';
+      reset.onclick = async () => {
+        if (!reset.dataset.sure) { reset.dataset.sure = '1'; reset.textContent = '確定要清除？再按一次'; setTimeout(() => { delete reset.dataset.sure; reset.textContent = '清除資料，重新開始'; }, 5000); return; }
+        delete reset.dataset.sure;
+        await Dataset.Vault.clear();
+        S.E = null; S.raw = null; S.vault = null;
+        done();
+        toast('已清除。電腦請重新匯入 Excel；手機請重新開啟資料包', 6000);
+      };
+    });
   }
 
   // ---------- 啟動 ----------
@@ -805,8 +991,11 @@
     let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (S.view === 'overview' && S.E) drawOverviewChart(); }, 200); });
     const start = (location.hash.slice(1) || 'overview');
     try {
-      const buf = await Dataset.idbGet('data');
-      if (buf) await loadBuffer(buf);
+      if (await Dataset.Vault.exists()) await lockScreen('unlock');
+      else {
+        const legacy = await Dataset.Vault.legacy(); // 舊版存下的未加密資料：先設定密碼加密
+        if (legacy) await lockScreen('setup', legacy);
+      }
     } catch (e) { console.warn(e); }
     go(start);
     if (!S.E) {

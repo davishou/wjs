@@ -18,6 +18,33 @@
 <script>try{document.documentElement.dataset.theme=localStorage.getItem('dv.theme')||'indigo'}catch(e){document.documentElement.dataset.theme='indigo'}</script>
 </head>
 <body>
+<!-- 開鎖畫面：資料加密存在這台裝置上，每次開啟都要輸入密碼 -->
+<div class="lock" id="lock" hidden>
+  <form class="lock-card" id="lockForm" novalidate>
+    <svg class="lock-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="17" width="5" height="12" rx="1.5"/><rect x="11" y="10" width="5" height="19" rx="1.5"/><rect x="19" y="4" width="5" height="25" rx="1.5"/><path d="M26 22h3v7h-3z" opacity=".45"/></svg>
+    <h1>銷售分析</h1>
+    <p class="sub" id="lockSub">資料已上鎖，請輸入開啟密碼。</p>
+    <label class="field-label" for="lockPw" id="lockPwLabel">開啟密碼</label>
+    <input type="password" id="lockPw" autocomplete="current-password">
+    <div id="lockPw2Wrap" hidden>
+      <label class="field-label" for="lockPw2">再輸入一次</label>
+      <input type="password" id="lockPw2" autocomplete="new-password">
+    </div>
+    <p class="form-err" id="lockErr" role="alert"></p>
+    <button class="btn primary block" id="lockGo">開啟</button>
+    <button type="button" class="link-btn" id="lockForgot">忘記密碼？</button>
+    <div class="lock-forgot" id="lockForgotBox" hidden>
+      <p><strong>密碼無法找回，也沒有後門</strong>——這正是資料加密的用意。</p>
+      <p>你可以清除這台裝置上的資料，再重新載入：</p>
+      <ul>
+        <li><strong>電腦</strong>：重新匯入總表 Excel，並設定新的開啟密碼。</li>
+        <li><strong>手機</strong>：重新開啟資料包，開啟密碼會沿用資料包的密碼。</li>
+      </ul>
+      <button type="button" class="btn danger" id="lockReset">清除資料，重新開始</button>
+    </div>
+  </form>
+</div>
+
 <div class="shell">
   <header class="nav" role="navigation" aria-label="主選單">
     <div class="brand">
@@ -153,7 +180,7 @@
           <input type="file" id="fileXlsx" accept=".xlsx,.xlsm" hidden>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm-1 7V3.5L18.5 9zM8 13h2l1 2 1-2h2l-2 3 2 3h-2l-1-2-1 2H8l2-3z"/></svg>
           <p><strong>把總表 Excel 拖到這裡</strong>，或 <button class="btn primary" id="pickXlsx">選擇檔案</button></p>
-          <p class="hint">只會讀取「原始進貨表」A～AE 欄與「原始退貨表」A～AB 欄，其他工作表一律忽略。檔案只在這台裝置上處理，不會上傳。</p>
+          <p class="hint">只會讀取「原始進貨表」A～AE 欄與「原始退貨表」A～AB 欄，其他工作表一律忽略。檔案只在這台裝置上處理，不會上傳。有開啟密碼的 Excel 也可以直接匯入，會請你輸入密碼，在瀏覽器內解密。</p>
         </div>
         <div class="progress" id="importProgress" hidden><div class="bar"><i></i></div><p></p></div>
         <dl class="facts" id="dataFacts"></dl>
@@ -173,7 +200,7 @@
         <div class="grid2 tight">
           <div>
             <h3>步驟 1：在這台電腦匯出資料包</h3>
-            <p class="hint">把目前的資料壓縮成一個小檔案（約 5MB）。先替它設一組密碼上鎖，再傳到手機或其他電腦。</p>
+            <p class="hint">把目前的資料壓縮成一個小檔案（約 5MB）。先替它設一組密碼上鎖，再傳到手機或其他電腦。手機開啟資料包後，軟體的開啟密碼就是這組密碼。</p>
             <label class="field-label" for="packPw">替資料包上鎖的密碼</label>
             <div class="row"><input type="password" id="packPw" placeholder="自己設一組，建議 8 碼以上" autocomplete="new-password"><button class="btn primary" id="packExport">匯出資料包</button></div>
           </div>
@@ -188,8 +215,14 @@
       </div>
 
       <div class="panel">
+        <div class="panel-head"><h2>開啟密碼</h2></div>
+        <p class="hint" id="lockState"></p>
+        <div class="row"><button class="btn" id="changePw">更改開啟密碼</button><button class="btn" id="lockNow">立即鎖定</button></div>
+      </div>
+
+      <div class="panel">
         <div class="panel-head"><h2>其他</h2></div>
-        <p class="hint">只會刪除存在這台裝置上的銷售資料，軟體本身和介面風格都會保留。之後重新匯入 Excel 或開啟資料包就能繼續使用。適合在共用電腦或手機轉給別人之前使用。</p>
+        <p class="hint">只會刪除存在這台裝置上的銷售資料和開啟密碼，軟體本身和介面風格都會保留。之後重新匯入 Excel 或開啟資料包就能繼續使用。適合在共用電腦或手機轉給別人之前使用，忘記開啟密碼時也是用這個方式重新開始。</p>
         <div class="row"><button class="btn danger" id="clearData">清除這台裝置上的資料</button></div>
       </div>
     </section>
@@ -204,6 +237,7 @@
   </div>
 </aside>
 <div class="popover" id="popover" hidden></div>
+<dialog class="dlg" id="dlg"><form method="dialog" id="dlgForm" novalidate></form></dialog>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="js/dataset.js"></script>

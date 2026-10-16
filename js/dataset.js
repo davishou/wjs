@@ -61,9 +61,12 @@
   }
 
   // ---- 壓縮 / 加密 ----
+  // 不經過 Blob（瀏覽器可能把大型 Blob 暫存到硬碟），直接用記憶體串流
   async function pipeBytes(buf, transform) {
-    const s = new Blob([buf]).stream().pipeThrough(transform);
-    return await new Response(s).arrayBuffer();
+    const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    let p = 0; const STEP = 1 << 20;
+    const src = new ReadableStream({ pull(c) { if (p >= u8.length) c.close(); else { c.enqueue(u8.slice(p, p + STEP)); p += STEP; } } });
+    return await new Response(src.pipeThrough(transform)).arrayBuffer();
   }
   const gzip = (b) => pipeBytes(b, new CompressionStream('gzip'));
   const gunzip = (b) => pipeBytes(b, new DecompressionStream('gzip'));
@@ -178,5 +181,41 @@
     return new Promise((res) => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').delete(key); t.oncomplete = () => res(); });
   }
 
-  root.Dataset = { serialize, deserialize, hydrate, makePack, openPack, packNeedsPassword, gzip, gunzip, idbSet, idbGet, idbDel, regionOf, simplify };
+  // ---- 加密的本機儲存（開啟密碼）----
+  // IndexedDB 只存密文：{ v, iter, salt, iv, ct }。密碼與金鑰只放在記憶體，重新整理就要重新輸入。
+  const VAULT_ITER = 600000;
+  const VAULT_AAD = enc.encode('DVVAULT1');
+  async function vaultKey(password, salt, iter) {
+    const km = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: iter, hash: 'SHA-256' }, km, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  }
+  const Vault = {
+    // 用新密碼建立金鑰（每次都換新的 salt）
+    async create(password) {
+      const salt = crypto.getRandomValues(new Uint8Array(16));
+      return { key: await vaultKey(password, salt, VAULT_ITER), salt, iter: VAULT_ITER };
+    },
+    // 加密後存入，並刪除舊版未加密的資料
+    async save(v, buf) {
+      const z = await gzip(buf);
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: VAULT_AAD }, v.key, z);
+      await idbSet('vault', { v: 1, iter: v.iter, salt: v.salt, iv, ct, savedAt: new Date().toISOString() });
+      await idbDel('data');
+    },
+    // 用密碼解開；密碼錯誤時丟出 code = BAD_PASSWORD
+    async open(password) {
+      const rec = await idbGet('vault');
+      if (!rec) { const e = new Error('這台裝置上沒有資料'); e.code = 'NO_DATA'; throw e; }
+      const key = await vaultKey(password, rec.salt, rec.iter);
+      let z;
+      try { z = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: rec.iv, additionalData: VAULT_AAD }, key, rec.ct); } catch (e) { const er = new Error('密碼不正確'); er.code = 'BAD_PASSWORD'; throw er; }
+      return { vault: { key, salt: rec.salt, iter: rec.iter }, buf: await gunzip(z) };
+    },
+    async exists() { return !!(await idbGet('vault')); },
+    async legacy() { return (await idbGet('data')) || null; }, // 舊版（未加密）資料
+    async clear() { await idbDel('vault'); await idbDel('data'); },
+  };
+
+  root.Dataset = { Vault, serialize, deserialize, hydrate, makePack, openPack, packNeedsPassword, gzip, gunzip, idbSet, idbGet, idbDel, regionOf, simplify };
 })(typeof self !== 'undefined' ? self : globalThis);

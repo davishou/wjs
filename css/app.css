@@ -280,6 +280,31 @@ table.dt { width: 100%; border-collapse: separate; border-spacing: 0; font-size:
 .toast { position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 20px); background: var(--ink); color: var(--surface); padding: 10px 18px; border-radius: 999px; opacity: 0; transition: .2s; pointer-events: none; z-index: 70; font-size: .9rem; max-width: calc(100vw - 32px); }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
+/* ============ 開鎖畫面與密碼對話框 ============ */
+.lock { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 16px; background: var(--bg); overflow: auto; }
+.lock-card { width: min(380px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: 28px 24px 20px; display: flex; flex-direction: column; }
+[data-theme="market"] .lock-card { border-color: transparent; }
+.lock-mark { width: 40px; height: 40px; fill: var(--primary); margin-bottom: 10px; }
+.lock-card h1 { font-size: 1.5rem !important; }
+.lock-card .sub { margin-bottom: 18px; }
+.lock-card input[type="password"], .dlg input[type="password"] { width: 100%; margin-bottom: 12px; }
+.btn.block { width: 100%; padding-top: 10px; padding-bottom: 10px; }
+.btn:disabled { opacity: .6; cursor: progress; }
+.form-err { color: var(--bad); font-size: .88rem; min-height: 1.3em; margin: -4px 0 10px; }
+.form-err:empty { min-height: 0; margin: 0; }
+.link-btn { background: none; border: 0; color: var(--primary); cursor: pointer; padding: 8px 0 0; font-size: .88rem; align-self: center; }
+.link-btn:hover { text-decoration: underline; }
+.lock-forgot { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: .9rem; color: var(--ink-2); }
+.lock-forgot p { margin: 0 0 8px; } .lock-forgot ul { margin: 0 0 14px; padding-left: 1.2em; }
+.dlg { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); color: var(--ink); padding: 24px; width: min(440px, calc(100vw - 32px)); box-shadow: 0 20px 60px -20px rgba(10, 16, 28, .45); }
+.dlg::backdrop { background: rgba(10, 16, 28, .45); }
+.dlg h2 { margin-bottom: 8px; }
+.dlg .desc { color: var(--ink-2); font-size: .9rem; margin: 0 0 16px; }
+.dlg .desc p { margin: 0 0 6px; }
+.dlg .check { display: flex; gap: 8px; align-items: center; font-size: .9rem; color: var(--ink-2); margin: -2px 0 14px; cursor: pointer; }
+.dlg .check input { accent-color: var(--primary); width: 16px; height: 16px; }
+.dlg .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+
 /* ============ 響應式（平板／手機）============ */
 @media (max-width: 1180px) {
   .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }

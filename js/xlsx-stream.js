@@ -4,18 +4,31 @@
 (function (root) {
   const TD = new TextDecoder('utf-8');
 
-  async function readBytes(blob, start, end) {
-    return new Uint8Array(await blob.slice(start, end).arrayBuffer());
+  // 來源可以是 File/Blob，也可以是記憶體中的 Uint8Array（解密後的 Excel 只放記憶體，不建立 Blob，避免瀏覽器把它暫存到硬碟）
+  function toSource(x) {
+    if (x instanceof Uint8Array) {
+      return {
+        size: x.length,
+        read: async (s, e) => x.subarray(s, e),
+        stream(s, e) {
+          const part = x.subarray(s, e); let p = 0; const STEP = 1 << 20;
+          return new ReadableStream({ pull(c) { if (p >= part.length) c.close(); else { c.enqueue(part.slice(p, p + STEP)); p += STEP; } } });
+        },
+      };
+    }
+    return { size: x.size, read: async (s, e) => new Uint8Array(await x.slice(s, e).arrayBuffer()), stream: (s, e) => x.slice(s, e).stream() };
   }
+  async function readBytes(src, start, end) { return src.read(start, end); }
   const u16 = (b, o) => b[o] | (b[o + 1] << 8);
   const u32 = (b, o) => (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16)) + b[o + 3] * 16777216;
   const u64 = (b, o) => u32(b, o) + u32(b, o + 4) * 4294967296;
 
-  async function openZip(blob) {
+  async function openZip(input) {
+    const blob = toSource(input);
     const size = blob.size;
     const head = await readBytes(blob, 0, 8);
     if (head[0] === 0xd0 && head[1] === 0xcf && head[2] === 0x11 && head[3] === 0xe0) {
-      throw new Error('這份 Excel 設有開啟密碼（或是舊版 .xls 格式），軟體無法讀取。請在 Excel 開啟後，另存一份沒有開啟密碼的 .xlsx 再匯入。');
+      throw new Error('這份 Excel 設有開啟密碼（或是舊版 .xls 格式），需要先輸入密碼解密。');
     }
     const tailLen = Math.min(size, 65557 + 20);
     const tail = await readBytes(blob, size - tailLen, size);
@@ -69,7 +82,7 @@
       const en = entries[name];
       if (!en) throw new Error('xlsx 內缺少 ' + name);
       const s = await dataStart(en);
-      const raw = blob.slice(s, s + en.comp).stream();
+      const raw = blob.stream(s, s + en.comp);
       if (en.method === 0) return raw;
       if (en.method !== 8) throw new Error('不支援的壓縮方式 ' + en.method);
       return raw.pipeThrough(new DecompressionStream('deflate-raw'));
