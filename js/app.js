@@ -686,7 +686,7 @@
 
   async function importXlsx(file) {
     if (!file) return;
-    if (!/\.xls[xm]$/i.test(file.name)) { toast('請選擇 .xlsx 檔案'); return; }
+    if (!/\.xls[xm]?$/i.test(file.name)) { toast('請選擇 .xlsx 檔案'); return; }
     go('data');
     const t0 = performance.now();
     showProgress(0, '準備讀取 ' + file.name);
@@ -763,6 +763,9 @@
     fp.addEventListener('change', () => { openPackFile(fp.files[0]); fp.value = ''; });
     $('#urlPack').addEventListener('click', () => openPackUrl('data/pack.dvp', $('#openPw').value));
     $('#clearData').addEventListener('click', async () => {
+      const b = $('#clearData');
+      if (!b.dataset.sure) { b.dataset.sure = '1'; b.textContent = '確定要清除？再按一次'; setTimeout(() => { delete b.dataset.sure; b.textContent = '清除這台裝置上的資料'; }, 5000); return; }
+      delete b.dataset.sure; b.textContent = '清除這台裝置上的資料';
       await Dataset.idbDel('data'); S.E = null; S.raw = null; $('#brandSub').textContent = '尚未載入資料'; renderData(); toast('已清除這台裝置上的資料');
     });
   }

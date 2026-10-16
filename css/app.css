@@ -115,6 +115,7 @@ main { padding: 28px 32px 64px; max-width: 1480px; }
 .grid2.tight { gap: 28px; margin: 0; }
 .link { font-size: .88rem; text-decoration: none; }
 .link:hover { text-decoration: underline; }
+.field-label { display: block; font-size: .85rem; font-weight: 700; color: var(--ink-2); margin: 0 0 6px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .inline { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: .9rem; }
 

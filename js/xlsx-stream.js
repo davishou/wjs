@@ -13,6 +13,10 @@
 
   async function openZip(blob) {
     const size = blob.size;
+    const head = await readBytes(blob, 0, 8);
+    if (head[0] === 0xd0 && head[1] === 0xcf && head[2] === 0x11 && head[3] === 0xe0) {
+      throw new Error('這份 Excel 設有開啟密碼（或是舊版 .xls 格式），軟體無法讀取。請在 Excel 開啟後，另存一份沒有開啟密碼的 .xlsx 再匯入。');
+    }
     const tailLen = Math.min(size, 65557 + 20);
     const tail = await readBytes(blob, size - tailLen, size);
     let p = -1;

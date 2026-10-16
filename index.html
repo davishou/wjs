@@ -172,21 +172,24 @@
         <div class="panel-head"><h2>手機與其他電腦</h2></div>
         <div class="grid2 tight">
           <div>
-            <h3>匯出資料包</h3>
-            <p class="hint">把目前的資料壓縮成一個小檔案（約 5MB），設定密碼後傳到手機或放到網站上。</p>
-            <div class="row"><input type="password" id="packPw" placeholder="設定密碼（建議 8 碼以上）" autocomplete="new-password"><button class="btn primary" id="packExport">匯出資料包</button></div>
+            <h3>步驟 1：在這台電腦匯出資料包</h3>
+            <p class="hint">把目前的資料壓縮成一個小檔案（約 5MB）。先替它設一組密碼上鎖，再傳到手機或其他電腦。</p>
+            <label class="field-label" for="packPw">替資料包上鎖的密碼</label>
+            <div class="row"><input type="password" id="packPw" placeholder="自己設一組，建議 8 碼以上" autocomplete="new-password"><button class="btn primary" id="packExport">匯出資料包</button></div>
           </div>
           <div>
-            <h3>開啟資料包</h3>
-            <p class="hint">在手機或其他電腦上開啟匯出的資料包。</p>
+            <h3>步驟 2：在手機或其他電腦開啟</h3>
+            <p class="hint">輸入步驟 1 設的同一組密碼，再選擇資料包檔案。</p>
+            <label class="field-label" for="openPw">輸入資料包的密碼來開啟</label>
             <input type="file" id="filePack" accept=".dvp,application/octet-stream" hidden>
-            <div class="row"><input type="password" id="openPw" placeholder="資料包密碼" autocomplete="current-password"><button class="btn" id="pickPack">選擇資料包檔案</button><button class="btn" id="urlPack">從網站載入</button></div>
+            <div class="row"><input type="password" id="openPw" placeholder="和匯出時設的密碼相同" autocomplete="current-password"><button class="btn" id="pickPack">選擇資料包檔案</button><button class="btn" id="urlPack">從網站載入</button></div>
           </div>
         </div>
       </div>
 
       <div class="panel">
         <div class="panel-head"><h2>其他</h2></div>
+        <p class="hint">只會刪除存在這台裝置上的銷售資料，軟體本身和介面風格都會保留。之後重新匯入 Excel 或開啟資料包就能繼續使用。適合在共用電腦或手機轉給別人之前使用。</p>
         <div class="row"><button class="btn danger" id="clearData">清除這台裝置上的資料</button></div>
       </div>
     </section>
