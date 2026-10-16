@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>銷售分析</title>
+<meta name="description" content="進貨、退貨資料的樞紐分析、客戶交易與商品滯銷分析">
+<meta name="theme-color" content="#26437A">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="銷售分析">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;700&family=Huninn&family=Barlow+Semi+Condensed:wght@400;500;600&family=Nunito:wght@600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+<script>try{document.documentElement.dataset.theme=localStorage.getItem('dv.theme')||'indigo'}catch(e){document.documentElement.dataset.theme='indigo'}</script>
+</head>
+<body>
+<div class="shell">
+  <header class="nav" role="navigation" aria-label="主選單">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="17" width="5" height="12" rx="1.5"/><rect x="11" y="10" width="5" height="19" rx="1.5"/><rect x="19" y="4" width="5" height="25" rx="1.5"/><path d="M26 22h3v7h-3z" opacity=".45"/></svg>
+      <div class="brand-text"><strong>銷售分析</strong><span id="brandSub">尚未載入資料</span></div>
+    </div>
+    <nav class="tabs">
+      <a href="#overview" data-view="overview"><svg viewBox="0 0 24 24"><path d="M3 13h7V3H3zm11 8h7V11h-7zM3 21h7v-6H3zm11-18v6h7V3z"/></svg><span>總覽</span></a>
+      <a href="#pivot" data-view="pivot"><svg viewBox="0 0 24 24"><path d="M3 3h18v4H3zm0 6h5v12H3zm7 0h11v12H10z"/></svg><span>樞紐分析</span></a>
+      <a href="#customers" data-view="customers"><svg viewBox="0 0 24 24"><path d="M16 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm-8 1a3 3 0 1 0-3-3 3 3 0 0 0 3 3zm8 1c-2.7 0-8 1.3-8 4v3h16v-3c0-2.7-5.3-4-8-4zm-8 0c-.4 0-.8 0-1.3.1C8 14 9 15.3 9 17v3H1v-3c0-2.2 4.4-4 7-4z"/></svg><span>客戶</span></a>
+      <a href="#products" data-view="products"><svg viewBox="0 0 24 24"><path d="M9 3 4 6v4l3 1v10h10V11l3-1V6l-5-3c0 1.7-1.3 3-3 3S9 4.7 9 3z"/></svg><span>商品</span></a>
+      <a href="#data" data-view="data"><svg viewBox="0 0 24 24"><path d="M12 3C7 3 3 4.8 3 7v10c0 2.2 4 4 9 4s9-1.8 9-4V7c0-2.2-4-4-9-4zm0 2c4.4 0 7 1.4 7 2s-2.6 2-7 2-7-1.4-7-2 2.6-2 7-2zm7 12c0 .6-2.6 2-7 2s-7-1.4-7-2v-2.3c1.6.8 4.1 1.3 7 1.3s5.4-.5 7-1.3zm0-5c0 .6-2.6 2-7 2s-7-1.4-7-2V9.7c1.6.8 4.1 1.3 7 1.3s5.4-.5 7-1.3z"/></svg><span>資料與設定</span></a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <!-- 總覽 -->
+    <section class="view" id="view-overview" hidden>
+      <div class="view-head">
+        <div><h1>總覽</h1><p class="sub" id="ovPeriod"></p></div>
+        <div class="head-actions"><label class="inline">基準月 <select id="ovRef"></select></label></div>
+      </div>
+      <div class="kpis" id="ovKpis"></div>
+      <div class="panel">
+        <div class="panel-head"><h2>每月銷貨與退貨</h2>
+          <div class="seg" id="ovRange"><button data-v="24" class="on">近 24 個月</button><button data-v="all">全部</button></div>
+        </div>
+        <div id="ovChart" class="chart"></div>
+      </div>
+      <div class="grid2">
+        <div class="panel"><div class="panel-head"><h2>漸漸沒來的客戶</h2><a href="#customers" class="link" data-goto="cust-idle">看全部</a></div>
+          <p class="hint">靜止 3～12 個月、過去銷售額高的客戶，值得業務主動聯絡。</p><div id="ovIdleCust"></div></div>
+        <div class="panel"><div class="panel-head"><h2>滯銷商品</h2><a href="#products" class="link" data-goto="prod-idle">看全部</a></div>
+          <p class="hint">6 個月以上沒有賣出、但過去有業績的商品。</p><div id="ovIdleProd"></div></div>
+      </div>
+      <div class="panel"><div class="panel-head"><h2>各區域今年表現</h2></div><div id="ovRegion"></div></div>
+    </section>
+
+    <!-- 樞紐分析 -->
+    <section class="view" id="view-pivot" hidden>
+      <div class="view-head">
+        <div><h1>樞紐分析</h1><p class="sub">選擇分組方式與數值，進貨、退貨可以一起比較。</p></div>
+        <div class="head-actions">
+          <div class="seg" id="pvMode"><button data-v="agg" class="on">彙總</button><button data-v="detail">明細</button></div>
+        </div>
+      </div>
+      <div class="pivot-layout">
+        <aside class="panel config" id="pvConfig">
+          <div class="cfg-block">
+            <h3>常用範本</h3>
+            <div class="presets" id="pvPresets"></div>
+          </div>
+          <div class="cfg-block">
+            <h3>資料來源</h3>
+            <div class="seg full" id="pvSrc"><button data-v="all" class="on">進貨＋退貨</button><button data-v="sales">只看進貨</button><button data-v="returns">只看退貨</button></div>
+          </div>
+          <div class="cfg-block">
+            <h3>期間</h3>
+            <div class="range"><select id="pvFrom"></select><span>到</span><select id="pvTo"></select></div>
+          </div>
+          <div class="cfg-block agg-only">
+            <h3>列（分組）</h3>
+            <div class="chips" id="pvRows"></div>
+            <select class="add" id="pvAddRow"><option value="">＋ 加入分組</option></select>
+          </div>
+          <div class="cfg-block agg-only">
+            <h3>欄（橫向展開）</h3>
+            <select id="pvCol"><option value="">不展開</option></select>
+          </div>
+          <div class="cfg-block agg-only">
+            <h3>數值</h3>
+            <div class="checks" id="pvMeasures"></div>
+          </div>
+          <div class="cfg-block">
+            <h3>篩選</h3>
+            <div class="chips" id="pvFilters"></div>
+            <select class="add" id="pvAddFilter"><option value="">＋ 加入篩選</option></select>
+          </div>
+        </aside>
+        <div class="panel result">
+          <div class="result-head">
+            <p class="meta" id="pvMeta"></p>
+            <div class="result-actions">
+              <input type="search" id="pvSearch" placeholder="在結果中搜尋">
+              <button class="btn" id="pvExport">匯出 CSV</button>
+            </div>
+          </div>
+          <div class="table-wrap" id="pvTable"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 客戶 -->
+    <section class="view" id="view-customers" hidden>
+      <div class="view-head">
+        <div><h1>客戶交易</h1><p class="sub" id="cuSub"></p></div>
+        <div class="head-actions"><button class="btn" id="cuExport">匯出 CSV</button></div>
+      </div>
+      <div class="toolbar">
+        <input type="search" id="cuSearch" placeholder="搜尋客戶代號或名稱">
+        <div class="seg" id="cuIdle"><button data-v="all" class="on">全部</button><button data-v="0-2">活躍 0～2 月</button><button data-v="3-5">靜止 3～5 月</button><button data-v="6-11">6～11 月</button><button data-v="12-">1 年以上</button></div>
+        <div class="chips" id="cuFilters"></div>
+        <select class="add" id="cuAddFilter"><option value="">＋ 篩選</option></select>
+      </div>
+      <div class="panel"><div class="table-wrap" id="cuTable"></div></div>
+    </section>
+
+    <!-- 商品 -->
+    <section class="view" id="view-products" hidden>
+      <div class="view-head">
+        <div><h1>商品銷售與滯銷</h1><p class="sub" id="prSub"></p></div>
+        <div class="head-actions">
+          <div class="seg" id="prLevel"><button data-v="sku" class="on">商品代號</button><button data-v="sku2">簡化代碼</button></div>
+          <button class="btn" id="prExport">匯出 CSV</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <input type="search" id="prSearch" placeholder="搜尋商品代號">
+        <div class="seg" id="prIdle"><button data-v="all" class="on">全部</button><button data-v="0-2">熱賣中 0～2 月</button><button data-v="3-5">3～5 月沒賣</button><button data-v="6-11">6～11 月</button><button data-v="12-">1 年以上</button></div>
+        <div class="chips" id="prFilters"></div>
+        <select class="add" id="prAddFilter"><option value="">＋ 篩選</option></select>
+      </div>
+      <div class="panel"><div class="table-wrap" id="prTable"></div></div>
+    </section>
+
+    <!-- 資料與設定 -->
+    <section class="view" id="view-data" hidden>
+      <div class="view-head"><div><h1>資料與設定</h1><p class="sub">更新 Excel、切換介面風格、匯出手機用資料包。</p></div></div>
+
+      <div class="panel" id="importPanel">
+        <div class="panel-head"><h2>更新資料</h2></div>
+        <div class="drop" id="drop">
+          <input type="file" id="fileXlsx" accept=".xlsx,.xlsm" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm-1 7V3.5L18.5 9zM8 13h2l1 2 1-2h2l-2 3 2 3h-2l-1-2-1 2H8l2-3z"/></svg>
+          <p><strong>把總表 Excel 拖到這裡</strong>，或 <button class="btn primary" id="pickXlsx">選擇檔案</button></p>
+          <p class="hint">只會讀取「原始進貨表」A～AE 欄與「原始退貨表」A～AB 欄，其他工作表一律忽略。檔案只在這台裝置上處理，不會上傳。</p>
+        </div>
+        <div class="progress" id="importProgress" hidden><div class="bar"><i></i></div><p></p></div>
+        <dl class="facts" id="dataFacts"></dl>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>介面風格</h2></div>
+        <div class="themes" id="themePick">
+          <button data-theme="indigo"><span class="sw"><i style="background:#F7F8FA"></i><i style="background:#26437A"></i><i style="background:#B8473C"></i></span><strong>藍染</strong><small>明亮、表格清楚，適合辦公室長時間看</small></button>
+          <button data-theme="night"><span class="sw"><i style="background:#0E1726"></i><i style="background:#2FA898"></i><i style="background:#F3B23C"></i></span><strong>夜航</strong><small>深色、資訊密集，一頁看更多數字</small></button>
+          <button data-theme="market"><span class="sw"><i style="background:#EEF3EF"></i><i style="background:#13805F"></i><i style="background:#C77D05"></i></span><strong>市集</strong><small>圓潤、按鈕大，手機操作最順手</small></button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>手機與其他電腦</h2></div>
+        <div class="grid2 tight">
+          <div>
+            <h3>匯出資料包</h3>
+            <p class="hint">把目前的資料壓縮成一個小檔案（約 5MB），設定密碼後傳到手機或放到網站上。</p>
+            <div class="row"><input type="password" id="packPw" placeholder="設定密碼（建議 8 碼以上）" autocomplete="new-password"><button class="btn primary" id="packExport">匯出資料包</button></div>
+          </div>
+          <div>
+            <h3>開啟資料包</h3>
+            <p class="hint">在手機或其他電腦上開啟匯出的資料包。</p>
+            <input type="file" id="filePack" accept=".dvp,application/octet-stream" hidden>
+            <div class="row"><input type="password" id="openPw" placeholder="資料包密碼" autocomplete="current-password"><button class="btn" id="pickPack">選擇資料包檔案</button><button class="btn" id="urlPack">從網站載入</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>其他</h2></div>
+        <div class="row"><button class="btn danger" id="clearData">清除這台裝置上的資料</button></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="drawer-scrim" data-close></div>
+  <div class="drawer-body" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+    <header><div><h2 id="drawerTitle"></h2><p class="sub" id="drawerSub"></p></div><button class="icon-btn" data-close aria-label="關閉">✕</button></header>
+    <div id="drawerContent"></div>
+  </div>
+</aside>
+<div class="popover" id="popover" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="js/dataset.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/chart.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

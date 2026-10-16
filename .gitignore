@@ -1,0 +1,6 @@
+*.xlsx
+*.xlsm
+*.xls
+*.dvp
+!data/pack.dvp
+.DS_Store
