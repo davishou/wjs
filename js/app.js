@@ -753,10 +753,11 @@
     return h[0] === 0xd0 && h[1] === 0xcf && h[2] === 0x11 && h[3] === 0xe0;
   }
 
-  async function importXlsx(file) {
+  async function importXlsx(file, { force } = {}) {
     if (!file) return;
-    if (/\.xls$/i.test(file.name)) { toast('舊版 .xls 格式無法讀取，請在 Excel「另存新檔」為 .xlsx 再匯入', 5000); return; }
-    if (!/\.xls[xm]$/i.test(file.name)) { toast('請選擇 .xlsx 檔案'); return; }
+    if (!force && /\.xls$/i.test(file.name)) { toast('舊版 .xls 格式無法讀取，請在 Excel「另存新檔」為 .xlsx 再匯入', 5000); return; }
+    if (!force && !/\.xls[xm]$/i.test(file.name)) { toast('請選擇 .xlsx 檔案'); return; }
+    if (force) toast('這是 Excel 檔，直接匯入', 3000);
     go('data');
     const encrypted = await isCfbFile(file);
     let xlsPw = null, appPw = null, same = false;
@@ -839,7 +840,7 @@
     drop.addEventListener('drop', (e) => importXlsx(e.dataTransfer.files[0]));
     // 整個視窗也可拖放
     window.addEventListener('dragover', (e) => e.preventDefault());
-    window.addEventListener('drop', (e) => { if (S.locked) { e.preventDefault(); return; } if (!drop.contains(e.target)) { e.preventDefault(); const f2 = e.dataTransfer.files[0]; if (f2) (/\.dvp$/i.test(f2.name) ? openPackFile(f2) : importXlsx(f2)); } });
+    window.addEventListener('drop', (e) => { if (S.locked) { e.preventDefault(); return; } if (!drop.contains(e.target)) { e.preventDefault(); const f2 = e.dataTransfer.files[0]; if (f2) (/\.xls[xm]?$/i.test(f2.name) ? importXlsx(f2) : openPackFile(f2)); } });
     $('#themePick').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setTheme(b.dataset.theme); });
     $('#packExport').addEventListener('click', async () => {
       if (!S.raw) { toast('請先載入資料'); return; }
@@ -905,9 +906,31 @@
     toast(pw ? '資料包已載入。之後開啟軟體，請輸入資料包的密碼' : '資料包已載入', 5000); go('overview');
     return true;
   }
+  // 手機上選到的檔案不一定是原本的資料包：可能被 LINE／雲端硬碟包成 zip、存成網頁，或選到了 Excel。
+  // 先看檔案內容判斷，能處理的直接處理，不能處理的說清楚原因。
   async function openPackFile(file) {
     if (!file) return;
-    try { await openPackBuffer(await file.arrayBuffer(), $('#openPw').value); } catch (e) { toast(e.message); }
+    try {
+      const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+      const sig = String.fromCharCode(...head.slice(0, 4));
+      if (sig === 'DVPK') { await openPackBuffer(await file.arrayBuffer(), $('#openPw').value); return; }
+      if (!file.size) throw new Error('這個檔案是空的（0 KB），可能還沒下載完成。請重新傳送一次資料包。');
+      if (head[0] === 0xd0 && head[1] === 0xcf) { importXlsx(file, { force: true }); return; } // 有密碼的 Excel
+      if (sig.startsWith('PK')) {
+        const zip = await XlsxStream.openZip(file);
+        if (zip.entries['xl/workbook.xml']) { importXlsx(file, { force: true }); return; } // 選到的是 Excel，直接匯入
+        const name = Object.keys(zip.entries).find((n) => /\.dvp$/i.test(n) && !/(^|\/)\._/.test(n));
+        if (!name) throw new Error('這是壓縮檔，裡面沒有資料包（.dvp）。請重新傳送 pack.dvp。');
+        const r = (await zip.stream(name)).getReader(); const parts = []; let len = 0;
+        for (;;) { const { done, value } = await r.read(); if (done) break; parts.push(value); len += value.length; }
+        const buf = new Uint8Array(len); let k = 0; for (const x of parts) { buf.set(x, k); k += x.length; }
+        if (String.fromCharCode(...buf.slice(0, 4)) !== 'DVPK') throw new Error('壓縮檔裡的 ' + name + ' 不是本軟體匯出的資料包');
+        await openPackBuffer(buf.buffer, $('#openPw').value); return;
+      }
+      const txt = new TextDecoder().decode(new Uint8Array(await file.slice(0, 200).arrayBuffer())).trim().toLowerCase();
+      if (txt.startsWith('<') || txt.includes('<html')) throw new Error('選到的是網頁，不是資料包本身。從雲端硬碟或 Email 要按「下載」把檔案存到手機，再選擇它。');
+      throw new Error(`「${file.name}」（${(file.size / 1e6).toFixed(2)} MB）不是本軟體匯出的資料包。請確認選的是 pack.dvp；若還是不行，換一種方式傳送（例如 Email 附件或雲端硬碟下載）。`);
+    } catch (e) { toast(e.message, 8000); }
   }
   async function openPackUrl(url, pw) {
     try {

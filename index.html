@@ -208,7 +208,7 @@
             <h3>步驟 2：在手機或其他電腦開啟</h3>
             <p class="hint">輸入步驟 1 設的同一組密碼，再選擇資料包檔案。</p>
             <label class="field-label" for="openPw">輸入資料包的密碼來開啟</label>
-            <input type="file" id="filePack" accept=".dvp,application/octet-stream" hidden>
+            <input type="file" id="filePack" hidden>
             <div class="row"><input type="password" id="openPw" placeholder="和匯出時設的密碼相同" autocomplete="current-password"><button class="btn" id="pickPack">選擇資料包檔案</button><button class="btn" id="urlPack">從網站載入</button></div>
           </div>
         </div>
@@ -240,6 +240,7 @@
 <dialog class="dlg" id="dlg"><form method="dialog" id="dlgForm" novalidate></form></dialog>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<script src="js/xlsx-stream.js"></script>
 <script src="js/dataset.js"></script>
 <script src="js/engine.js"></script>
 <script src="js/chart.js"></script>
