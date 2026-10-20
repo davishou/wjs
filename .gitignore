@@ -1,6 +1,9 @@
+# 公司資料一律不進 repo（repo 是公開的）
 *.xlsx
 *.xlsm
 *.xls
+*.csv
 *.dvp
-!data/pack.dvp
+*.zip
+data/
 .DS_Store

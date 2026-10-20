@@ -861,7 +861,6 @@
     const fp = $('#filePack');
     $('#pickPack').addEventListener('click', () => fp.click());
     fp.addEventListener('change', () => { openPackFile(fp.files[0]); fp.value = ''; });
-    $('#urlPack').addEventListener('click', () => openPackUrl('data/pack.dvp', $('#openPw').value));
     $('#clearData').addEventListener('click', async () => {
       const b = $('#clearData');
       if (!b.dataset.sure) { b.dataset.sure = '1'; b.textContent = '確定要清除？再按一次'; setTimeout(() => { delete b.dataset.sure; b.textContent = '清除這台裝置上的資料'; }, 5000); return; }
@@ -931,13 +930,6 @@
       if (txt.startsWith('<') || txt.includes('<html')) throw new Error('選到的是網頁，不是資料包本身。從雲端硬碟或 Email 要按「下載」把檔案存到手機，再選擇它。');
       throw new Error(`「${file.name}」（${(file.size / 1e6).toFixed(2)} MB）不是本軟體匯出的資料包。請確認選的是 pack.dvp；若還是不行，換一種方式傳送（例如 Email 附件或雲端硬碟下載）。`);
     } catch (e) { toast(e.message, 8000); }
-  }
-  async function openPackUrl(url, pw) {
-    try {
-      const r = await fetch(url, { cache: 'no-cache' });
-      if (!r.ok) throw new Error('網站上還沒有資料包（' + r.status + '）');
-      return await openPackBuffer(await r.arrayBuffer(), pw);
-    } catch (e) { toast(e.message); return false; }
   }
 
   // ---------- 開鎖畫面 ----------
@@ -1021,13 +1013,6 @@
       }
     } catch (e) { console.warn(e); }
     go(start);
-    if (!S.E) {
-      // 手機上：若網站有資料包，提示輸入密碼
-      try {
-        const h = await fetch('data/pack.dvp', { method: 'HEAD', cache: 'no-cache' });
-        if (h.ok) { toast('網站上有資料包，輸入密碼後按「從網站載入」', 6000); $('#openPw').focus(); }
-      } catch (e) { /* 沒有網路或沒有資料包 */ }
-    }
     if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   window.__app = S;
