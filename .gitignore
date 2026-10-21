@@ -7,3 +7,5 @@
 *.zip
 data/
 .DS_Store
+tests/fixtures/
+__pycache__/

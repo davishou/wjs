@@ -59,4 +59,6 @@ js/chart.js           圖表
 js/app.js             介面
 js/worker.js          背景讀檔，畫面不會卡住
 sw.js                 離線使用
+CLAUDE.md             給 Claude Code 的專案說明與規則
+tests/                假資料產生器與瀏覽器實測
 ```
