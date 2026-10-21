@@ -37,6 +37,52 @@ async def dlg_fill(page, vals, check=None):
 async def wait_done(page):
     await page.wait_for_function("document.querySelector('#importProgress p') && /完成|失敗|取消/.test(document.querySelector('#importProgress p').textContent)", timeout=120000)
     return await page.text_content('#importProgress p')
+async def facts(page):
+    return await page.text_content('#dataFacts')
+async def add_month_open(page, f):
+    await page.set_input_files('#fileAdd', FX+'/'+f)
+    await page.wait_for_selector('#dlg[open]', timeout=60000)
+    return await page.text_content('#dlgForm')
+async def add_month_done(page):
+    await page.click('#dlgOk')
+    await page.wait_for_function("/完成：加入|失敗/.test(document.querySelector('#importProgress p').textContent)", timeout=60000)
+    return await page.text_content('#importProgress p')
+async def add_month(page, app_pw):
+    """每月加入新資料：plain.xlsx（1,080 筆進貨、8 筆退貨，112/01–114/12）＋ month.xlsx。"""
+    ok(await page.is_visible('#pickAdd'), '有資料時顯示「加入新月份」')
+    # 取消 → 資料不變
+    d = await add_month_open(page, 'month.xlsx')
+    ok('115/01（新）' in d and '114/12（取代）' in d and '1,085' in d, '加入前的確認視窗列出新增與取代的月份')
+    await page.screenshot(path=SH+'/10_add_month.png')
+    await page.click('#dlgCancel'); await page.wait_for_function("document.querySelector('#importProgress p').textContent.includes('已取消')")
+    ok('1,080' in await facts(page) and '114/12' in await page.text_content('#brandSub'), '取消加入 → 資料沒有改變')
+    # 確定 → 114/12 的 30 筆換成 10 筆，加上 115/01 的 25 筆進貨、2 筆退貨
+    await add_month_open(page, 'month.xlsx'); t = await add_month_done(page)
+    ok('1,085 筆進貨' in t and '10 筆退貨' in t, '加入新月份：'+t)
+    ok('115/01' in await page.text_content('#brandSub') and 'month.xlsx' in await facts(page), '資料到 115/01，顯示最近加入的檔案')
+    # 同一個檔案再加一次 → 不重複
+    d = await add_month_open(page, 'month.xlsx'); ok('115/01（取代）' in d, '同一個檔案再加一次：月份都標「取代」')
+    t = await add_month_done(page); ok('1,085 筆進貨' in t and '10 筆退貨' in t, '同一個檔案加兩次不會重複：'+t)
+    # 有密碼的 Excel 也能加入
+    await page.set_input_files('#fileAdd', FX+'/month_agile.xlsx'); await page.wait_for_selector('#dlg_xls')
+    await dlg_fill(page, {'xls':'wrong'}); await page.wait_for_function("document.querySelector('#dlgErr') && document.querySelector('#dlgErr').textContent.includes('不正確')", timeout=60000)
+    await dlg_fill(page, {'xls':'測試pw123'}); await page.wait_for_selector('#dlgOk:text("加入")', timeout=60000)
+    t = await add_month_done(page); ok('1,085 筆進貨' in t, '有密碼的 Excel 也能每月加入：'+t)
+    # 新客戶、舊客戶都在客戶列表裡（合併後代碼對應正確）
+    await page.click('a[data-view=customers]'); await page.wait_for_selector('#view-customers:not([hidden])')
+    cu = await page.text_content('#cuTable')
+    ok('戊新店' in cu and '甲商行' in cu and '115/01' in cu, '客戶列表有新加入的客戶，最近交易 115/01')
+    await page.click('a[data-view=data]')
+    # 重新開啟後資料還在
+    await page.reload(); await page.wait_for_selector('#lock:not([hidden])')
+    await page.fill('#lockPw', app_pw); await page.click('#lockGo'); await page.wait_for_selector('#lock[hidden]', state='attached')
+    await page.click('a[data-view=data]')
+    f = await facts(page); ok('1,085' in f and '115/01' in f, '重新開啟後，加入的資料仍在')
+    for th in ['night', 'market']:
+        await page.evaluate(f"document.documentElement.dataset.theme='{th}'")
+        await add_month_open(page, 'month.xlsx'); await page.screenshot(path=SH+f'/10_add_month_{th}.png'); await page.click('#dlgCancel')
+    await page.evaluate("document.documentElement.dataset.theme='indigo'")
+
 async def main():
   async with async_playwright() as p:
     b = await p.chromium.launch()
@@ -110,6 +156,7 @@ async def main():
     await dlg_fill(page, {'app':'abcd1','app2':'abcd2'}); await page.wait_for_function("document.querySelector('#dlgErr').textContent.includes('不一樣')")
     await dlg_fill(page, {'app':'ab','app2':'ab'}); await page.wait_for_function("document.querySelector('#dlgErr').textContent.includes('至少')")
     await dlg_fill(page, {'app':'abcd1','app2':'abcd1'}); t = await wait_done(page); ok('完成' in t, '設定開啟密碼並匯入：'+t)
+    await add_month(page, 'abcd1')
     # 8. 加密 Excel、不勾「也用這組」→ 分開設定
     await page.click('#clearData'); await page.click('#clearData'); await page.wait_for_timeout(300)
     await page.set_input_files('#fileXlsx', FX+'/agile.xlsx'); await page.wait_for_selector('#dlg[open]')
@@ -131,6 +178,18 @@ async def main():
     await page.reload(); await page.wait_for_selector('#lock:not([hidden])'); await page.screenshot(path=SH+'/7_phone_lock.png')
     await page.fill('#lockPw','packpw88'); await page.click('#lockGo'); await page.wait_for_selector('#lock[hidden]', state='attached')
     ok(True, '手機：開啟密碼沿用資料包密碼')
+    # 有資料時，每個畫面、三種風格都不能比手機螢幕寬（不然整頁會被縮小、選單跑到畫面外）
+    for th in ['indigo', 'night', 'market']:
+        await page.evaluate(f"document.documentElement.dataset.theme='{th}'")
+        for vw in ['overview', 'pivot', 'customers', 'products', 'data']:
+            await page.evaluate(f"location.hash='{vw}'"); await page.wait_for_timeout(400)
+            w = await page.evaluate("document.documentElement.scrollWidth")
+            ok(w <= 392, f'手機寬度：{th} 風格的 {vw} 畫面沒有超出螢幕（{w}px）')
+    await page.evaluate("document.documentElement.dataset.theme='indigo'")
+    # 資料包是 mid（54,000 筆，114/12 有 1,500 筆）→ 54,000 − 1,500 + 35
+    await page.click('a[data-view=data]'); await add_month_open(page, 'month.xlsx')
+    await page.screenshot(path=SH+'/11_phone_add_month.png')
+    t = await add_month_done(page); ok('52,535 筆進貨' in t, '手機也能每月加入：'+t)
     ok(not errs, '手機端沒有 JS 錯誤 '+str(errs))
     await m.close()
     # ===== 舊版未加密資料 → 設定密碼 =====

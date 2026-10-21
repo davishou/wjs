@@ -795,6 +795,57 @@
     }
   }
 
+  // 每月加入新資料：讀新的 Excel，先讓使用者確認哪些月份會加入／取代，再加密存檔
+  async function addMonthXlsx(file) {
+    if (!file) return;
+    if (/\.xls$/i.test(file.name)) { toast('舊版 .xls 格式無法讀取，請在 Excel「另存新檔」為 .xlsx 再加入', 5000); return; }
+    if (!/\.xls[xm]$/i.test(file.name)) { toast('請選擇 .xlsx 檔案'); return; }
+    if (!S.raw || !S.vault) { toast('請先匯入完整的總表，之後才能每月加入'); return; }
+    go('data');
+    let xlsPw = null;
+    if (await isCfbFile(file)) {
+      const r = await askImportPasswords(file.name, true, false, '');
+      if (!r) { toast('已取消加入'); return; }
+      xlsPw = r.xlsPw;
+    }
+    for (;;) {
+      showProgress(0, '準備讀取 ' + file.name);
+      let d;
+      try {
+        const base = S.raw.slice(0);
+        d = await runWorker({ type: 'merge', file, password: xlsPw, base }, [base], (s) => showProgress(s.pct || 0, `${s.stage}… ${s.rows ? nf0.format(s.rows) + ' 筆' : ''}`));
+        xlsPw = null;
+      } catch (err) {
+        worker && worker.terminate(); worker = null;
+        if (err.code === 'BAD_PASSWORD' || err.code === 'NEED_PASSWORD') {
+          showProgress(0, 'Excel 密碼不正確');
+          const r = await askImportPasswords(file.name, true, false, err.code === 'BAD_PASSWORD' ? 'Excel 密碼不正確，請再試一次。' : '');
+          if (!r) { showProgress(0, '已取消加入'); return; }
+          xlsPw = r.xlsPw;
+          continue;
+        }
+        xlsPw = null;
+        showProgress(0, '讀取失敗：' + err.message);
+        return;
+      }
+      const st = d.stats;
+      const isNew = new Set(st.newMonths);
+      const replaced = st.months.length - st.newMonths.length;
+      const desc = `<p>「${esc(file.name)}」裡有 <strong>${nf0.format(st.addSales)}</strong> 筆進貨、<strong>${nf0.format(st.addReturns)}</strong> 筆退貨，月份：</p>` +
+        `<ul class="month-tags">${st.months.map((m) => `<li class="${isNew.has(m) ? 'new' : ''}">${ymLabel(m)}${isNew.has(m) ? '（新）' : '（取代）'}</li>`).join('')}</ul>` +
+        (replaced ? `<p>標「取代」的月份目前已有資料：會先拿掉目前這些月份的 ${nf0.format(st.delSales)} 筆進貨、${nf0.format(st.delReturns)} 筆退貨，換成新檔案的內容。</p>` : '<p>都是新的月份，目前的資料不會被改動。</p>') +
+        (st.noMonth ? `<p>另有 ${nf0.format(st.noMonth)} 筆的單號看不出月份，會直接加入。</p>` : '') +
+        `<p>加入後共 ${nf0.format(st.nSales)} 筆進貨、${nf0.format(st.nReturns)} 筆退貨。</p>`;
+      const v = await ask({ title: '確認加入新資料', desc, fields: [], submit: '加入' });
+      if (!v) { showProgress(0, '已取消加入，資料沒有改變'); return; }
+      showProgress(1, '加密並儲存到這台裝置…');
+      await loadBuffer(d.buf, { save: true });
+      showProgress(1, `完成：加入 ${st.months.map(ymLabel).join('、')}，目前共 ${nf0.format(S.E.ds.nSales)} 筆進貨、${nf0.format(S.E.ds.nReturns)} 筆退貨`);
+      toast('新資料已加入，已加密保存在這台裝置');
+      return;
+    }
+  }
+
   async function loadBuffer(buf, { save } = {}) {
     if (save) {
       if (!S.vault) throw new Error('尚未設定開啟密碼');
@@ -819,6 +870,7 @@
       : '尚未設定：匯入 Excel（電腦）或開啟資料包（手機，會沿用資料包的密碼）時會設定。';
     $('#changePw').hidden = $('#lockNow').hidden = !S.vault;
     const f = $('#dataFacts');
+    $('#addMonth').hidden = !S.E;
     if (!S.E) { f.innerHTML = '<div><dt>目前狀態</dt><dd>尚未載入資料</dd></div>'; return; }
     const ds = S.E.ds;
     const items = [
@@ -826,6 +878,8 @@
       ['資料期間', `${ymLabel(S.E.minYm)} – ${ymLabel(S.E.maxYm)}`], ['進貨筆數', nf0.format(ds.nSales)], ['退貨筆數', nf0.format(ds.nReturns)],
       ['客戶數', nf0.format(ds.str.ck.dict.length)], ['商品代號數', nf0.format(ds.str.sku.dict.length)],
     ];
+    const last = ds.added && ds.added[ds.added.length - 1];
+    if (last) items.splice(2, 0, ['最近加入', `${last.name}（${new Date(last.at).toLocaleDateString('zh-TW')}）`]);
     f.innerHTML = items.map(([a, b]) => `<div><dt>${a}</dt><dd>${esc(b)}</dd></div>`).join('') +
       `<div><dt>基準月（計算靜止、滯銷月數）</dt><dd><select id="dataRef"></select></dd></div>`;
     fillRefSelect($('#dataRef'));
@@ -838,6 +892,9 @@
     ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
     ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
     drop.addEventListener('drop', (e) => importXlsx(e.dataTransfer.files[0]));
+    const fa = $('#fileAdd');
+    $('#pickAdd').addEventListener('click', () => fa.click());
+    fa.addEventListener('change', () => { addMonthXlsx(fa.files[0]); fa.value = ''; });
     // 整個視窗也可拖放
     window.addEventListener('dragover', (e) => e.preventDefault());
     window.addEventListener('drop', (e) => { if (S.locked) { e.preventDefault(); return; } if (!drop.contains(e.target)) { e.preventDefault(); const f2 = e.dataTransfer.files[0]; if (f2) (/\.xls[xm]?$/i.test(f2.name) ? importXlsx(f2) : openPackFile(f2)); } });

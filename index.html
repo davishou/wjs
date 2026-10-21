@@ -182,6 +182,12 @@
           <p><strong>把總表 Excel 拖到這裡</strong>，或 <button class="btn primary" id="pickXlsx">選擇檔案</button></p>
           <p class="hint">只會讀取「原始進貨表」A～AE 欄與「原始退貨表」A～AB 欄，其他工作表一律忽略。檔案只在這台裝置上處理，不會上傳。有開啟密碼的 Excel 也可以直接匯入，會請你輸入密碼，在瀏覽器內解密。</p>
         </div>
+        <div class="add-month" id="addMonth" hidden>
+          <h3>每月加入新資料</h3>
+          <p class="hint">不用每次匯入整份總表：把新月份的進貨、退貨另存成一個 Excel（一樣要有「原始進貨表」「原始退貨表」和表頭，只放新資料就好），按「加入新月份」。檔案裡有的月份會<strong>取代</strong>目前同月份的資料，所以同一個檔案加兩次也不會重複；其他月份不變。加入前會先讓你確認。</p>
+          <input type="file" id="fileAdd" accept=".xlsx,.xlsm" hidden>
+          <div class="row"><button class="btn" id="pickAdd">加入新月份</button></div>
+        </div>
         <div class="progress" id="importProgress" hidden><div class="bar"><i></i></div><p></p></div>
         <dl class="facts" id="dataFacts"></dl>
       </div>

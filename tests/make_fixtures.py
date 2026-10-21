@@ -7,6 +7,8 @@
   agile.xlsx       plain.xlsx 加上 Excel 2010+ 的開啟密碼（AES-256 + SHA-512）
   big_agile.xlsx   big_plain.xlsx 加密（--big 才產生）
   standard.xlsx    plain.xlsx 加上 Excel 2007 的開啟密碼（AES-128 + SHA-1）
+  month.xlsx       每月加入用的新月份資料（115/01 新增、114/12 取代）
+  month_agile.xlsx month.xlsx 加密
   mid_standard.xlsx
 
 需要：pip install openpyxl cryptography
@@ -45,6 +47,23 @@ def make_xlsx(path, per_month):
             r.append([f'{y}{m:02d}900', '類A', 'A100-1', 'R', '雙', 60, 100, 2, 1, 200, '1001', '甲商行', '王'])
     wb.save(path)
     print(f'{os.path.basename(path)}: {n} 筆進貨、8 筆退貨')
+
+
+def make_month_xlsx(path):
+    """每月加入用：115 年 1 月（新月份）25 筆進貨、2 筆退貨，加上 114 年 12 月（取代原有的 30 筆）10 筆進貨。"""
+    wb = openpyxl.Workbook()
+    s = wb.active; s.title = '原始進貨表'
+    s.append(['出貨日期', '商品類別', '商品代號', '顏色代號', '單位', '單價', '售價', '數量', '單位(數字)', '品項總額', '客戶代號', '客戶名', '業務員'])
+    for k in range(10):
+        s.append([f'11412{k:04d}', '類A', 'A100-1', 'R', '雙', 60, 100, 1, 1, 100, '1001', '甲商行', '王'])
+    for k in range(25):
+        s.append([f'11501{k:04d}', '類D', 'D400-1', 'B', '雙', 120, 200, 2, 1, 400, '8005', '戊新店', '李'])
+    r = wb.create_sheet('原始退貨表')
+    r.append(['退貨單號', '商品類別', '商品代號', '顏色代號', '單位', '單價', '售價', '數量', '單位(數字)', '退貨金額', '客戶代號', '客戶名', '業務員'])
+    for k in range(2):
+        r.append([f'11501{900 + k}', '類D', 'D400-1', 'B', '雙', 120, 200, 1, 1, 200, '8005', '戊新店', '李'])
+    wb.save(path)
+    print(f'{os.path.basename(path)}: 每月加入用，35 筆進貨、2 筆退貨')
 
 
 # ---------- 最小的 CFB（OLE 複合文件）寫入器 ----------
@@ -162,6 +181,8 @@ if __name__ == '__main__':
     p = lambda n: os.path.join(FX, n)
     make_xlsx(p('plain.xlsx'), 30)
     make_xlsx(p('mid_plain.xlsx'), 1500)
+    make_month_xlsx(p('month.xlsx'))
+    encrypt_agile(p('month.xlsx'), p('month_agile.xlsx'), AGILE_PW)
     encrypt_agile(p('plain.xlsx'), p('agile.xlsx'), AGILE_PW)
     encrypt_standard(p('plain.xlsx'), p('standard.xlsx'), STANDARD_PW)
     encrypt_standard(p('mid_plain.xlsx'), p('mid_standard.xlsx'), STANDARD_PW)

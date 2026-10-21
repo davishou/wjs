@@ -169,6 +169,7 @@ select.add { border-style: dashed; color: var(--ink-2); }
 /* ============ 表格 ============ */
 .table-wrap { overflow: auto; max-height: 70vh; border-radius: var(--radius); }
 #ovIdleCust .table-wrap, #ovIdleProd .table-wrap, #ovRegion .table-wrap { max-height: none; }
+#ovIdleCust, #ovIdleProd, #ovRegion { overflow-x: auto; }   /* 總覽的表格太寬時在框內左右滑，不要把整頁撐寬（手機） */
 table.dt { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .9rem; }
 [data-theme="night"] table.dt { font-size: .86rem; }
 .dt th, .dt td { padding: 0 12px; height: var(--row-h); border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
@@ -241,6 +242,11 @@ table.dt { width: 100%; border-collapse: separate; border-spacing: 0; font-size:
 .drop.over { border-color: var(--primary); background: var(--primary-soft); }
 .drop svg { width: 40px; height: 40px; fill: var(--primary); }
 .drop p { margin: 8px 0; }
+.add-month { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.add-month .hint { margin-top: 0; }
+.dlg .month-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; padding: 0; list-style: none; }
+.dlg .month-tags li { background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: .85rem; }
+.dlg .month-tags li.new { border-color: var(--primary); color: var(--primary); }
 .progress { margin-top: 16px; }
 .progress .bar { height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
 .progress .bar i { display: block; height: 100%; width: 0; background: var(--primary); transition: width .2s; }

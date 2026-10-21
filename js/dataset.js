@@ -28,7 +28,7 @@
     push('src', raw.src);
     const head = enc.encode(JSON.stringify({
       magic: MAGIC, n: raw.n, nSales: raw.nSales, nReturns: raw.nReturns,
-      createdAt: raw.createdAt, sourceName: raw.sourceName, dicts, cols,
+      createdAt: raw.createdAt, sourceName: raw.sourceName, added: raw.added || [], dicts, cols,
     }));
     const total = 8 + head.length + ((8 - ((8 + head.length) % 8)) % 8) + off;
     const out = new Uint8Array(total);
@@ -53,7 +53,7 @@
       const Ctor = T[c.type];
       return new Ctor(buf, base + c.off, c.len);
     };
-    const raw = { n: head.n, nSales: head.nSales, nReturns: head.nReturns, createdAt: head.createdAt, sourceName: head.sourceName, str: {}, num: {} };
+    const raw = { n: head.n, nSales: head.nSales, nReturns: head.nReturns, createdAt: head.createdAt, sourceName: head.sourceName, added: head.added || [], str: {}, num: {} };
     for (const k of STR) raw.str[k] = { dict: head.dicts[k], codes: get('s.' + k) };
     for (const k of NUM) raw.num[k] = get('n.' + k);
     raw.src = get('src');
@@ -104,6 +104,64 @@
     return deserialize(await gunzip(z));
   }
 
+  // 單號前 5 碼是民國年月（例如 11501 = 115 年 1 月）；讀不出來時為 0
+  function ymOfOrd(s) { const v = parseInt(String(s).slice(0, 5), 10); return Number.isNaN(v) ? 0 : v; }
+
+  // ---- 每月加入新資料 ----
+  // 把 add（新月份的 Excel）併入 base（目前的資料）。新檔案裡出現的月份，會取代 base 中「同一種來源（進貨／退貨）、同月份」的資料，
+  // 所以同一個檔案加兩次也不會重複。讀不出月份的列直接加入。
+  function merge(base, add, name) {
+    if (!add.n) throw new Error('「' + (name || '新檔案') + '」裡沒有任何進貨或退貨資料');
+    const monthsOf = (raw) => {
+      const d = raw.str.ord.dict.map(ymOfOrd), c = raw.str.ord.codes, out = new Int32Array(raw.n);
+      for (let r = 0; r < raw.n; r++) out[r] = d[c[r]];
+      return out;
+    };
+    const bYm = monthsOf(base), aYm = monthsOf(add);
+    const replace = [new Set(), new Set()]; // [進貨月份, 退貨月份]
+    for (let r = 0; r < add.n; r++) if (aYm[r]) replace[add.src[r]].add(aYm[r]);
+    const keep = new Uint8Array(base.n);
+    const removed = [0, 0], added = [0, 0];
+    for (let r = 0; r < base.n; r++) { if (replace[base.src[r]].has(bYm[r])) removed[base.src[r]]++; else keep[r] = 1; }
+    for (let r = 0; r < add.n; r++) added[add.src[r]]++;
+    // 新的列順序：進貨（舊→新）、退貨（舊→新）。from[j]：0 = 舊資料、1 = 新檔案；row[j]：在該資料中的列號
+    const n = base.n - removed[0] - removed[1] + add.n;
+    const from = new Uint8Array(n), row = new Int32Array(n);
+    let j = 0;
+    for (const s of [0, 1]) {
+      for (let r = 0; r < base.n; r++) if (keep[r] && base.src[r] === s) { row[j++] = r; }
+      for (let r = 0; r < add.n; r++) if (add.src[r] === s) { from[j] = 1; row[j++] = r; }
+    }
+    const parts = [base, add];
+    const now = new Date().toISOString();
+    const out = {
+      n, nSales: base.nSales - removed[0] + added[0], nReturns: base.nReturns - removed[1] + added[1],
+      createdAt: now, sourceName: base.sourceName,
+      added: (base.added || []).concat([{ name: name || '', at: now, sales: added[0], returns: added[1] }]).slice(-24),
+      str: {}, num: {}, src: new Uint8Array(n),
+    };
+    for (const k of STR) {
+      const d = makeDict();
+      const maps = parts.map((p) => p.str[k].dict.map((v) => d.code(v)));
+      const codes = new Int32Array(n), pc = [base.str[k].codes, add.str[k].codes];
+      for (let i = 0; i < n; i++) codes[i] = maps[from[i]][pc[from[i]][row[i]]];
+      out.str[k] = { dict: d.list, codes };
+    }
+    for (const k of NUM) {
+      const a = new Float64Array(n), pn = [base.num[k], add.num[k]];
+      for (let i = 0; i < n; i++) a[i] = pn[from[i]][row[i]];
+      out.num[k] = a;
+    }
+    for (let i = 0; i < n; i++) out.src[i] = parts[from[i]].src[row[i]];
+    const months = [...new Set([...replace[0], ...replace[1]])].sort((x, y) => x - y);
+    const baseMonths = new Set(bYm);
+    let noMonth = 0; for (let r = 0; r < add.n; r++) if (!aYm[r]) noMonth++;
+    return {
+      raw: out,
+      stats: { months, newMonths: months.filter((m) => !baseMonths.has(m)), addSales: added[0], addReturns: added[1], delSales: removed[0], delReturns: removed[1], noMonth, nSales: out.nSales, nReturns: out.nReturns },
+    };
+  }
+
   // ---- 衍生欄位（等同 Excel W~AE 欄的公式）----
   function regionOf(code) {
     const c = code.charAt(0);
@@ -124,12 +182,11 @@
 
   function hydrate(raw) {
     const n = raw.n;
-    const ds = { n, nSales: raw.nSales, nReturns: raw.nReturns, createdAt: raw.createdAt, sourceName: raw.sourceName, str: {}, num: {}, src: raw.src };
+    const ds = { n, nSales: raw.nSales, nReturns: raw.nReturns, createdAt: raw.createdAt, sourceName: raw.sourceName, added: raw.added || [], str: {}, num: {}, src: raw.src };
     for (const k of STR) ds.str[k] = raw.str[k];
     for (const k of NUM) ds.num[k] = raw.num[k];
     const ordD = raw.str.ord.dict, ordC = raw.str.ord.codes;
-    const ymOf = new Int32Array(ordD.length);
-    for (let i = 0; i < ordD.length; i++) { const v = parseInt(ordD[i].slice(0, 5), 10); ymOf[i] = Number.isNaN(v) ? 0 : v; }
+    const ymOf = Int32Array.from(ordD, ymOfOrd);
     const ym = new Int32Array(n);
     for (let r = 0; r < n; r++) ym[r] = ymOf[ordC[r]];
     // 客戶 = 代號 + 客戶名
@@ -217,5 +274,5 @@
     async clear() { await idbDel('vault'); await idbDel('data'); },
   };
 
-  root.Dataset = { Vault, serialize, deserialize, hydrate, makePack, openPack, packNeedsPassword, gzip, gunzip, idbSet, idbGet, idbDel, regionOf, simplify };
+  root.Dataset = { Vault, serialize, deserialize, hydrate, merge, makePack, openPack, packNeedsPassword, gzip, gunzip, idbSet, idbGet, idbDel, regionOf, simplify };
 })(typeof self !== 'undefined' ? self : globalThis);
