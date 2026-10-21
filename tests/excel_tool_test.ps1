@@ -226,10 +226,10 @@ try {
   }
   ok ($ws.Range('AR2').Value2 -eq 11410) "AR2 自動填成 11410（資料到 114/09）"
   $dims = @{}; foreach ($t in $ws.ListObjects) { if ($t.Name -ne '表格1') { $dims[[string]$t.Range.Cells.Item(1, 1).Value2] = @($t.DataBodyRange.Value2) } }
-  function SpillVals($addr) { $sp = $ws.Range($addr).SpillingToRange; $x = @($sp.Value2); , @($x[1..($x.Count - 1)] | Where-Object { $null -ne $_ -and $_ -ne '' -and -not ($_ -is [double] -and $_ -eq 0) }) }
+  function SpillVals($addr) { $sp = $ws.Range($addr).SpillingToRange; $x = @($sp.Value2); , @($x[1..($x.Count - 1)] | Where-Object { $null -ne $_ }) }
   foreach ($pair in @(@('代號+客戶', 'AK1'), @('商品代號', 'AT1'), @('商品代碼(簡化)', 'BM1'))) {
     $want = SpillVals $pair[1]; $got = $dims[$pair[0]]
-    ok ($want.Count -eq $got.Count -and ($want -join '|') -ceq ($got -join '|')) "對照表「$($pair[0])」和 $($pair[1]) 的清單一模一樣（$($got.Count) 個）"
+    ok ($want.Count -eq $got.Count -and ($want -join '|') -ceq ($got -join '|') -and $got[$got.Count - 1] -eq 0) "對照表「$($pair[0])」和 $($pair[1]) 的清單一模一樣，包含最後的空白／0（$($got.Count) 個）"
   }
   ok ($dims['代號+客戶'] -contains '9Z09新客戶' -and $dims['代號+客戶'] -notcontains '2E05戊店' -and $dims['代號+客戶'] -notcontains 'X999已不存在') '對照表 BB：有新客戶；只在退貨的客戶、AK 沒有的舊值都不在'
   ok ($dims['商品類別'] -contains '05' -and $dims['區域'] -contains '其他地區' -and $dims['顏色代號'] -contains '03') '對照表 BJ、BG、BH 加入進貨新的值'

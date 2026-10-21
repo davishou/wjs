@@ -302,7 +302,7 @@ function Get-Spills($ws) {
     $vals = New-Object 'System.Collections.Generic.List[object]'
     for ($i = 2; $i -le $v.GetLength(0); $i++) {   # 第 1 格是表頭
       $x = $v[$i, 1]
-      if ($null -eq $x -or $x -is [int] -or ($x -is [double] -and $x -eq 0) -or ($x -is [string] -and $x.Trim() -eq '')) { continue }   # 空白、0、錯誤值不要
+      if ($null -eq $x -or $x -is [int]) { continue }   # 錯誤值不要；最後的空白（顯示成 0）照樣保留，和清單完全一樣
       $vals.Add($x)
     }
     $map[$h] = [pscustomobject]@{ Col = ($cell.Address($false, $false) -replace '\d', ''); Vals = $vals }
