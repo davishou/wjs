@@ -136,14 +136,24 @@ function ToCell($v, [string]$type, [bool]$textFmt) {
 }
 
 # ---------- 把一種資料（進貨或退貨）併進總表 ----------
+# 一列一列轉成要寫進 Excel 的值
+function Row-Array($rows, $ti, $n) {
+  $arr = New-Object 'object[,]' $rows.Count, $n
+  for ($r = 0; $r -lt $rows.Count; $r++) { $row = $rows[$r]; for ($c = 0; $c -lt $n; $c++) { $arr[$r, $c] = Unwrap (ToCell $row[$c] $ti.Types[$c + 1] $ti.TextFmt[$c + 1]) } }
+  return , $arr
+}
+function Sorted-Sigs($rows, $n) { $s = New-Object string[] $rows.Count; for ($i = 0; $i -lt $rows.Count; $i++) { $s[$i] = SigRow $rows[$i] $n }; [Array]::Sort($s, [StringComparer]::Ordinal); [string]::Join("`n", $s) }
+
 function Merge-Kind($wb, $kind, $src) {
   $ws = $null; foreach ($s in $wb.Worksheets) { if ($s.Name -eq $kind.Sheet) { $ws = $s } }
   if (-not $ws) { throw "總表裡找不到「$($kind.Sheet)」工作表，請確認選的是總表。" }
   if ((Txt $ws.Cells.Item(1, 1).Value2).Trim() -ne $kind.Key) { throw "「$($kind.Sheet)」的 A1 不是「$($kind.Key)」，請確認選的是總表。" }
   $n = $kind.NRaw
+  $rep = $n - 1   # 業務員是原始資料的最後一欄（進貨 V、退貨 U）
   $last = Last-Row $ws 1
   if ($last -lt 2) { throw "「$($kind.Sheet)」裡沒有資料，請確認選的是總表。" }
   Say "[$($kind.Label)] 總表目前有 $($last - 1) 筆，檢查重複…"
+  $heads = Get-Values (Rng $ws 1 1 1 $n)
 
   # 新資料依單號分組（同一張單的列保持原本順序）
   $groups = New-Object 'System.Collections.Generic.Dictionary[string,System.Collections.Generic.List[object]]'
@@ -163,7 +173,8 @@ function Merge-Kind($wb, $kind, $src) {
   }
   $a = $null
   # 讀出這些單號在總表裡的內容（相鄰的列一次讀）
-  $exSig = New-Object 'System.Collections.Generic.Dictionary[string,System.Collections.Generic.List[string]]'
+  $exRows = New-Object 'System.Collections.Generic.Dictionary[string,System.Collections.Generic.List[int]]'
+  $exVals = New-Object 'System.Collections.Generic.Dictionary[string,System.Collections.Generic.List[object]]'
   $j = 0
   while ($j -lt $hits.Count) {
     $s = $hits[$j]; $e = $s
@@ -173,68 +184,135 @@ function Merge-Kind($wb, $kind, $src) {
     for ($i = 1; $i -le $e - $s + 1; $i++) {
       $k = Key $v[$i, 1]
       if (-not $groups.ContainsKey($k)) { continue }
-      if (-not $exSig.ContainsKey($k)) { $exSig[$k] = New-Object 'System.Collections.Generic.List[string]' }
-      $exSig[$k].Add((Sig2D $v $i $n))
+      if (-not $exRows.ContainsKey($k)) { $exRows[$k] = New-Object 'System.Collections.Generic.List[int]'; $exVals[$k] = New-Object 'System.Collections.Generic.List[object]' }
+      $row = New-Object object[] $n; for ($c = 1; $c -le $n; $c++) { $row[$c - 1] = $v[$i, $c] }
+      $exRows[$k].Add($s + $i - 1); $exVals[$k].Add($row)
     }
   }
-  # 逐張單比對：總表沒有 → 新增；整張每一列每一格都一樣 → 重複，跳過；不一樣 → 不加入，列在報告裡
+  # 逐張單比對：
+  #   總表沒有 → 新增
+  #   每一列每一格都一樣 → 重複，跳過
+  #   只有業務員不同 → 保留總表原本的
+  #   其他欄位不同 → 改用新資料，但業務員保留總表原本的
   $keys = [string[]]@($groups.Keys); [Array]::Sort($keys, [StringComparer]::Ordinal)
   $add = New-Object 'System.Collections.Generic.List[object]'
-  $dup = 0; $dupRows = 0; $addOrders = 0
-  $conf = New-Object 'System.Collections.Generic.List[object]'
+  $replace = New-Object 'System.Collections.Generic.List[object]'
+  $dup = 0; $dupRows = 0; $keptRep = 0; $addOrders = 0
   foreach ($k in $keys) {
     $rows = $groups[$k]
-    if (-not $exSig.ContainsKey($k)) { foreach ($r in $rows) { $add.Add($r) }; $addOrders++; continue }
-    $ns = New-Object string[] $rows.Count; for ($i = 0; $i -lt $rows.Count; $i++) { $ns[$i] = SigRow $rows[$i] $n }
-    $es = $exSig[$k].ToArray()
-    [Array]::Sort($ns, [StringComparer]::Ordinal); [Array]::Sort($es, [StringComparer]::Ordinal)
-    if ([string]::Join("`n", $ns) -ceq [string]::Join("`n", $es)) { $dup++; $dupRows += $rows.Count; continue }
-    # 列出只在一邊出現的列
-    $cnt = @{}; foreach ($x in $es) { $cnt[$x] = 1 + [int]$cnt[$x] }
-    $onlyNew = New-Object 'System.Collections.Generic.List[string]'
-    foreach ($x in $ns) { if ([int]$cnt[$x] -gt 0) { $cnt[$x]-- } else { $onlyNew.Add($x) } }
-    $onlyEx = New-Object 'System.Collections.Generic.List[string]'
-    foreach ($x in $cnt.Keys) { for ($q = 0; $q -lt $cnt[$x]; $q++) { $onlyEx.Add($x) } }
-    $conf.Add([pscustomobject]@{ Key = $k; ExRows = $es.Count; NewRows = $ns.Count; OnlyEx = $onlyEx; OnlyNew = $onlyNew })
+    if (-not $exRows.ContainsKey($k)) { foreach ($r in $rows) { $add.Add($r) }; $addOrders++; continue }
+    $ex = $exVals[$k]
+    $merged = New-Object 'System.Collections.Generic.List[object]'
+    for ($i = 0; $i -lt $rows.Count; $i++) {
+      $x = $rows[$i].Clone()
+      $x[$rep] = if ($ex.Count -eq $rows.Count) { $ex[$i][$rep] } else { $ex[0][$rep] }
+      $merged.Add($x)
+    }
+    $es = Sorted-Sigs $ex $n
+    if ((Sorted-Sigs $merged $n) -ceq $es) {
+      if ((Sorted-Sigs $rows $n) -ceq $es) { $dup++; $dupRows += $rows.Count } else { $keptRep++ }
+      continue
+    }
+    # 哪些欄位不一樣（筆數相同時逐列比對）
+    $cols = New-Object 'System.Collections.Generic.List[string]'
+    if ($ex.Count -eq $merged.Count) {
+      for ($c = 0; $c -lt $n; $c++) {
+        for ($i = 0; $i -lt $ex.Count; $i++) { if ((Norm $ex[$i][$c]) -cne (Norm $merged[$i][$c])) { $cols.Add((Txt $heads[1, ($c + 1)])); break } }
+      }
+    }
+    $replace.Add([pscustomobject]@{ Key = $k; Rows = $exRows[$k]; New = $merged; ExCount = $ex.Count; Cols = $cols })
   }
-  Say "[$($kind.Label)] 新增 $addOrders 張單（$($add.Count) 筆）、重複跳過 $dup 張單（$dupRows 筆）、內容不一樣 $($conf.Count) 張單"
+  Say "[$($kind.Label)] 新增 $addOrders 張單（$($add.Count) 筆）、重複跳過 $dup 張單、只有業務員不同 $keptRep 張單、改用新資料 $($replace.Count) 張單"
 
   $fcols = Get-FormulaCols $ws $n
   $lastCol = if ($fcols.Count) { $fcols[$fcols.Count - 1].Col } else { $n }
+  $ti = Get-ColTypes $ws $last $n
+  $changed = New-Object 'System.Collections.Generic.List[object]'   # 這次寫進去的所有列（給對照表用）
+  foreach ($r in $add) { $changed.Add($r) }
+  $addRows = $add.Count
+  # 改用新資料：同一位置直接覆蓋；新資料比較多 → 多的接在後面；比較少 → 多出來的舊列清空（排序後移到最下面再刪掉）
+  $cleared = 0
+  foreach ($rp in $replace) {
+    $m = [math]::Min($rp.Rows.Count, $rp.New.Count)
+    for ($i = 0; $i -lt $m; $i++) { $r = $rp.Rows[$i]; (Rng $ws $r 1 $r $n).Value2 = (Row-Array @(, $rp.New[$i]) $ti $n) }
+    for ($i = $m; $i -lt $rp.New.Count; $i++) { $add.Add($rp.New[$i]) }
+    for ($i = $m; $i -lt $rp.Rows.Count; $i++) { [void](Rng $ws $rp.Rows[$i] 1 $rp.Rows[$i] $n).ClearContents(); $cleared++ }
+    foreach ($r in $rp.New) { $changed.Add($r) }
+  }
   $start = $last + 1; $end = $last + $add.Count; $sorted = $false
+  $newMax = $exMax; $minAdd = $null
+  foreach ($r in $add) {
+    $k = Key $r[0]
+    if ([string]::CompareOrdinal($k, $newMax) -gt 0) { $newMax = $k }
+    if ($null -eq $minAdd -or [string]::CompareOrdinal($k, $minAdd) -lt 0) { $minAdd = $k }
+  }
+  $lo = Get-MainTable $ws
   if ($add.Count) {
-    $ti = Get-ColTypes $ws $last $n
-    $arr = New-Object 'object[,]' $add.Count, $n
-    for ($r = 0; $r -lt $add.Count; $r++) { $row = $add[$r]; for ($c = 0; $c -lt $n; $c++) { $arr[$r, $c] = Unwrap (ToCell $row[$c] $ti.Types[$c + 1] $ti.TextFmt[$c + 1]) } }
-    $lo = Get-MainTable $ws
     if ($lo) {
       $loEnd = $lo.Range.Row + $lo.Range.Rows.Count - 1
       if ($loEnd -lt $end) { [void]$lo.Resize((Rng $ws 1 1 $end $lo.Range.Columns.Count)) }
     }
     for ($c = 1; $c -le $lastCol; $c++) { try { (Rng $ws $start $c $end $c).NumberFormat = $ws.Cells.Item($last, $c).NumberFormat } catch {} }
     Say "[$($kind.Label)] 寫入第 $start ～ $end 列，補上公式…"
-    (Rng $ws $start 1 $end $n).Value2 = $arr
+    (Rng $ws $start 1 $end $n).Value2 = (Row-Array $add $ti $n)
     foreach ($f in $fcols) { Set-R1C1 (Rng $ws $start $f.Col $end $f.Col) $f.R1C1 }
-    # 有比目前最後一張還早的單號（例如補來的 3 月退貨）→ 整張表依單號重新排序
-    if ([string]::CompareOrdinal((Key $add[0][0]), $exMax) -le 0) {
-      Say "[$($kind.Label)] 有比較早的單號，整張表依單號重新排序…"
-      if ($lo) {
-        $st = $lo.Sort; $st.SortFields.Clear(); [void]$st.SortFields.Add($lo.ListColumns.Item(1).DataBodyRange, 0, 1); $st.Header = 1; $st.MatchCase = $false; [void]$st.Apply()
-      } else {
-        $st = $ws.Sort; $st.SortFields.Clear(); [void]$st.SortFields.Add((Rng $ws 2 1 $end 1), 0, 1); $st.SetRange((Rng $ws 1 1 $end $lastCol)); $st.Header = 1; $st.MatchCase = $false; [void]$st.Apply()
-      }
-      $sorted = $true
-    }
   }
-  $newMax = if ($add.Count) { Key $add[$add.Count - 1][0] } else { '' }
-  if ([string]::CompareOrdinal($newMax, $exMax) -lt 0) { $newMax = $exMax }
+  # 有比目前最後一張還早的單號（例如補來的 3 月退貨），或有清空的列 → 整張表依單號重新排序
+  if ($cleared -or ($add.Count -and [string]::CompareOrdinal($minAdd, $exMax) -le 0)) {
+    Say "[$($kind.Label)] 整張表依單號重新排序…"
+    $sortEnd = [math]::Max($last, $end)
+    if ($lo) {
+      $st = $lo.Sort; $st.SortFields.Clear(); [void]$st.SortFields.Add($lo.ListColumns.Item(1).DataBodyRange, 0, 1); $st.Header = 1; $st.MatchCase = $false; [void]$st.Apply()
+    } else {
+      $st = $ws.Sort; $st.SortFields.Clear(); [void]$st.SortFields.Add((Rng $ws 2 1 $sortEnd 1), 0, 1); $st.SetRange((Rng $ws 1 1 $sortEnd $lastCol)); $st.Header = 1; $st.MatchCase = $false; [void]$st.Apply()
+    }
+    $sorted = $true
+  }
+  $newLast = Last-Row $ws 1
+  # 資料下面的空白列（表格多出來的列、AE 一路到底的公式、清空的舊列）全部清掉，檔案會變小、開起來比較快
+  $trim = ''
+  $tail = [math]::Max([math]::Max($last, $end), (Last-Row $ws $lastCol))
+  if ($lo) {
+    $loEnd = $lo.Range.Row + $lo.Range.Rows.Count - 1
+    $tail = [math]::Max($tail, $loEnd)
+    if ($loEnd -gt $newLast) { [void]$lo.Resize((Rng $ws 1 1 $newLast $lo.Range.Columns.Count)) }
+  }
+  if ($tail -gt $newLast) {
+    Say "[$($kind.Label)] 清掉資料下面第 $($newLast + 1) ～ $tail 列的空白列…"
+    [void](Rng $ws ($newLast + 1) 1 $tail $lastCol).Clear()
+    $trim = "「$($kind.Sheet)」資料只到第 $newLast 列，下面第 $($newLast + 1) ～ $tail 列的空白列和公式已清掉" + $(if ($lo) { "（表格「$($lo.Name)」縮到第 $newLast 列）" } else { '' })
+  }
   return [pscustomobject]@{
-    Kind = $kind; Ws = $ws; Before = $last - 1; NewLast = [math]::Max($last, $end); Start = $start; End = $end; Sorted = $sorted
-    Added = $add; AddOrders = $addOrders; Dup = $dup; DupRows = $dupRows; Conf = $conf; FCols = $fcols; MaxYm = (Ym $newMax)
+    Kind = $kind; Ws = $ws; Before = $last - 1; After = $newLast - 1; NewLast = $newLast; Sorted = $sorted; Trim = $trim
+    AddOrders = $addOrders; AddRows = $addRows; Dup = $dup; DupRows = $dupRows; KeptRep = $keptRep; Replace = $replace
+    Changed = $changed; FCols = $fcols; MaxYm = (Ym $newMax)
   }
 }
 
-# ---------- BB～BJ 對照表（給 Power Pivot 用）：把新出現的客戶、商品、年月…加進去 ----------
+# ---------- 第 1 列的 UNIQUE 清單（AK、AT、BM…）：表頭 → 清單內容 ----------
+function Get-Spills($ws) {
+  $map = New-Object 'System.Collections.Generic.Dictionary[string,object]'
+  $maxCol = $ws.UsedRange.Column + $ws.UsedRange.Columns.Count - 1
+  for ($c = 1; $c -le $maxCol; $c++) {
+    $cell = $ws.Cells.Item(1, $c)
+    if (-not $cell.HasFormula -or (Get-R1C1 $cell) -notmatch 'UNIQUE\(' -or -not $cell.HasSpill) { continue }
+    $h = (Txt $cell.Value2).Trim()
+    if ($map.ContainsKey($h)) { continue }
+    $sp = $cell.SpillingToRange; $v = Get-Values $sp
+    $vals = New-Object 'System.Collections.Generic.List[object]'
+    for ($i = 2; $i -le $v.GetLength(0); $i++) {   # 第 1 格是表頭
+      $x = $v[$i, 1]
+      if ($null -eq $x -or $x -is [int] -or ($x -is [double] -and $x -eq 0) -or ($x -is [string] -and $x.Trim() -eq '')) { continue }   # 空白、0、錯誤值不要
+      $vals.Add($x)
+    }
+    $map[$h] = [pscustomobject]@{ Col = ($cell.Address($false, $false) -replace '\d', ''); Vals = $vals }
+  }
+  return , $map
+}
+
+# ---------- BB～BJ 對照表（給 Power Pivot 用）----------
+# 和 AK、AT、BM 同名的（代號+客戶、商品代號、商品代碼(簡化)）：整張改成和那個 UNIQUE 清單一模一樣
+# 其他（年份、年月、月份、區域、顏色、類別）：把「進貨」新出現的值加到最下面
 function Update-Dims($ws, $results) {
   $derive = @{
     '代號+客戶' = { param($r, $k) (Txt $r[$k.Cust - 1]) + (Txt $r[$k.Name - 1]) }
@@ -247,41 +325,60 @@ function Update-Dims($ws, $results) {
     '商品代碼(簡化)' = { param($r, $k) Simplify (Txt $r[$k.Sku - 1]) }
     '商品類別' = { param($r, $k) Txt $r[$k.Cat - 1] }
   }
+  $spills = Get-Spills $ws
   $log = New-Object 'System.Collections.Generic.List[string]'
   foreach ($lo in @($ws.ListObjects)) {
     if ($lo.Range.Column -eq 1 -or $lo.Range.Columns.Count -ne 1) { continue }
     $h = (Txt $lo.Range.Cells.Item(1, 1).Value2).Trim()
     if (-not $derive.ContainsKey($h)) { continue }
-    $seen = New-Object 'System.Collections.Generic.HashSet[string]'
+    $top = $lo.Range.Row; $col = $lo.Range.Column; $oldEnd = $top + $lo.Range.Rows.Count - 1
+    $old = New-Object 'System.Collections.Generic.List[object]'
     $isNum = $false; $found = $false
     if ($lo.DataBodyRange) {
       $v = Get-Values $lo.DataBodyRange
       for ($i = 1; $i -le $v.GetLength(0); $i++) {
-        $x = $v[$i, 1]; if ($null -eq $x) { continue }
-        if (-not $found) { $isNum = $x -is [double]; $found = $true }
-        [void]$seen.Add((Txt $x).Trim())
+        $x = $v[$i, 1]; $old.Add($x)
+        if ($null -ne $x -and -not $found) { $isNum = $x -is [double]; $found = $true }
       }
     }
-    $new = New-Object 'System.Collections.Generic.List[string]'
-    foreach ($res in $results) {
-      foreach ($r in $res.Added) {
-        $val = ([string](& $derive[$h] $r $res.Kind)).Trim()
-        if ($val -ne '' -and $seen.Add($val)) { $new.Add($val) }
+    if ($spills.ContainsKey($h)) {
+      $want = $spills[$h].Vals
+      if (-not $want.Count) { continue }
+      $same = $want.Count -eq $old.Count
+      if ($same) { for ($i = 0; $i -lt $want.Count; $i++) { if ((Txt $want[$i]) -cne (Txt $old[$i])) { $same = $false; break } } }
+      if ($same) { continue }
+      $vals = $want; $newEnd = $top + $want.Count; $what = "整張改成和 $($spills[$h].Col) 欄的清單一樣：原本 $($old.Count) 個 → 現在 $($want.Count) 個"
+    } else {
+      $seen = New-Object 'System.Collections.Generic.HashSet[string]'
+      foreach ($x in $old) { if ($null -ne $x) { [void]$seen.Add((Txt $x).Trim()) } }
+      $new = New-Object 'System.Collections.Generic.List[object]'
+      foreach ($res in $results) {
+        if ($res.Kind.Label -ne '進貨') { continue }   # 對照表是從進貨資料算出來的
+        foreach ($r in $res.Changed) {
+          $val = ([string](& $derive[$h] $r $res.Kind)).Trim()
+          if ($val -ne '' -and $seen.Add($val)) { $new.Add($val) }
+        }
       }
+      if (-not $new.Count) { continue }
+      $vals = New-Object 'System.Collections.Generic.List[object]'; foreach ($x in $old) { $vals.Add($x) }; foreach ($x in $new) { $vals.Add($x) }
+      $newEnd = $top + $vals.Count; $what = "加入 $($new.Count) 個：$([string]::Join('、', ($new | Select-Object -First 20)))$(if ($new.Count -gt 20) { '…' })"
     }
-    if (-not $new.Count) { continue }
-    $top = $lo.Range.Row; $col = $lo.Range.Column; $r0 = $top + $lo.Range.Rows.Count
-    $target = Rng $ws $r0 $col ($r0 + $new.Count - 1) $col
-    if ($ws.Application.WorksheetFunction.CountA($target) -gt 0) { $log.Add("對照表「$h」下方的格子有其他內容，沒有自動加入：$([string]::Join('、', $new))"); continue }
-    $textFmt = ([string]$ws.Cells.Item($r0 - 1, $col).NumberFormat) -eq '@'
-    $arr = New-Object 'object[,]' $new.Count, 1
-    for ($i = 0; $i -lt $new.Count; $i++) {
-      $d = 0.0
-      $arr[$i, 0] = Unwrap $(if ($isNum -and [double]::TryParse($new[$i], [Globalization.NumberStyles]::Float, $INV, [ref]$d)) { $d } elseif ($textFmt) { $new[$i] } else { "'" + $new[$i] })
+    if ($newEnd -gt $oldEnd -and $ws.Application.WorksheetFunction.CountA((Rng $ws ($oldEnd + 1) $col $newEnd $col)) -gt 0) {
+      $log.Add("對照表「$h」下方的格子有其他內容，沒有自動更新，請自己確認。"); continue
     }
-    [void]$lo.Resize((Rng $ws $top $col ($r0 + $new.Count - 1) $col))
-    $target.Value2 = $arr
-    $log.Add("對照表「$h」加入 $($new.Count) 個：$([string]::Join('、', ($new | Select-Object -First 20)))$(if ($new.Count -gt 20) { '…' })")
+    $textFmt = ([string]$ws.Cells.Item($top + 1, $col).NumberFormat) -eq '@'
+    $arr = New-Object 'object[,]' $vals.Count, 1
+    for ($i = 0; $i -lt $vals.Count; $i++) {
+      $x = $vals[$i]; $d = 0.0
+      $arr[$i, 0] = Unwrap $(if ($null -eq $x) { $null }
+        elseif ($isNum -and [double]::TryParse((Txt $x), [Globalization.NumberStyles]::Float, $INV, [ref]$d)) { $d }
+        elseif ($x -is [double]) { $x }
+        elseif ($textFmt) { [string]$x } else { "'" + [string]$x })
+    }
+    [void]$lo.Resize((Rng $ws $top $col $newEnd $col))
+    (Rng $ws ($top + 1) $col $newEnd $col).Value2 = $arr
+    if ($oldEnd -gt $newEnd) { [void](Rng $ws ($newEnd + 1) $col $oldEnd $col).Clear() }
+    $log.Add("對照表「$h」$what")
   }
   return , $log
 }
@@ -327,7 +424,8 @@ try {
   Write-Host '================ 總表更新工具 ================'
   Write-Host '把 JMSSAL（進貨）、JMSSBK（退貨）的新資料接到總表下方：'
   Write-Host '・整張單號的每一列、每一格都一樣 → 視為重複，跳過'
-  Write-Host '・單號已經有、但內容不一樣 → 不加入，列在報告裡讓你自己看'
+  Write-Host '・單號已經有、但內容不一樣 → 改用新資料，業務員保留總表原本的（只有業務員不同就不動）'
+  Write-Host '・BB、BC、BI 對照表改成和 AK、AT、BM 的清單一樣；資料下面的空白列會清掉'
   Write-Host '・公式自動往下補，AR2 自動填成最新資料的下一個月'
   Write-Host '・原本的總表不會被修改，最後會另存成新檔'
   Write-Host ''
@@ -363,23 +461,21 @@ try {
   $wsSales = $null; foreach ($s in $wb.Worksheets) { if ($s.Name -eq '原始進貨表') { $wsSales = $s } }
 
   $extra = New-Object 'System.Collections.Generic.List[string]'
-  $totalAdded = 0; $totalConf = 0
-  foreach ($res in $results) { $totalAdded += $res.Added.Count; $totalConf += $res.Conf.Count }
-  if ($totalAdded -gt 0) {
-    Say '更新 BB～BJ 對照表…'
-    foreach ($x in (Update-Dims $wsSales $results)) { $extra.Add($x) }
-    # 先算好新資料的公式欄，UNIQUE 清單才會是最新的
-    foreach ($res in $results) {
-      if (-not $res.Added.Count -or -not $res.FCols.Count) { continue }
-      $c1 = $res.FCols[0].Col; $c2 = $res.FCols[$res.FCols.Count - 1].Col
-      if ($res.Sorted) { [void](Rng $res.Ws 2 $c1 $res.NewLast $c2).Calculate() } else { [void](Rng $res.Ws $res.Start $c1 $res.End $c2).Calculate() }
-    }
-    Say '補上 AL～AP、AU～AX、BN～BR 等公式…'
-    foreach ($x in (Extend-SpillFormulas $wsSales)) { $extra.Add($x) }
+  $totalChanged = 0
+  foreach ($res in $results) { $totalChanged += $res.Changed.Count; if ($res.Trim) { $extra.Add($res.Trim) } }
+  # 先算好有改動的公式欄，UNIQUE 清單才會是最新的
+  foreach ($res in $results) {
+    if (-not $res.Changed.Count -or -not $res.FCols.Count) { continue }
+    $c1 = $res.FCols[0].Col; $c2 = $res.FCols[$res.FCols.Count - 1].Col
+    [void](Rng $res.Ws 2 $c1 $res.NewLast $c2).Calculate()
   }
+  Say '補上 AL～AP、AU～AX、BN～BR 等公式…'
+  foreach ($x in (Extend-SpillFormulas $wsSales)) { $extra.Add($x) }
+  Say '更新 BB～BJ 對照表…'
+  foreach ($x in (Update-Dims $wsSales $results)) { $extra.Add($x) }
   # AR2：最新資料的下一個月
   $ymMax = 0; foreach ($res in $results) { if ($res.Kind.Label -eq '進貨' -and $res.MaxYm -gt $ymMax) { $ymMax = $res.MaxYm } }
-  if (-not $ymMax) { $ymMax = (Ym (Key (Get-Values (Rng $wsSales 2 1 2 1))[1, 1])) }
+  if (-not $ymMax) { $ymMax = Ym (Key $wsSales.Cells.Item((Last-Row $wsSales 1), 1).Value2) }
   if ($ymMax) {
     $ar = $wsSales.Range('AR2'); $old = $ar.Value2; $newYm = NextYm $ymMax
     if ($null -eq $old -or ($old -is [double] -and $old -ge 10000 -and $old -lt 100000)) {
@@ -403,30 +499,32 @@ try {
   foreach ($res in $results) {
     $k = $res.Kind
     $L.Add(''); $L.Add("【$($k.Label)】$(Split-Path ($(if ($k.Label -eq '進貨') { $Sales } else { $Returns })) -Leaf)")
-    $L.Add("  原本 $($res.Before) 筆 → 現在 $($res.Before + $res.Added.Count) 筆")
-    $L.Add("  新增 $($res.AddOrders) 張單、$($res.Added.Count) 筆")
+    $L.Add("  原本 $($res.Before) 筆 → 現在 $($res.After) 筆")
+    $L.Add("  新增 $($res.AddOrders) 張單、$($res.AddRows) 筆")
     $L.Add("  重複跳過 $($res.Dup) 張單、$($res.DupRows) 筆")
-    if ($res.Added.Count) { $L.Add($(if ($res.Sorted) { '  有比較早的單號，已整張依單號重新排序' } else { '  新資料都接在最後面，原本的順序沒有動' })) }
-    if ($res.Conf.Count) {
-      $L.Add("  ※ 單號已經有、但內容不一樣，沒有加入的：$($res.Conf.Count) 張（請自己確認）")
-      foreach ($cf in $res.Conf) {
-        $L.Add("    單號 $($cf.Key)：總表有 $($cf.ExRows) 筆，新資料有 $($cf.NewRows) 筆")
-        foreach ($x in $cf.OnlyEx) { $L.Add('      只在總表：　' + ($x -replace [char]31, ' | ')) }
-        foreach ($x in $cf.OnlyNew) { $L.Add('      只在新資料：' + ($x -replace [char]31, ' | ')) }
-      }
+    $L.Add("  只有業務員不同、保留總表原本的：$($res.KeptRep) 張單")
+    $L.Add("  內容不一樣、改用新資料（業務員保留原本的）：$($res.Replace.Count) 張單")
+    foreach ($rp in $res.Replace) {
+      $why = if ($rp.Cols.Count) { '不同的欄位：' + [string]::Join('、', $rp.Cols) } else { "筆數不同：總表 $($rp.ExCount) 筆 → 新資料 $($rp.New.Count) 筆" }
+      $L.Add("    單號 $($rp.Key)：$why")
     }
+    if ($res.Changed.Count) { $L.Add($(if ($res.Sorted) { '  已整張依單號重新排序' } else { '  新資料都接在最後面，原本的順序沒有動' })) }
   }
   if ($extra.Count) { $L.Add(''); $L.Add('【其他】'); foreach ($x in $extra) { $L.Add('  ' + $x) } }
   Write-Host ''; foreach ($x in $L) { Write-Host $x }; Write-Host ''
 
-  if (-not $totalAdded -and -not $NoUI) {
-    Show-Msg $owner '沒有需要新增的資料（全部都是重複或內容不一樣的單號），總表不用另存。詳細內容請看黑色視窗。' | Out-Null
-    return
-  }
   # ---------- 另存新檔 ----------
   if (-not $NoUI) {
-    $msg = "新增 $totalAdded 筆。" + $(if ($totalConf) { "`n有 $totalConf 張單號內容不一樣，沒有加入，會寫在報告裡。" } else { '' }) + "`n`n接下來請選擇要存成的新檔名（原本的總表不會被改動）。"
-    Show-Msg $owner $msg | Out-Null
+    $nAdd = 0; $nRep = 0; foreach ($res in $results) { $nAdd += $res.AddRows; $nRep += $res.Replace.Count }
+    if ($totalChanged) {
+      $msg = "新增 $nAdd 筆。" + $(if ($nRep) { "`n有 $nRep 張單號內容不一樣，已改用新資料（業務員保留原本的），詳細寫在報告裡。" } else { '' }) + "`n`n接下來請選擇要存成的新檔名（原本的總表不會被改動）。"
+      Show-Msg $owner $msg | Out-Null
+    } elseif ($extra.Count -eq 0) {
+      Show-Msg $owner '沒有需要新增或修改的資料，總表不用另存。詳細內容請看黑色視窗。' | Out-Null
+      return
+    } elseif ((Show-Msg $owner "沒有新的資料，但整理了總表（清掉空白列、對照表等，詳見黑色視窗）。`n`n要另存成新檔嗎？" 'Question' 'YesNo') -ne 'Yes') {
+      Say '沒有存檔（原本的總表沒有改動）。'; return
+    }
     $d = New-Object System.Windows.Forms.SaveFileDialog
     $d.Title = '另存新的總表'; $d.Filter = 'Excel 檔案|*' + [IO.Path]::GetExtension($Master)
     $d.InitialDirectory = Split-Path $Master

@@ -90,7 +90,7 @@ try {
   $vals = @{}; foreach ($d in $dimDefs) { $vals[$d[2]] = New-Object 'System.Collections.Generic.List[object]' }
   function AddDim($h, $v) { if (-not $vals[$h].Contains($v)) { $vals[$h].Add($v) } }
   foreach ($r in $sales) { AddDim '代號+客戶' ($r[18] + $r[19]); AddDim '商品代號' $r[3]; AddDim '訂單年份' ([double]$r[0].Substring(0, 3)); AddDim '訂單年月' $r[0].Substring(0, 5); AddDim '訂單月份' $r[0].Substring(3, 2); AddDim '區域' (Region $r[18]); AddDim '顏色代號' $r[4]; AddDim '商品代碼(簡化)' ($r[3] -split '[-/]')[0]; AddDim '商品類別' $r[2] }
-  foreach ($r in $rets) { AddDim '代號+客戶' ($r[17] + $r[18]); AddDim '商品代號' $r[4] }
+  AddDim '代號+客戶' 'X999已不存在'
   foreach ($d in $dimDefs) {
     $col = $ws.Range("$($d[0])1").Column; $list = $vals[$d[2]]
     $ws.Cells.Item(1, $col).Value2 = $d[2]
@@ -123,7 +123,11 @@ try {
   $byOrd = @{}; foreach ($r in $sales) { if (-not $byOrd[$r[0]]) { $byOrd[$r[0]] = @() }; $byOrd[$r[0]] += , $r }
   $newSales = @()
   foreach ($r in $byOrd['1140800006']) { $x = $r.Clone(); $x[11] = '1'; $x[21] = '12'; if ($null -eq $x[20]) { $x[20] = 0.0 }; $newSales += , $x }   # 重複（型態不同、空白變 0 也算一樣）
-  $i = 0; foreach ($r in $byOrd['1140800005']) { $x = $r.Clone(); if ($i -eq 0) { $x[10] = $x[10] + 1 }; $newSales += , $x; $i++ }     # 內容不一樣
+  $i = 0; foreach ($r in $byOrd['1140800005']) { $x = $r.Clone(); if ($i -eq 0) { $x[10] = $x[10] + 1 }; $newSales += , $x; $i++ }     # 數量不同 → 改用新資料
+  foreach ($r in $byOrd['1140800004']) { $x = $r.Clone(); $x[21] = 13.0; $newSales += , $x }                                    # 只有業務員不同 → 保留原本的
+  $i = 0; foreach ($r in $byOrd['1140800002']) { $x = $r.Clone(); $x[21] = 13.0; if ($i -eq 1) { $x[8] = $x[8] + 10 }; $newSales += , $x; $i++ }   # 售價和業務員都不同 → 用新資料、業務員保留原本的
+  foreach ($r in $byOrd['1140700004']) { $newSales += , $r.Clone() }; $newSales += , (SalesRow '1140700004' 3 'C300' '02' '01' 150 4 $custs[3] $null)   # 多一列
+  $i = 0; foreach ($r in $byOrd['1140700005']) { if ($i -lt 2) { $newSales += , $r.Clone() }; $i++ }                                # 少一列
   $newCust = @('9Z09', '新客戶')
   foreach ($o in 4, 3, 2, 1) {                                                                                                         # 新的 115/09 單（檔案裡順序倒過來）
     if ($o -eq 3) { $newSales += , (SalesRow '1140900003' 1 'D400-1' '05' '03' 200 2 $newCust 400.0) }
@@ -134,7 +138,7 @@ try {
   $wbS = $xl.Workbooks.Add(); $s1 = $wbS.Worksheets.Item(1); $s1.Name = 'JMSSAL'
   $SALH = @('DELIVNO', 'DELIVORD', 'CODE', 'STYLE', 'COLO', 'UNIT_NM', 'TRAN_RATE', 'PRICE', 'OUTPRICE', 'PRC', 'OUTQTY', 'UNIT', 'SALEGET', 'RECEIVE', 'CUT', 'TOTBKPAY', 'PAY', 'BUY', 'ID', 'SNAME', 'AMOUNT', 'EMPNO', 'DELIVDATE')
   Put $s1 1 (, $SALH)
-  $tmp = @(); foreach ($r in $newSales) { $x = @($r + @('1140901')); $x[11] = '1'; $x[21] = '12'; if ($null -eq $x[20]) { $x[20] = 0.0 }; $tmp += , $x }
+  $tmp = @(); foreach ($r in $newSales) { $x = @($r + @('1140901')); $x[11] = '1'; $x[21] = ([double]$x[21]).ToString($INV); if ($null -eq $x[20]) { $x[20] = 0.0 }; $tmp += , $x }
   Put $s1 2 $tmp
   $SAL = Join-Path $FX 'JMSSAL.xlsx'; $wbS.SaveAs($SAL, 51); $wbS.Close($false)
 } finally { $xl.Quit(); [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($xl); $xl = $null; [GC]::Collect(); [GC]::WaitForPendingFinalizers() }
@@ -192,7 +196,7 @@ try {
   ok ($xl.Calculation -eq -4105) '計算模式維持「自動」'
   $ws = $wb.Worksheets.Item('原始進貨表')
   $last = Last-Row $ws 1
-  ok ($last - 1 -eq $sales.Count + $expSalesAdd) "進貨筆數：$($sales.Count) + $expSalesAdd = $($last - 1)（重複和內容不一樣的單沒有加入）"
+  ok ($last - 1 -eq $sales.Count + $expSalesAdd) "進貨筆數：$($sales.Count) + $expSalesAdd = $($last - 1)（重複的沒加入；多一列、少一列的單照新資料）"
   $v = $ws.Range("A1:AE$last").Value2
   $prev = ''; $allText = $true; $isSorted = $true
   for ($i = 2; $i -le $last; $i++) { $a = $v[$i, 1]; if (-not ($a -is [string])) { $allText = $false }; if ([string]::CompareOrdinal([string]$a, $prev) -lt 0) { $isSorted = $false }; $prev = [string]$a }
@@ -204,7 +208,14 @@ try {
   ok ($nr -gt 0 -and $v[$nr, 23] -eq '9Z09新客戶' -and $v[$nr, 30] -eq '其他地區' -and $v[$nr, 31] -eq 'D400' -and $v[$nr, 24] -eq 2 -and $v[$nr, 27] -eq '11409') '新資料的 W～AE 公式有補上、算出來正確'
   ok ($v[$nr, 12] -is [double] -and $v[$nr, 22] -is [double]) '單位(數字)、業務員照總表存成數字'
   ok ($ws.Cells.Item($nr, 23).HasFormula -and $ws.Cells.Item($late[0], 31).HasFormula) 'W、AE 欄是公式'
-  $lo = $ws.ListObjects.Item('表格1'); ok ($lo.Range.Rows.Count -ge $last) '新資料在表格1 範圍內'
+  $lo = $ws.ListObjects.Item('表格1'); ok ($lo.Range.Rows.Count -eq $last) "表格1 剛好到最後一筆資料（第 $last 列），下面的空白列已縮掉"
+  ok (-not $ws.Cells.Item($last + 1, 31).HasFormula -and -not $ws.Cells.Item($last + 1, 23).HasFormula -and (Last-Row $ws 31) -eq $last) '資料下面沒有殘留的 AE 公式'
+  function OrdRows($k) { $r = @(); for ($i = 2; $i -le $last; $i++) { if ($v[$i, 1] -eq $k) { $r += $i } }; , $r }
+  $o5 = OrdRows '1140800005'; ok ($o5.Count -eq 3 -and $v[$o5[0], 11] -eq $byOrd['1140800005'][0][10] + 1) '內容不一樣（數量）→ 改用新資料'
+  $o4 = OrdRows '1140800004'; ok ($o4.Count -eq 2 -and @($o4 | Where-Object { $v[$_, 22] -ne 12 }).Count -eq 0) '只有業務員不同 → 保留原本的業務員'
+  $o2 = OrdRows '1140800002'; ok ($o2.Count -eq 3 -and $v[$o2[1], 9] -eq $byOrd['1140800002'][1][8] + 10 -and @($o2 | Where-Object { $v[$_, 22] -ne 12 }).Count -eq 0) '售價和業務員都不同 → 售價用新的、業務員保留原本的'
+  $o74 = OrdRows '1140700004'; ok ($o74.Count -eq 3 -and $o74[2] -eq $o74[0] + 2 -and $v[$o74[2], 2] -eq '03') '新資料多一列 → 整張照新資料，排在一起'
+  $o75 = OrdRows '1140700005'; ok ($o75.Count -eq 2) '新資料少一列 → 多的舊列刪掉'
   # UNIQUE 清單與旁邊的公式
   foreach ($chk in @(@('AK', 'AL', 'AP', '9Z09新客戶', 'AN'), @('AT', 'AU', 'AX', 'D400-1', 'AW'), @('BM', 'BN', 'BR', 'D400', 'BP'))) {
     $c0 = $ws.Range("$($chk[0])1"); $sp = $c0.SpillingToRange; $e = $sp.Row + $sp.Rows.Count - 1
@@ -215,8 +226,13 @@ try {
   }
   ok ($ws.Range('AR2').Value2 -eq 11410) "AR2 自動填成 11410（資料到 114/09）"
   $dims = @{}; foreach ($t in $ws.ListObjects) { if ($t.Name -ne '表格1') { $dims[[string]$t.Range.Cells.Item(1, 1).Value2] = @($t.DataBodyRange.Value2) } }
-  ok ($dims['代號+客戶'] -contains '9Z09新客戶' -and $dims['代號+客戶'] -contains '2E05戊店') '對照表 BB 加入新客戶（含只在退貨出現的客戶）'
-  ok ($dims['商品代號'] -contains 'D400-1' -and $dims['商品代碼(簡化)'] -contains 'D400' -and $dims['商品類別'] -contains '05' -and $dims['區域'] -contains '其他地區') '對照表 BC、BI、BJ、BG 加入新的值'
+  function SpillVals($addr) { $sp = $ws.Range($addr).SpillingToRange; $x = @($sp.Value2); , @($x[1..($x.Count - 1)] | Where-Object { $null -ne $_ -and $_ -ne '' -and -not ($_ -is [double] -and $_ -eq 0) }) }
+  foreach ($pair in @(@('代號+客戶', 'AK1'), @('商品代號', 'AT1'), @('商品代碼(簡化)', 'BM1'))) {
+    $want = SpillVals $pair[1]; $got = $dims[$pair[0]]
+    ok ($want.Count -eq $got.Count -and ($want -join '|') -ceq ($got -join '|')) "對照表「$($pair[0])」和 $($pair[1]) 的清單一模一樣（$($got.Count) 個）"
+  }
+  ok ($dims['代號+客戶'] -contains '9Z09新客戶' -and $dims['代號+客戶'] -notcontains '2E05戊店' -and $dims['代號+客戶'] -notcontains 'X999已不存在') '對照表 BB：有新客戶；只在退貨的客戶、AK 沒有的舊值都不在'
+  ok ($dims['商品類別'] -contains '05' -and $dims['區域'] -contains '其他地區' -and $dims['顏色代號'] -contains '03') '對照表 BJ、BG、BH 加入進貨新的值'
   ok ($dims['訂單年月'] -contains '11409' -and $dims['訂單年月'].Count -eq $dimCount['訂單年月'] + 1) '對照表 BE 加入 11409，沒有重複'
   ok ($dims['訂單年份'].Count -eq $dimCount['訂單年份'] -and $dims['訂單年份'][0] -is [double]) '對照表 BD（數字）沒有多出重複的年份'
   # 退貨
@@ -238,7 +254,9 @@ try {
 
 $rep = Get-ChildItem $FX -Filter '更新報告_*.txt' | Sort-Object LastWriteTime | Select-Object -Last 1
 $rt = [IO.File]::ReadAllText($rep.FullName)
-ok ($rt -match '1140800005' -and $rt -match '只在新資料') "報告列出內容不一樣的單號：$($rep.Name)"
+ok ($rt.Contains('只有業務員不同、保留總表原本的：1 張單') -and $rt.Contains('改用新資料（業務員保留原本的）：4 張單')) "報告：只有業務員不同 1 張、改用新資料 4 張：$($rep.Name)"
+ok ($rt.Contains('單號 1140800005：不同的欄位：數量') -and $rt.Contains('單號 1140800002：不同的欄位：售價') -and $rt.Contains('單號 1140700004：筆數不同')) '報告寫出每張單哪些欄位不同'
+ok ($rt.Contains('空白列和公式已清掉') -and $rt.Contains('和 AK 欄的清單一樣')) '報告寫出清掉空白列、對照表改成和 AK 一樣'
 
 # 同樣的檔案再跑一次 → 什麼都不會加
 Start-Sleep -Seconds 61   # 報告檔名到分鐘，等一分鐘避免同名
@@ -246,7 +264,7 @@ $OUT2 = Join-Path $FX 'out2.xlsx'
 ok ((RunTool $OUT $OUT2) -eq 0) '用新總表再跑一次同樣的檔案'
 $rep2 = Get-ChildItem $FX -Filter '更新報告_*.txt' | Sort-Object LastWriteTime | Select-Object -Last 1
 $rt2 = [IO.File]::ReadAllText($rep2.FullName)
-ok (([regex]::Matches($rt2, '新增 0 張單、0 筆')).Count -eq 2) '再跑一次：進貨、退貨都是新增 0 筆（不會重複）'
+ok (([regex]::Matches($rt2, '新增 0 張單、0 筆')).Count -eq 2 -and ([regex]::Matches($rt2, '改用新資料（業務員保留原本的）：0 張單')).Count -eq 2) '再跑一次：進貨、退貨都是新增 0 筆、改用新資料 0 張（不會重複）'
 
 # 有開啟密碼的總表：另存後仍有密碼
 $OUTPW = Join-Path $FX 'out_pw.xlsx'
