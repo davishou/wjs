@@ -31,6 +31,11 @@ js/chart.js           圖表
 sw.js                 離線快取
 ```
 
+### 總表更新工具（excel-tool/）
+另一套給使用者電腦用的工具：雙擊 `更新總表.cmd`，用 Excel 自動化（PowerShell COM）把 JMSSAL（.DBF/.xlsx）接到「原始進貨表」A～V、JMSSBK 接到「原始退貨表」A～U，
+以整張單號比對重複（內容不同的不加入、寫進報告）、依單號排序、補 W～AE／V～AB 公式、補 AK/AT/BM 的 UNIQUE 清單旁的公式、更新 BB～BJ 對照表、AR2 填下個月，最後另存新檔。
+說明在 `excel-tool/README.md`。`.ps1` 必須存成 UTF-8 含 BOM。測試：`powershell -NoProfile -ExecutionPolicy Bypass -File tests\excel_tool_test.ps1`（需要 Excel）。
+
 ### 資料流程
 - **電腦匯入 Excel**：worker 讀檔頭；若是加密檔（D0 CF 11 E0）就用 `OfficeCrypto.decryptXlsx` 在記憶體內解密成 Uint8Array（不建立 Blob，避免被暫存到硬碟），讀完 `fill(0)` 清空。→ `Dataset.serialize` → `Vault.save` 加密存進 IndexedDB。
 - **開啟密碼（Vault）**：IndexedDB 資料庫 `dv-analytics`、store `kv`、key `vault` = `{v, iter, salt, iv, ct}`。AES-256-GCM，PBKDF2-SHA256 60 萬次，內容先 gzip。金鑰只放記憶體（`S.vault`），重新整理就上鎖。舊版的未加密 key `data` 會在第一次開啟時轉成加密並刪除。

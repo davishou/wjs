@@ -9,3 +9,6 @@ data/
 .DS_Store
 tests/fixtures/
 __pycache__/
+*.dbf
+*.DBF
+更新報告_*.txt
