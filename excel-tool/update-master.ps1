@@ -6,11 +6,13 @@
 param(
   [string]$Master, [string]$Sales, [string]$Returns, [string]$Out,
   [string]$MasterPassword,   # 只給自動測試用；平常由 Excel 自己跳出密碼視窗
-  [switch]$NoUI, [switch]$NoRefresh
+  [switch]$NoUI, [switch]$NoRefresh,
+  [string]$FindIn, [string]$SmokeShot   # 只給自動測試用：列出會自動選到的檔案／把確認視窗存成圖片
 )
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
 Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.Application]::EnableVisualStyles()
 $INV = [Globalization.CultureInfo]::InvariantCulture
 $xlUp = -4162; $xlManual = -4135
 
@@ -417,6 +419,77 @@ function Show-Msg($owner, [string]$text, [string]$icon = 'Information', [string]
   [System.Windows.Forms.MessageBox]::Show($owner, $text, '總表更新工具', $buttons, $icon)
 }
 
+# ---------- 自動找檔案：記住上次的資料夾，挑出最新的總表、JMSSAL、JMSSBK ----------
+$SETTINGS = Join-Path $env:LOCALAPPDATA '總表更新工具\settings.json'   # 只記資料夾位置，不記任何資料
+function Load-Folder { try { $f = (Get-Content -LiteralPath $SETTINGS -Raw -Encoding UTF8 | ConvertFrom-Json).Folder; if ($f -and (Test-Path -LiteralPath $f)) { $f } } catch {} }
+function Save-Folder([string]$f) { try { New-Item -ItemType Directory -Force (Split-Path $SETTINGS) | Out-Null; (@{ Folder = $f } | ConvertTo-Json) | Set-Content -LiteralPath $SETTINGS -Encoding UTF8 } catch {} }
+# 最新的總表：檔名日期最新的優先；同一天的，檔名剛好是「總表_日期」的優先（不要挑到 cd、測試版這類副本）；再比修改時間
+function Find-Master([string]$dir) {
+  Get-ChildItem -LiteralPath $dir -File | Where-Object { $_.Name -match '總表' -and $_.Extension -match '^\.xls[xm]$' -and $_.Name -notlike '~$*' } |
+    Sort-Object @{ e = { if ($_.BaseName -match '\d{4}-\d{2}-\d{2}') { $matches[0] } else { '' } }; Descending = $true },
+                @{ e = { $_.BaseName -match '總表_\d{4}-\d{2}-\d{2}$' }; Descending = $true },
+                @{ e = 'LastWriteTime'; Descending = $true } | Select-Object -First 1
+}
+# 最新的 JMSSAL／JMSSBK（.DBF 或另存的 Excel，挑修改時間最新的）
+function Find-Source([string]$dir, [string]$name) {
+  Get-ChildItem -LiteralPath $dir -File | Where-Object { $_.BaseName -ieq $name -and $_.Extension -match '^\.(dbf|xlsx|xls)$' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+}
+
+# 確認視窗：列出要用的三個檔案，可以更換或不使用。$shot：測試用，存成圖片後自動關閉
+function Confirm-Files($state, [string]$shot) {
+  $f = New-Object System.Windows.Forms.Form
+  $f.Text = '總表更新工具'; $f.StartPosition = 'CenterScreen'; $f.TopMost = $true
+  $f.Font = New-Object System.Drawing.Font('Microsoft JhengHei UI', 10)
+  $f.FormBorderStyle = 'FixedDialog'; $f.MaximizeBox = $false; $f.MinimizeBox = $false
+  $f.ClientSize = New-Object System.Drawing.Size(740, 330)
+  $head = New-Object System.Windows.Forms.Label; $head.SetBounds(18, 14, 705, 48)
+  $f.Controls.Add($head)
+  $vals = @{}
+  $rows = @(@('master', '總表'), @('sales', '進貨 JMSSAL'), @('returns', '退貨 JMSSBK'))
+  $y = 74
+  foreach ($r in $rows) {
+    $k = $r[0]
+    $cap = New-Object System.Windows.Forms.Label; $cap.SetBounds(18, $y + 4, 120, 24); $cap.Text = $r[1]; $cap.Font = New-Object System.Drawing.Font('Microsoft JhengHei UI', 10, [System.Drawing.FontStyle]::Bold)
+    $val = New-Object System.Windows.Forms.Label; $val.SetBounds(140, $y + 4, 430, 50); $vals[$k] = $val
+    $chg = New-Object System.Windows.Forms.Button; $chg.SetBounds(578, $y, 72, 32); $chg.Text = '更換…'; $chg.Tag = $k
+    $f.Controls.AddRange(@($cap, $val, $chg))
+    if ($k -ne 'master') { $no = New-Object System.Windows.Forms.Button; $no.SetBounds(656, $y, 72, 32); $no.Text = '不使用'; $no.Tag = $k; $f.Controls.Add($no) }
+    $y += 64
+  }
+  $ok = New-Object System.Windows.Forms.Button; $ok.SetBounds(498, 278, 120, 38); $ok.Text = '開始更新'; $ok.DialogResult = 'OK'
+  $cancel = New-Object System.Windows.Forms.Button; $cancel.SetBounds(628, 278, 100, 38); $cancel.Text = '取消'; $cancel.DialogResult = 'Cancel'
+  $f.Controls.AddRange(@($ok, $cancel)); $f.AcceptButton = $ok; $f.CancelButton = $cancel
+  $refresh = {
+    $head.Text = "已經自動找出資料夾裡最新的檔案，請確認。不對的話按「更換」。`n資料夾：$($state.Dir)"
+    $mt = if ($state.master) { (Get-Item -LiteralPath $state.master).LastWriteTime } else { $null }
+    foreach ($k in 'master', 'sales', 'returns') {
+      $p = $state[$k]
+      if (-not $p) { $vals[$k].Text = $(if ($k -eq 'master') { '（沒有找到，請按「更換」選擇總表）' } else { '（這次不使用）' }); $vals[$k].ForeColor = [System.Drawing.Color]::Gray; continue }
+      $fi = Get-Item -LiteralPath $p
+      $note = if ($k -ne 'master' -and $mt -and $fi.LastWriteTime -lt $mt) { '　※ 比總表還舊，可能已經加過了（加過的會自動跳過）' } else { '' }
+      $vals[$k].Text = "$($fi.Name)`n修改時間 $($fi.LastWriteTime.ToString('yyyy/MM/dd HH:mm'))$note"
+      $vals[$k].ForeColor = $(if ($note) { [System.Drawing.Color]::DarkOrange } else { [System.Drawing.SystemColors]::ControlText })
+    }
+    $ok.Enabled = [bool]$state.master -and ([bool]$state.sales -or [bool]$state.returns)
+  }.GetNewClosure()
+  # 按鈕：更換、不使用
+  foreach ($c in @($f.Controls)) {
+    if ($c -isnot [System.Windows.Forms.Button] -or -not $c.Tag) { continue }
+    $k = [string]$c.Tag
+    if ($c.Text -eq '不使用') { $c.Add_Click({ $state[$k] = $null; & $refresh }.GetNewClosure()); continue }
+    $filter = if ($k -eq 'master') { 'Excel 檔案|*.xlsx;*.xlsm' } else { '進貨／退貨資料|*.dbf;*.xlsx;*.xls|所有檔案|*.*' }
+    $c.Add_Click({
+        $d = New-Object System.Windows.Forms.OpenFileDialog; $d.Filter = $filter; $d.InitialDirectory = $state.Dir
+        if ($d.ShowDialog($f) -eq 'OK') { $state[$k] = $d.FileName; if ($k -eq 'master') { $state.Dir = Split-Path $d.FileName } ; & $refresh }
+      }.GetNewClosure())
+  }
+  & $refresh
+  if ($shot) {
+    $f.Add_Shown({ $bmp = New-Object System.Drawing.Bitmap($f.Width, $f.Height); $f.DrawToBitmap($bmp, (New-Object System.Drawing.Rectangle(0, 0, $f.Width, $f.Height))); $bmp.Save($shot); $f.DialogResult = 'Cancel' }.GetNewClosure())
+  }
+  return ($f.ShowDialog() -eq 'OK')
+}
+
 # =====================================================================
 $owner = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true }
 $xl = $null; $wb = $null; $exit = 0
@@ -429,12 +502,25 @@ try {
   Write-Host '・公式自動往下補，AR2 自動填成最新資料的下一個月'
   Write-Host '・原本的總表不會被修改，最後會另存成新檔'
   Write-Host ''
+  if ($FindIn) {
+    # 測試用：只列出會自動選到的檔案（加 -SmokeShot 會把確認視窗存成圖片）
+    $state = @{ Dir = $FindIn; master = (Find-Master $FindIn).FullName; sales = (Find-Source $FindIn 'JMSSAL').FullName; returns = (Find-Source $FindIn 'JMSSBK').FullName }
+    Write-Output ('FOUND master=' + (Split-Path -Leaf "$($state.master)") + ' sales=' + (Split-Path -Leaf "$($state.sales)") + ' returns=' + (Split-Path -Leaf "$($state.returns)"))
+    if ($SmokeShot) { [void](Confirm-Files $state $SmokeShot) }
+    return
+  }
   if (-not $NoUI) {
-    $Master = Pick-Open $owner '1/3 選擇總表 Excel' 'Excel 檔案|*.xlsx;*.xlsm' ([Environment]::GetFolderPath('Desktop'))
-    if (-not $Master) { Say '沒有選總表，結束。'; return }
-    $dir = Split-Path $Master
-    $Sales = Pick-Open $owner '2/3 選擇進貨資料 JMSSAL（這次沒有就按「取消」）' '進貨資料|*.dbf;*.xlsx;*.xls|所有檔案|*.*' $dir
-    $Returns = Pick-Open $owner '3/3 選擇退貨資料 JMSSBK（這次沒有就按「取消」）' '退貨資料|*.dbf;*.xlsx;*.xls|所有檔案|*.*' $dir
+    # 第一次用：選一次總表，之後記住它所在的資料夾
+    $dir = Load-Folder; $first = $null
+    if (-not $dir) {
+      $first = Pick-Open $owner '選擇總表 Excel（之後會記住這個資料夾，自動找最新的檔案）' 'Excel 檔案|*.xlsx;*.xlsm' ([Environment]::GetFolderPath('Desktop'))
+      if (-not $first) { Say '沒有選總表，結束。'; return }
+      $dir = Split-Path $first
+    }
+    $state = @{ Dir = $dir; master = $(if ($first) { $first } else { (Find-Master $dir).FullName }); sales = (Find-Source $dir 'JMSSAL').FullName; returns = (Find-Source $dir 'JMSSBK').FullName }
+    if (-not (Confirm-Files $state)) { Say '取消，結束。'; return }
+    $Master = $state.master; $Sales = $state.sales; $Returns = $state.returns
+    Save-Folder (Split-Path $Master)
   }
   if (-not $Sales -and -not $Returns) { Say '沒有選任何新資料，結束。'; return }
   foreach ($p in @($Master, $Sales, $Returns)) { if ($p -and -not (Test-Path -LiteralPath $p)) { throw "找不到檔案：$p" } }

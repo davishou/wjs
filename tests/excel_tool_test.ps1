@@ -272,4 +272,18 @@ ok ((RunTool $MASTER_PW $OUTPW @('-MasterPassword', 'pw1234', '-NoRefresh')) -eq
 $h = [IO.File]::ReadAllBytes($OUTPW)[0..3]
 ok ($h[0] -eq 0xD0 -and $h[1] -eq 0xCF -and $h[2] -eq 0x11 -and $h[3] -eq 0xE0) '另存的新總表仍然有開啟密碼'
 
+# 自動找檔案：檔名日期最新的總表優先（不要挑到 cd 副本、Excel 暫存檔、其他 Excel）、最新的 JMSSAL／JMSSBK
+$FD = Join-Path $FX 'find'; New-Item -ItemType Directory -Force $FD | Out-Null
+$files = [ordered]@{ '00_總表_2026-08-31.xlsx' = '2026-09-03'; '00_總表_2026-08-31cd.xlsx' = '2026-10-21'; '00_總表_2026-10-22.xlsx' = '2026-10-22 09:00'; '~$00_總表_2026-11-01.xlsx' = '2026-11-01'
+  'JMSSAL.xlsx' = '2026-10-21'; 'JMSSAL.DBF' = '2026-10-23'; 'JMSSBK.DBF' = '2026-10-20'; '114年退貨率.xlsx' = '2026-10-30' }
+foreach ($k in $files.Keys) { $f = Join-Path $FD $k; [IO.File]::WriteAllBytes($f, [byte[]]@()); (Get-Item -LiteralPath $f).LastWriteTime = [datetime]$files[$k] }
+function FindOut($shot) { $a = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-File', $TOOL, '-FindIn', $FD); if ($shot) { $a += @('-SmokeShot', $shot) }; [string](& powershell @a | Select-String 'FOUND') }
+$shot = Join-Path $FD 'confirm.png'
+$r = FindOut $shot
+ok ($r -match 'master=00_總表_2026-10-22\.xlsx sales=JMSSAL\.DBF returns=JMSSBK\.DBF') "自動找檔案：$r"
+ok (Test-Path $shot) "確認視窗可以正常顯示（截圖：$shot）"
+Remove-Item -LiteralPath (Join-Path $FD '00_總表_2026-10-22.xlsx')
+$r = FindOut $null
+ok ($r -match 'master=00_總表_2026-08-31\.xlsx ') "同一天的總表，挑「總表_日期」那份、不挑 cd 副本：$r"
+
 Write-Host '全部通過'
