@@ -32,6 +32,8 @@ function RetRow($ord, $sku, $cat, $color, $price, $qty, $c) {
   # 退貨單號 SERIES DELIVORD 商品類別 商品代號 顏色 單位 TRAN_RATE 單價 售價 數量 單位(數字) 退貨金額 RECEIVE TOTBKPAY PAY HOLD 客戶代號 客戶名 退貨總金額 業務員
   , @($ord, $null, '01', $cat, $sku, $color, '雙', 1.0, [double]($price * 0.6), [double]$price, [double]$qty, 1.0, [double]($price * $qty), 0.0, 0.0, $false, $false, $c[0], $c[1], [double]($price * $qty), 12.0)
 }
+# 實際出貨／退貨日期（原始資料最後一欄 DELIVDATE）：一般是單號月份的 15 日；晚到的單故意放在下個月，檢查排序後日期仍跟著那一列
+function DateOf([string]$ord) { switch ($ord) { '1140300099' { '1140402' } '1140290099' { '1140303' } default { $ord.Substring(0, 5) + '15' } } }
 function OrderRows($ym, $o, $m) {
   $c = $custs[($o + $m) % 4]; $nl = 1 + ($o % 3); $rows = @()
   for ($l = 1; $l -le $nl; $l++) {
@@ -138,7 +140,7 @@ try {
   $wbS = $xl.Workbooks.Add(); $s1 = $wbS.Worksheets.Item(1); $s1.Name = 'JMSSAL'
   $SALH = @('DELIVNO', 'DELIVORD', 'CODE', 'STYLE', 'COLO', 'UNIT_NM', 'TRAN_RATE', 'PRICE', 'OUTPRICE', 'PRC', 'OUTQTY', 'UNIT', 'SALEGET', 'RECEIVE', 'CUT', 'TOTBKPAY', 'PAY', 'BUY', 'ID', 'SNAME', 'AMOUNT', 'EMPNO', 'DELIVDATE')
   Put $s1 1 (, $SALH)
-  $tmp = @(); foreach ($r in $newSales) { $x = @($r + @('1140901')); $x[11] = '1'; $x[21] = ([double]$x[21]).ToString($INV); if ($null -eq $x[20]) { $x[20] = 0.0 }; $tmp += , $x }
+  $tmp = @(); foreach ($r in $newSales) { $x = @($r + @((DateOf $r[0]))); $x[11] = '1'; $x[21] = ([double]$x[21]).ToString($INV); if ($null -eq $x[20]) { $x[20] = 0.0 }; $tmp += , $x }
   Put $s1 2 $tmp
   $SAL = Join-Path $FX 'JMSSAL.xlsx'; $wbS.SaveAs($SAL, 51); $wbS.Close($false)
 } finally { $xl.Quit(); [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($xl); $xl = $null; [GC]::Collect(); [GC]::WaitForPendingFinalizers() }
@@ -161,7 +163,7 @@ foreach ($f in $FIELDS) { $nm = New-Object byte[] 11; [Text.Encoding]::ASCII.Get
 $bw.Write([byte]0x0D)
 foreach ($r in $dbfRows) {
   $bw.Write([byte][char]' ')
-  $vals = @($r + @('1140901'))
+  $vals = @($r + @((DateOf $r[0])))
   for ($k = 0; $k -lt $FIELDS.Count; $k++) {
     $f = $FIELDS[$k]; $v = $vals[$k]
     if ($k -eq 11) { $v = '1' }; if ($k -eq 20) { $v = '12' }
@@ -216,6 +218,15 @@ try {
   $o2 = OrdRows '1140800002'; ok ($o2.Count -eq 3 -and $v[$o2[1], 9] -eq $byOrd['1140800002'][1][8] + 10 -and @($o2 | Where-Object { $v[$_, 22] -ne 12 }).Count -eq 0) '售價和業務員都不同 → 售價用新的、業務員保留原本的'
   $o74 = OrdRows '1140700004'; ok ($o74.Count -eq 3 -and $o74[2] -eq $o74[0] + 2 -and $v[$o74[2], 2] -eq '03') '新資料多一列 → 整張照新資料，排在一起'
   $o75 = OrdRows '1140700005'; ok ($o75.Count -eq 2) '新資料少一列 → 多的舊列刪掉'
+  # 實際出貨日期（AF 欄）
+  ok ([string]$ws.Range('AF1').Value2 -eq '實際出貨日期' -and $lo.Range.Columns.Count -eq 32) '新增 AF 欄「實際出貨日期」，表格1 加寬到 AF'
+  $dv = $ws.Range("AF1:AF$last").Value2
+  ok ($dv[$late[0], 1] -eq '1140402' -and $dv[$late[1], 1] -eq '1140402') '晚到的 114/03 單重新排序後，實際日期（114/04/02）跟著那一列'
+  ok ($dv[$nr, 1] -eq '1140915' -and $dv[$nr, 1] -is [string]) '新加入的單有實際日期，存成文字'
+  $o6 = OrdRows '1140800006'; ok ($o6.Count -gt 0 -and @($o6 | Where-Object { $dv[$_, 1] -ne '1140815' }).Count -eq 0) '重複跳過的單（總表原有）也補上實際日期'
+  ok (@($o5 + $o2 + $o74 + $o75 | Where-Object { $dv[$_, 1] -notlike '11408*' -and $dv[$_, 1] -notlike '11407*' }).Count -eq 0) '改用新資料、多一列、少一列的單，實際日期都正確'
+  $o11 = OrdRows '1140100001'; ok ($o11.Count -gt 0 -and @($o11 | Where-Object { $null -ne $dv[$_, 1] }).Count -eq 0) '新資料裡沒有的單，實際日期留空'
+  ok ($null -eq $ws.Range("AF$($last + 1)").Value2) '資料下面沒有殘留的日期'
   # UNIQUE 清單與旁邊的公式
   foreach ($chk in @(@('AK', 'AL', 'AP', '9Z09新客戶', 'AN'), @('AT', 'AU', 'AX', 'D400-1', 'AW'), @('BM', 'BN', 'BR', 'D400', 'BP'))) {
     $c0 = $ws.Range("$($chk[0])1"); $sp = $c0.SpillingToRange; $e = $sp.Row + $sp.Rows.Count - 1
@@ -245,6 +256,12 @@ try {
   ok ($lr -gt 0 -and ([string]$rv[($lr - 1), 1]).StartsWith('11402') -and ([string]$rv[($lr + 1), 1]).StartsWith('11403') -and $rv[$lr, 23] -eq '11402' -and $wr.Cells.Item($lr, 22).HasFormula) '晚到的 114/02 退貨插回 2 月，V～AB 公式正確'
   $dr = 0; for ($i = 2; $i -le $rl; $i++) { if ($rv[$i, 1] -eq '1140990001') { $dr = $i } }
   ok ($dr -gt 0 -and $rv[$dr, 19] -eq '新客戶' -and $rv[$dr, 5] -eq 'D400-1') 'DBF 的中文（Big5）和文字欄位讀取正確，沒有多餘空白'
+  # 實際退貨日期（AC 欄，退貨表是一般範圍）
+  ok ([string]$wr.Range('AC1').Value2 -eq '實際退貨日期') '新增 AC 欄「實際退貨日期」'
+  $rd = $wr.Range("AC1:AC$rl").Value2
+  ok ($rd[$lr, 1] -eq '1140303' -and $rd[$dr, 1] -eq '1140915') '晚到的 114/02 退貨排序後實際日期（114/03/03）正確；新的退貨有日期'
+  $dup = 0; for ($i = 2; $i -le $rl; $i++) { if ($rv[$i, 1] -eq '1140890002') { $dup = $i } }
+  ok ($dup -gt 0 -and $rd[$dup, 1] -eq '1140815') '重複的退貨單也補上實際日期'
   # 樞紐
   $pt = $wb.Worksheets.Item('進貨樞紐').PivotTables('PT1')
   $items = @(); foreach ($it in $pt.PivotFields('訂單年月').PivotItems()) { $items += [string]$it.Name }
@@ -257,6 +274,7 @@ $rt = [IO.File]::ReadAllText($rep.FullName)
 ok ($rt.Contains('只有業務員不同、保留總表原本的：1 張單') -and $rt.Contains('改用新資料（業務員保留原本的）：4 張單')) "報告：只有業務員不同 1 張、改用新資料 4 張：$($rep.Name)"
 ok ($rt.Contains('單號 1140800005：不同的欄位：數量') -and $rt.Contains('單號 1140800002：不同的欄位：售價') -and $rt.Contains('單號 1140700004：筆數不同')) '報告寫出每張單哪些欄位不同'
 ok ($rt.Contains('空白列和公式已清掉') -and $rt.Contains('和 AK 欄的清單一樣')) '報告寫出清掉空白列、對照表改成和 AK 一樣'
+ok ($rt.Contains('新增 AF 欄「實際出貨日期」') -and $rt.Contains('新增 AC 欄「實際退貨日期」') -and $rt.Contains('實際日期（AF 欄）')) '報告寫出新增的實際日期欄與筆數'
 
 # 同樣的檔案再跑一次 → 什麼都不會加
 Start-Sleep -Seconds 61   # 報告檔名到分鐘，等一分鐘避免同名
@@ -265,6 +283,7 @@ ok ((RunTool $OUT $OUT2) -eq 0) '用新總表再跑一次同樣的檔案'
 $rep2 = Get-ChildItem $FX -Filter '更新報告_*.txt' | Sort-Object LastWriteTime | Select-Object -Last 1
 $rt2 = [IO.File]::ReadAllText($rep2.FullName)
 ok (([regex]::Matches($rt2, '新增 0 張單、0 筆')).Count -eq 2 -and ([regex]::Matches($rt2, '改用新資料（業務員保留原本的）：0 張單')).Count -eq 2) '再跑一次：進貨、退貨都是新增 0 筆、改用新資料 0 張（不會重複）'
+ok (([regex]::Matches($rt2, '總表原有的單補上 0 筆')).Count -eq 2 -and -not $rt2.Contains('新增 AF 欄')) '再跑一次：實際日期欄沿用、不會重複新增，也沒有要補的日期'
 
 # 有開啟密碼的總表：另存後仍有密碼
 $OUTPW = Join-Path $FX 'out_pw.xlsx'

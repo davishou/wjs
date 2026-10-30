@@ -293,6 +293,20 @@ def make_raw(fx):
     print(f'JMSSAL／JMSSBK（.DBF 與 .xlsx）: {len(sal)} 筆出貨（DBF 另有 1 筆已刪除）、{len(bk)} 筆退貨')
 
 
+
+def make_dated_master(path):
+    """總表更新工具加上實際日期欄之後的總表：中文表頭，原始進貨表最後有「實際出貨日期」、原始退貨表有「實際退貨日期」。內容和 raw_rows() 一樣。"""
+    sal, bk = raw_rows()
+    wb = openpyxl.Workbook(); wb.active.title = '樞紐'
+    s = wb.create_sheet('原始進貨表')
+    s.append(['出貨日期', '商品類別', '商品代號', '顏色代號', '單位', '單價', '售價', '數量', '單位(數字)', '品項總額', '客戶代號', '客戶名', '業務員', '實際出貨日期'])
+    for r in sal: s.append([r['DELIVNO'], r['CODE'], r['STYLE'], r['COLO'], r['UNIT_NM'], r['PRICE'], r['OUTPRICE'], r['OUTQTY'], int(r['UNIT']), r['SALEGET'], r['ID'], r['SNAME'], int(r['EMPNO']), r['DELIVDATE']])
+    t = wb.create_sheet('原始退貨表')
+    t.append(['退貨單號', '商品類別', '商品代號', '顏色代號', '單位', '單價', '售價', '數量', '單位(數字)', '退貨金額', '客戶代號', '客戶名', '業務員', '實際退貨日期'])
+    for r in bk: t.append([r['DELIVNO'], r['CODE'], r['STYLE'], r['COLO'], r['UNIT_NM'], r['PRICE'], r['OUTPRICE'], r['OUTQTY'], int(r['UNIT']), r['SALEGET'], r['ID'], r['SNAME'], int(r['EMPNO']), r['DELIVDATE']])
+    wb.save(path)
+    print(f'{os.path.basename(path)}: 有實際日期欄的總表')
+
 if __name__ == '__main__':
     os.makedirs(FX, exist_ok=True)
     p = lambda n: os.path.join(FX, n)
@@ -301,6 +315,7 @@ if __name__ == '__main__':
     make_month_xlsx(p('month.xlsx'))
     make_class_xlsx(p('class.xlsx'))
     make_raw(FX)
+    make_dated_master(p('master_dated.xlsx'))
     encrypt_agile(p('class.xlsx'), p('class_agile.xlsx'), AGILE_PW)
     encrypt_agile(p('month.xlsx'), p('month_agile.xlsx'), AGILE_PW)
     encrypt_agile(p('plain.xlsx'), p('agile.xlsx'), AGILE_PW)

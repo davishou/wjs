@@ -2,6 +2,7 @@
 # 用 Excel 本身來改，樞紐分析、Power Pivot、表格都不會被破壞；原本的總表不會被修改，結果另存新檔。
 #
 # 一般使用：雙擊「更新總表.cmd」，依序選檔案即可。
+# 原始資料最後一欄的實際日期（DELIVDATE）會寫進總表「實際出貨日期」「實際退貨日期」欄（公式欄右邊），已經在總表的單也會補上。
 # 測試用（不跳視窗）：update-master.ps1 -NoUI -Master 總表.xlsx -Sales JMSSAL.dbf -Returns JMSSBK.dbf -Out 新總表.xlsx
 param(
   [string]$Master, [string]$Sales, [string]$Returns, [string]$Out,
@@ -16,11 +17,11 @@ Add-Type -AssemblyName System.Windows.Forms
 $INV = [Globalization.CultureInfo]::InvariantCulture
 $xlUp = -4162; $xlManual = -4135
 
-# 原始資料的欄位（依位置對應總表 A 欄起；最後的 DELIVDATE 不放進總表）
+# 原始資料的欄位（依位置對應總表 A 欄起）。最後一欄 DELIVDATE（實際出貨／退貨日期）另外寫進總表公式欄右邊的「實際出貨日期」「實際退貨日期」欄
 $KINDS = [ordered]@{
-  sales = @{ Label = '進貨'; Sheet = '原始進貨表'; Key = '出貨單號'; NRaw = 22; Cust = 19; Name = 20; Sku = 4; Color = 5; Cat = 3
+  sales = @{ Label = '進貨'; Sheet = '原始進貨表'; Key = '出貨單號'; NRaw = 22; Cust = 19; Name = 20; Sku = 4; Color = 5; Cat = 3; DateHead = '實際出貨日期'
     Head = @('DELIVNO', 'DELIVORD', 'CODE', 'STYLE', 'COLO', 'UNIT_NM', 'TRAN_RATE', 'PRICE', 'OUTPRICE', 'PRC', 'OUTQTY', 'UNIT', 'SALEGET', 'RECEIVE', 'CUT', 'TOTBKPAY', 'PAY', 'BUY', 'ID', 'SNAME', 'AMOUNT', 'EMPNO') }
-  returns = @{ Label = '退貨'; Sheet = '原始退貨表'; Key = '退貨單號'; NRaw = 21; Cust = 18; Name = 19; Sku = 5; Color = 6; Cat = 4
+  returns = @{ Label = '退貨'; Sheet = '原始退貨表'; Key = '退貨單號'; NRaw = 21; Cust = 18; Name = 19; Sku = 5; Color = 6; Cat = 4; DateHead = '實際退貨日期'
     Head = @('DELIVNO', 'SERIES', 'DELIVORD', 'CODE', 'STYLE', 'COLO', 'UNIT_NM', 'TRAN_RATE', 'PRICE', 'OUTPRICE', 'OUTQTY', 'UNIT', 'SALEGET', 'RECEIVE', 'TOTBKPAY', 'PAY', 'HOLD', 'ID', 'SNAME', 'AMOUNT', 'EMPNO') }
 }
 
@@ -59,6 +60,18 @@ function Region([string]$cust) {
   switch ($c) { { $_ -in '1', '2' } { return '大台北地區' } '3' { return '桃竹苗' } { $_ -in '4', '5' } { return '中部' } { $_ -in '6', '7', '8' } { return '南部' } default { return '其他地區' } }
 }
 function Simplify([string]$s) { $p = $s.Length; foreach ($ch in '-', '/') { $i = $s.IndexOf($ch); if ($i -ge 0 -and $i -lt $p) { $p = $i } }; $s.Substring(0, $p) }
+# 實際日期 → 和原始資料一樣的文字（民國 yyymmdd，例如 1150801）。Excel 開 DBF 時可能變成數字或日期序號
+function DateText($x) {
+  if ($null -eq $x) { return $null }
+  if ($x -is [double]) {
+    if ($x -ge 19000101 -and $x -le 21001231) { return ('{0}{1:0000}' -f ([math]::Floor($x / 10000) - 1911), ($x % 10000)) }   # 西元 20260801
+    if ($x -gt 20000 -and $x -lt 80000) { $d = [DateTime]::FromOADate($x); return ('{0}{1:00}{2:00}' -f ($d.Year - 1911), $d.Month, $d.Day) }   # Excel 日期
+    return $x.ToString('0', $INV)   # 民國 1150801
+  }
+  $s = ([string]$x).Trim()
+  if ($s -eq '') { return $null }
+  return $s
+}
 # 傳給 Excel 的值要是原本的數字／文字，不能包著 PowerShell 的外殼（否則 Excel 會出錯）
 function Unwrap($v) { if ($null -eq $v) { $null } else { $v.psobject.BaseObject } }
 function Get-R1C1($cell) { try { $cell.Formula2R1C1 } catch { $cell.FormulaR1C1 } }
@@ -76,18 +89,24 @@ function Read-Source($xl, [string]$path, $kind) {
       $h = (Txt $head[1, $c]).Trim().ToUpper()
       if ($h -ne $kind.Head[$c - 1]) { throw "「$leaf」看起來不是$($kind.Label)資料：第 $c 欄應該是 $($kind.Head[$c - 1])，實際是「$h」。請確認選對檔案（進貨是 JMSSAL、退貨是 JMSSBK）。" }
     }
+    # 實際日期 DELIVDATE：通常是緊接著的下一欄（進貨 W、退貨 V）
+    $dcol = 0
+    $more = Get-Values (Rng $ws 1 ($n + 1) 1 ($n + 5))
+    for ($c = 1; $c -le 5; $c++) { if ((Txt $more[1, $c]).Trim().ToUpper() -eq 'DELIVDATE') { $dcol = $n + $c; break } }
+    $width = if ($dcol) { $dcol } else { $n }
     $rows = New-Object 'System.Collections.Generic.List[object]'
     $last = Last-Row $ws 1
     if ($last -ge 2) {
-      $v = Get-Values (Rng $ws 2 1 $last $n)
+      $v = Get-Values (Rng $ws 2 1 $last $width)
       for ($i = 1; $i -le $last - 1; $i++) {
         if ((Key $v[$i, 1]) -eq '') { continue }
-        $row = New-Object object[] $n
+        $row = New-Object object[] ($n + 1)   # 最後一格放實際日期
         for ($c = 1; $c -le $n; $c++) { $row[$c - 1] = $v[$i, $c] }
+        $row[$n] = if ($dcol) { DateText $v[$i, $dcol] } else { $null }
         $rows.Add($row)
       }
     }
-    Say "  $leaf：$($rows.Count) 筆"
+    Say "  $leaf：$($rows.Count) 筆$(if (-not $dcol) { '（沒有 DELIVDATE 欄，不會寫入實際日期）' })"
     return , $rows
   } finally { $wb.Close($false) }
 }
@@ -107,6 +126,26 @@ function Get-FormulaCols($ws, $n) {
     $out.Add([pscustomobject]@{ Col = $c; R1C1 = (Get-R1C1 $cell) })
   }
   return , $out
+}
+
+# 總表裡的實際日期欄：已經有同名表頭就用它；沒有就加在公式欄右邊第一欄（例如進貨 AF、退貨 AC）。
+# 那一欄有任何內容就不加（避免蓋掉別的東西）；有主表格時一併把表格加寬，排序時日期才會跟著那一列移動。
+function Get-DateCol($ws, $kind, [int]$lastCol, $lo, [bool]$create) {
+  for ($c = 1; $c -le $lastCol + 10; $c++) { if ((Txt $ws.Cells.Item(1, $c).Value2).Trim() -eq $kind.DateHead) { return @{ Col = $c; Msg = '' } } }
+  if (-not $create) { return @{ Col = 0; Msg = '' } }
+  $c = $lastCol + 1
+  $letter = $ws.Cells.Item(1, $c).Address($false, $false) -replace '\d', ''
+  if ($ws.Application.WorksheetFunction.CountA($ws.Columns.Item($c)) -gt 0) {
+    return @{ Col = 0; Msg = "「$($kind.Sheet)」的 $letter 欄已經有其他內容，沒有加入「$($kind.DateHead)」欄，這次的實際日期沒有寫進總表。" }
+  }
+  if ($lo) {
+    $loLast = $lo.Range.Column + $lo.Range.Columns.Count - 1
+    if ($loLast -ne $c - 1) { return @{ Col = 0; Msg = "表格「$($lo.Name)」沒有剛好到公式欄的最後一欄，沒有加入「$($kind.DateHead)」欄，這次的實際日期沒有寫進總表。" } }
+  }
+  $ws.Cells.Item(1, $c).Value2 = $kind.DateHead
+  if ($lo) { [void]$lo.Resize((Rng $ws $lo.Range.Row $lo.Range.Column ($lo.Range.Row + $lo.Range.Rows.Count - 1) $c)) }
+  try { $ws.Columns.Item($c).ColumnWidth = 13 } catch {}
+  return @{ Col = $c; Msg = "「$($kind.Sheet)」新增 $letter 欄「$($kind.DateHead)」（原始資料最後一欄 DELIVDATE）" }
 }
 
 # 每一欄現有資料的型態（數字／文字／是非），新資料照著存，才不會「1」和 1 混在一起
@@ -229,6 +268,33 @@ function Merge-Kind($wb, $kind, $src) {
   $fcols = Get-FormulaCols $ws $n
   $lastCol = if ($fcols.Count) { $fcols[$fcols.Count - 1].Col } else { $n }
   $ti = Get-ColTypes $ws $last $n
+  $lo = Get-MainTable $ws
+  # 實際日期欄（新資料有日期才新增）
+  $hasDates = $false; foreach ($r in $src) { if ($null -ne $r[$n]) { $hasDates = $true; break } }
+  $dinfo = Get-DateCol $ws $kind $lastCol $lo $hasDates
+  $dc = [int]$dinfo.Col; $dateNote = [string]$dinfo.Msg
+  $lastAll = [math]::Max($lastCol, $dc)   # 排序、清空時要包含日期欄
+  $dateFill = 0; $dateNew = 0
+  if ($dc -and $hasDates) {
+    # 總表裡已經有的單：補上（或更新成）新資料的實際日期。一次讀、一次寫，資料多也很快
+    (Rng $ws 2 $dc $last $dc).NumberFormat = '@'
+    $dv = Get-Values (Rng $ws 2 $dc $last $dc)
+    foreach ($k in $exRows.Keys) {
+      $pos = $exRows[$k]; $nr = $groups[$k]
+      for ($i = 0; $i -lt $pos.Count; $i++) {
+        $d = if ($nr.Count -eq $pos.Count) { $nr[$i][$n] } else { $nr[0][$n] }
+        if ($null -eq $d) { continue }
+        if ((Txt $dv[($pos[$i] - 1), 1]) -cne [string]$d) { $dv[($pos[$i] - 1), 1] = [string]$d; $dateFill++ }
+      }
+    }
+    if ($dateFill) {
+      Say "[$($kind.Label)] 補上總表裡 $dateFill 筆的實際日期…"
+      $darr = New-Object 'object[,]' ($last - 1), 1   # 和其他寫入一樣用 0 起算的陣列
+      for ($i = 1; $i -le $last - 1; $i++) { $darr[($i - 1), 0] = $dv[$i, 1] }
+      (Rng $ws 2 $dc $last $dc).Value2 = $darr
+    }
+    $dv = $null
+  }
   $changed = New-Object 'System.Collections.Generic.List[object]'   # 這次寫進去的所有列（給對照表用）
   foreach ($r in $add) { $changed.Add($r) }
   $addRows = $add.Count
@@ -238,7 +304,7 @@ function Merge-Kind($wb, $kind, $src) {
     $m = [math]::Min($rp.Rows.Count, $rp.New.Count)
     for ($i = 0; $i -lt $m; $i++) { $r = $rp.Rows[$i]; (Rng $ws $r 1 $r $n).Value2 = (Row-Array @(, $rp.New[$i]) $ti $n) }
     for ($i = $m; $i -lt $rp.New.Count; $i++) { $add.Add($rp.New[$i]) }
-    for ($i = $m; $i -lt $rp.Rows.Count; $i++) { [void](Rng $ws $rp.Rows[$i] 1 $rp.Rows[$i] $n).ClearContents(); $cleared++ }
+    for ($i = $m; $i -lt $rp.Rows.Count; $i++) { [void](Rng $ws $rp.Rows[$i] 1 $rp.Rows[$i] $n).ClearContents(); if ($dc) { [void]$ws.Cells.Item($rp.Rows[$i], $dc).ClearContents() }; $cleared++ }
     foreach ($r in $rp.New) { $changed.Add($r) }
   }
   $start = $last + 1; $end = $last + $add.Count; $sorted = $false
@@ -248,7 +314,6 @@ function Merge-Kind($wb, $kind, $src) {
     if ([string]::CompareOrdinal($k, $newMax) -gt 0) { $newMax = $k }
     if ($null -eq $minAdd -or [string]::CompareOrdinal($k, $minAdd) -lt 0) { $minAdd = $k }
   }
-  $lo = Get-MainTable $ws
   if ($add.Count) {
     if ($lo) {
       $loEnd = $lo.Range.Row + $lo.Range.Rows.Count - 1
@@ -258,6 +323,12 @@ function Merge-Kind($wb, $kind, $src) {
     Say "[$($kind.Label)] 寫入第 $start ～ $end 列，補上公式…"
     (Rng $ws $start 1 $end $n).Value2 = (Row-Array $add $ti $n)
     foreach ($f in $fcols) { Set-R1C1 (Rng $ws $start $f.Col $end $f.Col) $f.R1C1 }
+    if ($dc) {
+      $da = New-Object 'object[,]' $add.Count, 1
+      for ($r = 0; $r -lt $add.Count; $r++) { $d = $add[$r][$n]; if ($null -ne $d) { $da[$r, 0] = [string]$d; $dateNew++ } }
+      (Rng $ws $start $dc $end $dc).NumberFormat = '@'
+      (Rng $ws $start $dc $end $dc).Value2 = $da
+    }
   }
   # 有比目前最後一張還早的單號（例如補來的 3 月退貨），或有清空的列 → 整張表依單號重新排序
   if ($cleared -or ($add.Count -and [string]::CompareOrdinal($minAdd, $exMax) -le 0)) {
@@ -266,7 +337,7 @@ function Merge-Kind($wb, $kind, $src) {
     if ($lo) {
       $st = $lo.Sort; $st.SortFields.Clear(); [void]$st.SortFields.Add($lo.ListColumns.Item(1).DataBodyRange, 0, 1); $st.Header = 1; $st.MatchCase = $false; [void]$st.Apply()
     } else {
-      $st = $ws.Sort; $st.SortFields.Clear(); [void]$st.SortFields.Add((Rng $ws 2 1 $sortEnd 1), 0, 1); $st.SetRange((Rng $ws 1 1 $sortEnd $lastCol)); $st.Header = 1; $st.MatchCase = $false; [void]$st.Apply()
+      $st = $ws.Sort; $st.SortFields.Clear(); [void]$st.SortFields.Add((Rng $ws 2 1 $sortEnd 1), 0, 1); $st.SetRange((Rng $ws 1 1 $sortEnd $lastAll)); $st.Header = 1; $st.MatchCase = $false; [void]$st.Apply()
     }
     $sorted = $true
   }
@@ -281,11 +352,18 @@ function Merge-Kind($wb, $kind, $src) {
   }
   if ($tail -gt $newLast) {
     Say "[$($kind.Label)] 清掉資料下面第 $($newLast + 1) ～ $tail 列的空白列…"
-    [void](Rng $ws ($newLast + 1) 1 $tail $lastCol).Clear()
+    [void](Rng $ws ($newLast + 1) 1 $tail $lastAll).Clear()
     $trim = "「$($kind.Sheet)」資料只到第 $newLast 列，下面第 $($newLast + 1) ～ $tail 列的空白列和公式已清掉" + $(if ($lo) { "（表格「$($lo.Name)」縮到第 $newLast 列）" } else { '' })
+  }
+  # 實際日期：還有幾筆沒有
+  $dateBlank = 0; $dateLetter = ''
+  if ($dc) {
+    $dateBlank = ($newLast - 1) - [int]$ws.Application.WorksheetFunction.CountA((Rng $ws 2 $dc $newLast $dc))
+    $dateLetter = $ws.Cells.Item(1, $dc).Address($false, $false) -replace '\d', ''
   }
   return [pscustomobject]@{
     Kind = $kind; Ws = $ws; Before = $last - 1; After = $newLast - 1; NewLast = $newLast; Sorted = $sorted; Trim = $trim
+    DateCol = $dc; DateLetter = $dateLetter; DateFill = $dateFill; DateNew = $dateNew; DateBlank = $dateBlank; DateNote = $dateNote
     AddOrders = $addOrders; AddRows = $addRows; Dup = $dup; DupRows = $dupRows; KeptRep = $keptRep; Replace = $replace
     Changed = $changed; FCols = $fcols; MaxYm = (Ym $newMax)
   }
@@ -500,6 +578,7 @@ try {
   Write-Host '・單號已經有、但內容不一樣 → 改用新資料，業務員保留總表原本的（只有業務員不同就不動）'
   Write-Host '・BB、BC、BI 對照表改成和 AK、AT、BM 的清單一樣；資料下面的空白列會清掉'
   Write-Host '・公式自動往下補，AR2 自動填成最新資料的下一個月'
+  Write-Host '・最後一欄的實際日期（DELIVDATE）寫進「實際出貨日期」「實際退貨日期」欄；總表裡已經有的單也會補上日期'
   Write-Host '・原本的總表不會被修改，最後會另存成新檔'
   Write-Host ''
   if ($FindIn) {
@@ -595,16 +674,23 @@ try {
       $L.Add("    單號 $($rp.Key)：$why")
     }
     if ($res.Changed.Count) { $L.Add($(if ($res.Sorted) { '  已整張依單號重新排序' } else { '  新資料都接在最後面，原本的順序沒有動' })) }
+    if ($res.DateNote) { $L.Add('  ' + $res.DateNote) }
+    if ($res.DateCol) {
+      $L.Add("  實際日期（$($res.DateLetter) 欄）：新加入的 $($res.DateNew) 筆有日期、總表原有的單補上 $($res.DateFill) 筆；目前還有 $($res.DateBlank) 筆沒有實際日期")
+      if ($res.DateBlank) { $L.Add('    （把含有那些月份的 JMSSAL／JMSSBK 放進資料夾再跑一次就會補上；重複的單會跳過，只補日期）') }
+    }
   }
   if ($extra.Count) { $L.Add(''); $L.Add('【其他】'); foreach ($x in $extra) { $L.Add('  ' + $x) } }
   Write-Host ''; foreach ($x in $L) { Write-Host $x }; Write-Host ''
 
   # ---------- 另存新檔 ----------
   if (-not $NoUI) {
-    $nAdd = 0; $nRep = 0; foreach ($res in $results) { $nAdd += $res.AddRows; $nRep += $res.Replace.Count }
+    $nAdd = 0; $nRep = 0; $nDate = 0; foreach ($res in $results) { $nAdd += $res.AddRows; $nRep += $res.Replace.Count; $nDate += $res.DateFill }
     if ($totalChanged) {
-      $msg = "新增 $nAdd 筆。" + $(if ($nRep) { "`n有 $nRep 張單號內容不一樣，已改用新資料（業務員保留原本的），詳細寫在報告裡。" } else { '' }) + "`n`n接下來請選擇要存成的新檔名（原本的總表不會被改動）。"
+      $msg = "新增 $nAdd 筆。" + $(if ($nRep) { "`n有 $nRep 張單號內容不一樣，已改用新資料（業務員保留原本的），詳細寫在報告裡。" } else { '' }) + $(if ($nDate) { "`n總表原有的單補上 $nDate 筆實際日期。" } else { '' }) + "`n`n接下來請選擇要存成的新檔名（原本的總表不會被改動）。"
       Show-Msg $owner $msg | Out-Null
+    } elseif ($nDate) {
+      if ((Show-Msg $owner "沒有新的單，但總表原有的單補上了 $nDate 筆實際出貨／退貨日期。`n`n要另存成新檔嗎？" 'Question' 'YesNo') -ne 'Yes') { Say '沒有存檔（原本的總表沒有改動）。'; return }
     } elseif ($extra.Count -eq 0) {
       Show-Msg $owner '沒有需要新增或修改的資料，總表不用另存。詳細內容請看黑色視窗。' | Out-Null
       return

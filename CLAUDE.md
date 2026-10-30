@@ -37,6 +37,8 @@ sw.js                 離線快取
 另一套給使用者電腦用的工具：雙擊 `更新總表.cmd`，用 Excel 自動化（PowerShell COM）把 JMSSAL（.DBF/.xlsx）接到「原始進貨表」A～V、JMSSBK 接到「原始退貨表」A～U，
 以整張單號比對重複；單號已有但內容不同 → 改用新資料、業務員保留原本的（使用者的規則）。依單號排序、清掉資料下面的空白列（表格1 縮到資料範圍）、補 W～AE／V～AB 公式、補 AK/AT/BM 的 UNIQUE 清單旁的公式；
 BB/BC/BI 對照表整張改成和 AK/AT/BM 一樣，其他對照表只加進貨的新值；AR2 填下個月，最後另存新檔。
+原始資料最後一欄 DELIVDATE 寫進公式欄右邊第一欄（原始進貨表 AF「實際出貨日期」、原始退貨表 AC「實際退貨日期」，第一次自動新增並加寬表格1；那一欄有內容就不寫），
+總表原有的單號也用新資料的日期補上（重複的單照樣跳過）。網站的 `ingest.js` 認得這兩個表頭。
 啟動時記住上次的資料夾（`%LOCALAPPDATA%\總表更新工具\settings.json`，只存路徑），自動挑最新的總表／JMSSAL／JMSSBK，跳確認視窗。
 說明在 `excel-tool/README.md`。`.ps1` 必須存成 UTF-8 含 BOM。測試：`powershell -NoProfile -ExecutionPolicy Bypass -File tests\excel_tool_test.ps1`（需要 Excel）。
 

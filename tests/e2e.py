@@ -384,6 +384,9 @@ async def raw_import(b):
     # WPS 另存的 Excel（工作表叫 JMSSAL／JMSSBK、英文表頭）也可以
     await pg.click('a[data-view=data]'); await pg.evaluate("document.querySelector('#importProgress p').textContent = ''"); await pg.set_input_files('#fileXlsx', [FX + '/JMSSAL.xlsx', FX + '/JMSSBK.xlsx']); t = await wait_done(pg)
     ok(f"{exp['nSales']} 筆進貨" in t and same_months(await pg.evaluate(NET_BY_YM), exp['by_date']), '另存成 Excel 的 JMSSAL＋JMSSBK：' + t)
+    # 總表更新工具加上「實際出貨日期」「實際退貨日期」欄之後的總表：網站也依實際日期
+    await pg.evaluate("document.querySelector('#importProgress p').textContent = ''"); await pg.set_input_files('#fileXlsx', [FX + '/master_dated.xlsx']); t = await wait_done(pg)
+    ok(f"其中 {exp['moved']} 筆" in t and same_months(await pg.evaluate(NET_BY_YM), exp['by_date']), '有「實際出貨日期」欄的總表也依實際日期：' + t)
     # 只選出貨
     await pg.evaluate("document.querySelector('#importProgress p').textContent = ''"); await pg.set_input_files('#fileXlsx', [FX + '/JMSSAL.DBF']); t = await wait_done(pg)
     ok(f"{exp['nSales']} 筆進貨" in t and '0 筆退貨' in t, '只選 JMSSAL 也可以：' + t)
