@@ -40,6 +40,7 @@
   // ---------- 狀態 ----------
   const S = {
     E: null, raw: null, vault: null, locked: false, meta: null, // meta：分類表、固定費用、應收帳款（存在加密的資料裡）
+    report: Object.assign({ year: null }, store.get('report', {})), slide: 0,
     ymMode: store.get('ymMode', 'date'), // 月份依據：'date' 實際出貨／退貨日期（預設）、'ord' 單號
     dash: Object.assign({ period: 'ytd', rankDim: 'ck', rankSort: 'net', cmp: 'quarter' }, store.get('dash', {})), // vault.key 只放記憶體，不會存下來
     view: 'overview',
@@ -61,7 +62,7 @@
     $$('#themePick button').forEach((b) => b.classList.toggle('on', b.dataset.theme === t));
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.content = { indigo: '#26437A', night: '#0E1726', market: '#13805F' }[t];
-    if (S.E) setTimeout(() => { if (S.view === 'overview') drawOverviewChart(); if (S.view === 'dashboard') renderDashboard(); }, 30);
+    if (S.E) setTimeout(() => { if (S.view === 'overview') drawOverviewChart(); if (S.view === 'dashboard') renderDashboard(); if (S.view === 'report') renderReport(); }, 30);
   }
 
   // ---------- 導覽 ----------
@@ -76,7 +77,7 @@
   }
   function renderView() {
     if (!S.E) { renderData(); return; }
-    ({ overview: renderOverview, dashboard: renderDashboard, pivot: renderPivot, customers: renderCustomers, products: renderProducts, data: renderData })[S.view]();
+    ({ overview: renderOverview, dashboard: renderDashboard, report: renderReport, pivot: renderPivot, customers: renderCustomers, products: renderProducts, data: renderData })[S.view]();
   }
 
   // ---------- 表格元件 ----------
@@ -299,6 +300,65 @@
     ctx.after.forEach((f) => f());
     $('#dbSub').textContent = `以 ${ymLabel(refYm())} 為基準月。點排名、佔比的項目可以看明細；每個數字下面的 ⓘ 有說明。`;
   }
+  // =====================================================
+  // 圖表報告（計算與版面在 js/report.js）：簡報模式、列印／存成 PDF
+  // =====================================================
+  function renderReport() {
+    const ctx = { S, E: S.E, fmt, nf0, nf1, esc, $, $$, refYm, repName, drill: dashDrill };
+    window.__report = Report.render(ctx); // 測試用
+    S.reportRedraw = window.__report.redraw;
+    if (document.body.classList.contains('presenting')) showSlide();
+  }
+  function showSlide() {
+    const cards = $$('#rpBody .rp-card'); if (!cards.length) return;
+    S.slide = Math.max(0, Math.min(cards.length - 1, S.slide));
+    cards.forEach((c, i) => c.classList.toggle('on', i === S.slide));
+    $('#rpCount').textContent = `${S.slide + 1} / ${cards.length}`;
+    $('#rpPrevSlide').disabled = S.slide === 0; $('#rpNextSlide').disabled = S.slide === cards.length - 1;
+    if (cards[S.slide].id === 'rpMonthly' && S.reportRedraw) setTimeout(S.reportRedraw, 30); // 圖的大小跟著畫面重畫
+  }
+  function startPresent() {
+    document.body.classList.add('presenting'); S.slide = 0; closeDrawer();
+    const el = document.documentElement;
+    if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+    showSlide();
+  }
+  function endPresent() {
+    if (!document.body.classList.contains('presenting')) return;
+    document.body.classList.remove('presenting');
+    $$('#rpBody .rp-card').forEach((c) => c.classList.remove('on'));
+    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    if (S.reportRedraw) setTimeout(S.reportRedraw, 30);
+  }
+  function bindReport() {
+    $('#rpYear').addEventListener('change', (e) => { S.report.year = +e.target.value; store.set('report', S.report); renderReport(); });
+    $('#rpPresent').addEventListener('click', startPresent);
+    $('#rpEnd').addEventListener('click', endPresent);
+    $('#rpPrevSlide').addEventListener('click', () => { S.slide--; showSlide(); });
+    $('#rpNextSlide').addEventListener('click', () => { S.slide++; showSlide(); });
+    document.addEventListener('keydown', (e) => {
+      if (!document.body.classList.contains('presenting')) return;
+      if (['ArrowRight', 'PageDown', ' ', 'Enter'].includes(e.key)) { e.preventDefault(); S.slide++; showSlide(); }
+      else if (['ArrowLeft', 'PageUp'].includes(e.key)) { e.preventDefault(); S.slide--; showSlide(); }
+      else if (e.key === 'Escape') endPresent();
+    });
+    document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) endPresent(); });
+    let x0 = null; // 手機左右滑換頁
+    $('#view-report').addEventListener('touchstart', (e) => { x0 = e.touches[0].clientX; }, { passive: true });
+    $('#view-report').addEventListener('touchend', (e) => {
+      if (x0 == null || !document.body.classList.contains('presenting')) return;
+      const dx = e.changedTouches[0].clientX - x0; x0 = null;
+      if (Math.abs(dx) > 50) { S.slide += dx < 0 ? 1 : -1; showSlide(); }
+    });
+    // 列印／存成 PDF：深色風格先換成明亮的再印，印完換回來
+    $('#rpPrint').addEventListener('click', () => {
+      const th = document.documentElement.dataset.theme, dark = th === 'night';
+      if (dark) { document.documentElement.dataset.theme = 'indigo'; renderReport(); }
+      setTimeout(() => { window.print(); if (dark) { document.documentElement.dataset.theme = th; renderReport(); } }, 60);
+    });
+    Report.bindTips($('#rpBody'));
+  }
+
   // 從儀表板點進去：客戶、款號開明細；其他到樞紐分析
   function dashDrill(dim, code, label) {
     if (dim === 'ck') { const c = S.E.customers({}, refYm()).list.find((x) => x.ck === code); if (c) openCustomer(c); return; }
@@ -1180,7 +1240,7 @@
   // ---------- 啟動 ----------
   async function boot() {
     setTheme(document.documentElement.dataset.theme || 'indigo');
-    bindPivot(); bindCustomers(); bindProducts(); bindData();
+    bindPivot(); bindCustomers(); bindProducts(); bindData(); bindReport();
     $('#ovRange').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; $$('#ovRange button').forEach((x) => x.classList.toggle('on', x === b)); drawOverviewChart(); });
     $$('[data-goto]').forEach((a) => a.addEventListener('click', (e) => {
       e.preventDefault();
@@ -1189,7 +1249,7 @@
     }));
     $$('.tabs a').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); go(a.dataset.view); }));
     window.addEventListener('hashchange', () => go(location.hash.slice(1) || 'overview'));
-    let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (S.view === 'overview' && S.E) drawOverviewChart(); if (S.view === 'dashboard' && S.E) renderDashboard(); }, 200); });
+    let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (S.view === 'overview' && S.E) drawOverviewChart(); if (S.view === 'dashboard' && S.E) renderDashboard(); if (S.view === 'report' && S.E && S.reportRedraw) S.reportRedraw(); }, 200); });
     const start = (location.hash.slice(1) || 'overview');
     try {
       if (await Dataset.Vault.exists()) await lockScreen('unlock');

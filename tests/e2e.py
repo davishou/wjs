@@ -209,6 +209,7 @@ async def main():
     await picker(b)
     await dashboard(b)
     await raw_import(b)
+    await report_page(b)
     await b.close()
     print('全部通過')
 
@@ -397,6 +398,60 @@ async def raw_import(b):
     await pg.screenshot(path=SH + '/31_raw_dashboard.png', full_page=True)
     ok(not errs, '原始資料匯入沒有 JS 錯誤 ' + str(errs))
     await c.close()
+
+
+async def report_page(b):
+    """圖表報告：數字和 Python 獨立計算一致、切換年度、簡報模式（鍵盤換頁、Esc 結束）、列印、手機寬度。"""
+    exp = expected_114()
+    c = await b.new_context(viewport={'width': 1366, 'height': 900})
+    pg = await c.new_page(); errs = []
+    pg.on('pageerror', lambda e: errs.append(str(e)))
+    await pg.goto(URL); await pg.wait_for_timeout(300)
+    await pg.set_input_files('#fileXlsx', FX + '/plain.xlsx'); await dlg_fill(pg, {'app': 'rep12', 'app2': 'rep12'}); await wait_done(pg)
+    await pg.set_input_files('#fileClass', FX + '/class.xlsx'); await pg.wait_for_function("document.querySelector('#classState').textContent.includes('已匯入')")
+    await pg.click('a[data-view=report]'); await pg.wait_for_selector('#rpBody .rp-card')
+    r = await pg.evaluate("window.__report")
+    ok(abs(r['cur']['net'] - exp['cur']['net']) < 0.01 and abs(r['cur']['netProfit'] - exp['cur']['netProfit']) < 0.01, f"報告 114 年淨營收 {r['cur']['net']:.0f}、淨毛利 {r['cur']['netProfit']:.0f}（Python {exp['cur']['net']:.0f}、{exp['cur']['netProfit']:.0f}）")
+    ok(abs(r['top10Share'] - exp['top10']) < 0.001, f"TOP10 客戶合計佔比 {r['top10Share']:.4f}（Python {exp['top10']:.4f}）")
+    big = {x['n']: x['cs'] for x in r['big']}
+    ok(all(abs(big.get(k, 0) - v) < 0.001 for k, v in exp['big'].items()), f'男女童比例 {big}（Python {exp["big"]}）')
+    ok(await pg.locator('#rpBody .rp-card').count() == 8 and await pg.locator('#rpCust .rb-row').count() >= 5 and await pg.locator('#rpRegion .sg').count() == 2, '8 張圖：封面、每月、TOP10 客戶、TOP15 商品、區域、品項、男女童、毛利貢獻；區域有今年和去年兩條')
+    ok('114年' in await pg.text_content('#rpCover') and '113年' in await pg.text_content('#rpSub'), '標題和去年同期的說明')
+    # 切換年度
+    await pg.select_option('#rpYear', '113'); await pg.wait_for_timeout(300)
+    ok('113年' in await pg.text_content('#rpCover .rp-title') and '112年' in await pg.text_content('#rpSub'), '切換到 113 年，和 112 年比較')
+    await pg.select_option('#rpYear', '114'); await pg.wait_for_timeout(300)
+    # 點 TOP10 客戶 → 客戶明細
+    await pg.click('#rpCust .rb-row.click'); await pg.wait_for_selector('#drawer.open'); await pg.keyboard.press('Escape'); await pg.wait_for_timeout(200)
+    ok(True, '點 TOP10 客戶可以看明細')
+    # 簡報模式
+    await pg.click('#rpPresent'); await pg.wait_for_timeout(300)
+    ok(await pg.evaluate("document.body.classList.contains('presenting')") and await pg.text_content('#rpCount') == '1 / 8' and await pg.is_hidden('.nav'), '簡報模式：一頁一張圖，從第 1 頁開始，選單隱藏')
+    for _ in range(3): await pg.keyboard.press('ArrowRight')
+    ok(await pg.text_content('#rpCount') == '4 / 8' and await pg.is_visible('#rpProd'), '方向鍵換頁到第 4 頁（TOP15 商品）')
+    await pg.keyboard.press('ArrowLeft'); ok(await pg.text_content('#rpCount') == '3 / 8', '往回一頁')
+    await pg.screenshot(path=SH + '/41_report_present.png')
+    await pg.keyboard.press('Escape'); await pg.wait_for_timeout(300)
+    ok(not await pg.evaluate("document.body.classList.contains('presenting')") and await pg.is_visible('.nav'), 'Esc 結束簡報')
+    # 列印：深色風格會先換成明亮的
+    await pg.evaluate("localStorage.setItem('dv.theme','night'); document.documentElement.dataset.theme = 'night'; window.__printTheme = null; window.print = () => { window.__printTheme = document.documentElement.dataset.theme; }")
+    await pg.click('#rpPrint'); await pg.wait_for_timeout(400)
+    ok(await pg.evaluate("window.__printTheme") == 'indigo' and await pg.evaluate("document.documentElement.dataset.theme") == 'night', '列印時用明亮風格，印完換回深色')
+    await pg.evaluate("document.documentElement.dataset.theme = 'indigo'")
+    pdf = await pg.pdf(format='A4', landscape=True, print_background=True)
+    ok(pdf.count(b'/Type /Page\n') + pdf.count(b'/Type /Page ') + pdf.count(b'/Type/Page') >= 8 or len(pdf) > 50000, '可以存成 PDF（A4 橫向）')
+    await pg.screenshot(path=SH + '/40_report.png', full_page=True)
+    ok(not errs, '圖表報告沒有 JS 錯誤 ' + str(errs))
+    await c.close()
+    m = await b.new_context(viewport={'width': 390, 'height': 844}, is_mobile=True, has_touch=True)
+    pm = await m.new_page(); errs = []; pm.on('pageerror', lambda e: errs.append(str(e)))
+    await pm.goto(URL); await pm.wait_for_timeout(300)
+    await pm.set_input_files('#fileXlsx', FX + '/plain.xlsx'); await dlg_fill(pm, {'app': 'rep12', 'app2': 'rep12'}); await wait_done(pm)
+    await pm.click('a[data-view=report]'); await pm.wait_for_selector('#rpBody .rp-card')
+    ok(await pm.evaluate('document.documentElement.scrollWidth') <= 390 and not errs, '手機：圖表報告沒有把畫面撐寬、沒有錯誤')
+    ok('需要先匯入商品類別代碼表' in await pm.text_content('#rpBig'), '沒有分類表時，男女童比例說明缺少什麼')
+    await pm.screenshot(path=SH + '/42_report_phone.png', full_page=True)
+    await m.close()
 
 
 async def picker(b):

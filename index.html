@@ -54,6 +54,7 @@
     <nav class="tabs">
       <a href="#overview" data-view="overview"><svg viewBox="0 0 24 24"><path d="M3 13h7V3H3zm11 8h7V11h-7zM3 21h7v-6H3zm11-18v6h7V3z"/></svg><span>總覽</span></a>
       <a href="#dashboard" data-view="dashboard"><svg viewBox="0 0 24 24"><path d="M12 4a9 9 0 0 0-9 9 9 9 0 0 0 2.6 6.4l1.4-1.4A7 7 0 1 1 19 13a7 7 0 0 1-2 4.9l1.4 1.5A9 9 0 0 0 12 4zm4.2 4.4-5 4.2a1.6 1.6 0 1 0 2.2 2.2z"/></svg><span>儀表板</span></a>
+      <a href="#report" data-view="report"><svg viewBox="0 0 24 24"><path d="M4 20h16v2H2V2h2zm2-3V9h3v8zm5 0V4h3v13zm5 0v-6h3v6z"/></svg><span>圖表報告</span></a>
       <a href="#pivot" data-view="pivot"><svg viewBox="0 0 24 24"><path d="M3 3h18v4H3zm0 6h5v12H3zm7 0h11v12H10z"/></svg><span>樞紐分析</span></a>
       <a href="#customers" data-view="customers"><svg viewBox="0 0 24 24"><path d="M16 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm-8 1a3 3 0 1 0-3-3 3 3 0 0 0 3 3zm8 1c-2.7 0-8 1.3-8 4v3h16v-3c0-2.7-5.3-4-8-4zm-8 0c-.4 0-.8 0-1.3.1C8 14 9 15.3 9 17v3H1v-3c0-2.2 4.4-4 7-4z"/></svg><span>客戶</span></a>
       <a href="#products" data-view="products"><svg viewBox="0 0 24 24"><path d="M9 3 4 6v4l3 1v10h10V11l3-1V6l-5-3c0 1.7-1.3 3-3 3S9 4.7 9 3z"/></svg><span>商品</span></a>
@@ -91,6 +92,20 @@
         <div class="head-actions"><div class="seg" id="dbPeriod"></div><label class="inline">基準月 <select id="dbRef"></select></label></div>
       </div>
       <div id="dbBody"></div>
+    </section>
+
+    <!-- 圖表報告 -->
+    <section class="view" id="view-report" hidden>
+      <div class="view-head">
+        <div><h1>圖表報告</h1><p class="sub" id="rpSub"></p></div>
+        <div class="head-actions">
+          <label class="inline">年度 <select id="rpYear"></select></label>
+          <button class="btn primary" id="rpPresent">簡報模式</button>
+          <button class="btn" id="rpPrint">列印／存成 PDF</button>
+        </div>
+      </div>
+      <div id="rpBody" class="rp"></div>
+      <div class="rp-nav" id="rpNav"><button class="btn" id="rpPrevSlide" aria-label="上一頁">‹ 上一頁</button><span id="rpCount"></span><button class="btn" id="rpNextSlide" aria-label="下一頁">下一頁 ›</button><button class="btn" id="rpEnd">結束簡報（Esc）</button></div>
     </section>
 
     <!-- 樞紐分析 -->
@@ -270,6 +285,7 @@
 <script src="js/engine.js"></script>
 <script src="js/chart.js"></script>
 <script src="js/dashboard.js"></script>
+<script src="js/report.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
