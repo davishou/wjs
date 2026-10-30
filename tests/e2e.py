@@ -208,6 +208,7 @@ async def main():
     await c3.close()
     await picker(b)
     await dashboard(b)
+    await raw_import(b)
     await b.close()
     print('全部通過')
 
@@ -331,6 +332,69 @@ async def dashboard(b):
     await pm.screenshot(path=SH + '/22_dashboard_phone.png', full_page=True)
     ok(not errs, '手機儀表板沒有 JS 錯誤 ' + str(errs))
     await m.close()
+
+def expected_raw():
+    """直接從產生假資料的函式算出：依實際日期、依單號，每月的淨銷售。"""
+    sys.path.insert(0, HERE)
+    import make_fixtures as mf
+    sal, bk = mf.raw_rows()
+    by_date, by_ord = {}, {}
+    for rows, sign in ((sal, 1), (bk, -1)):
+        for r in rows:
+            d = int(r['DELIVDATE']) // 100; o = int(r['DELIVNO'][:5])
+            by_date[d] = by_date.get(d, 0) + sign * r['SALEGET']; by_ord[o] = by_ord.get(o, 0) + sign * r['SALEGET']
+    moved = sum(1 for r in sal + bk if int(r['DELIVDATE']) // 100 != int(r['DELIVNO'][:5]))
+    return dict(nSales=len(sal), nReturns=len(bk), by_date=by_date, by_ord=by_ord, moved=moved)
+
+
+NET_BY_YM = "(() => { const E = window.__app.E; const p = E.pivot({ rows: ['ym'], cols: null, measures: ['net'], filter: {} }); return Object.fromEntries(p.rows.map(r => [E.ymList[r.codes[0]], r.vals[0][0]])); })()"
+
+
+def same_months(got, want):
+    return len(got) == len(want) and all(abs(got.get(str(k), 0) - v) < 0.01 for k, v in want.items())
+
+
+async def raw_import(b):
+    """系統原始資料：JMSSAL＋JMSSBK 一次選（DBF、或 WPS 另存的 Excel），月份依實際日期（預設）或單號。"""
+    exp = expected_raw()
+    c = await b.new_context(viewport={'width': 1366, 'height': 900})
+    pg = await c.new_page(); errs = []
+    pg.on('pageerror', lambda e: errs.append(str(e)))
+    await pg.goto(URL); await pg.wait_for_timeout(300)
+    await pg.set_input_files('#fileXlsx', [FX + '/JMSSAL.DBF', FX + '/JMSSBK.DBF'])
+    await dlg_fill(pg, {'app': 'raw12', 'app2': 'raw12'}); t = await wait_done(pg)
+    ok(f"{exp['nSales']} 筆進貨" in t and f"{exp['nReturns']} 筆退貨" in t and f"其中 {exp['moved']} 筆" in t, '一次選 JMSSAL.DBF＋JMSSBK.DBF（已刪除的列不算）：' + t)
+    got = await pg.evaluate(NET_BY_YM)
+    ok(same_months(got, exp['by_date']), f"預設依實際日期：每月淨銷售 {got}（Python {exp['by_date']}）")
+    ok(exp['by_date'] != exp['by_ord'], '假資料裡依日期和依單號的月份確實不同')
+    await pg.click('a[data-view=customers]'); cu = await pg.text_content('#cuTable')
+    ok('甲商行' in cu and '乙公司' in cu and '�' not in cu, 'DBF 的中文客戶名（Big5）正確，沒有亂碼')
+    # 切換成依單號
+    await pg.click('a[data-view=data]'); await pg.click('#ymMode button[data-v=ord]'); await pg.wait_for_timeout(500)
+    got = await pg.evaluate(NET_BY_YM)
+    ok(same_months(got, exp['by_ord']), f"切換成依單號：每月淨銷售 {got}（Python {exp['by_ord']}）")
+    await pg.reload(); await pg.fill('#lockPw', 'raw12'); await pg.click('#lockGo'); await pg.wait_for_selector('#lock[hidden]', state='attached')
+    ok(await pg.evaluate("window.__app.ymMode") == 'ord' and same_months(await pg.evaluate(NET_BY_YM), exp['by_ord']), '重新開啟後仍記得「依單號」')
+    await pg.click('a[data-view=data]'); await pg.click('#ymMode button[data-v=date]'); await pg.wait_for_timeout(500)
+    ok(same_months(await pg.evaluate(NET_BY_YM), exp['by_date']), '切回依實際日期')
+    # 明細有實際日期
+    await pg.evaluate("window.__app.pivot = { ...window.__app.pivot, mode: 'detail', filters: {} }"); await pg.click('a[data-view=pivot]'); await pg.wait_for_timeout(500)
+    ok('實際日期' in await pg.text_content('#pvTable') and '114/10/30' in await pg.text_content('#pvTable'), '明細有「實際日期」欄')
+    await pg.screenshot(path=SH + '/30_raw_detail.png')
+    # WPS 另存的 Excel（工作表叫 JMSSAL／JMSSBK、英文表頭）也可以
+    await pg.click('a[data-view=data]'); await pg.evaluate("document.querySelector('#importProgress p').textContent = ''"); await pg.set_input_files('#fileXlsx', [FX + '/JMSSAL.xlsx', FX + '/JMSSBK.xlsx']); t = await wait_done(pg)
+    ok(f"{exp['nSales']} 筆進貨" in t and same_months(await pg.evaluate(NET_BY_YM), exp['by_date']), '另存成 Excel 的 JMSSAL＋JMSSBK：' + t)
+    # 只選出貨
+    await pg.evaluate("document.querySelector('#importProgress p').textContent = ''"); await pg.set_input_files('#fileXlsx', [FX + '/JMSSAL.DBF']); t = await wait_done(pg)
+    ok(f"{exp['nSales']} 筆進貨" in t and '0 筆退貨' in t, '只選 JMSSAL 也可以：' + t)
+    # 只選退貨 → 說明缺出貨
+    await pg.evaluate("document.querySelector('#importProgress p').textContent = ''"); await pg.set_input_files('#fileXlsx', [FX + '/JMSSBK.DBF']); t = await wait_done(pg)
+    ok('找不到出貨' in t, '只選 JMSSBK → 說明缺出貨資料：' + t)
+    await pg.click('a[data-view=dashboard]'); await pg.wait_for_selector('#dbAlerts')
+    await pg.screenshot(path=SH + '/31_raw_dashboard.png', full_page=True)
+    ok(not errs, '原始資料匯入沒有 JS 錯誤 ' + str(errs))
+    await c.close()
+
 
 async def picker(b):
     """手機選資料包時，各種被改過的檔案都要有正確反應。"""

@@ -115,7 +115,7 @@
 
     // ---------- 版面 ----------
     const html = [];
-    html.push(`<p class="db-note">期間：<b>${periodText(F)}</b>${hasPrev ? `　對照：去年同期 ${periodText(P)}` : '　（全部期間沒有去年同期可比）'}</p>`);
+    html.push(`<p class="db-note">月份依：<b>${(E.ds.dates && E.ds.dates.dated && E.ds.dates.mode === 'date') ? '實際出貨／退貨日期' : '單號'}</b>　期間：<b>${periodText(F)}</b>${hasPrev ? `　對照：去年同期 ${periodText(P)}` : '　（全部期間沒有去年同期可比）'}</p>`);
     // 提醒（後面 BEP、應收、分類表會再補）
     html.push('<div class="panel" id="dbAlerts"></div>');
     // 核心數字
@@ -348,7 +348,10 @@
     if (!fixed) miss.push(['每月固定費用', '損益兩平需要。在上面「損益兩平」輸入。']);
     if (!ar) miss.push(['應收帳款餘額', '應收帳款天數需要。在上面「應收帳款天數」輸入；或確認總表 RECEIVE、PAY 欄的意思後改成自動計算。']);
     miss.push(['庫存與進貨（採購）資料', '總表只有銷貨和退貨，所以無法算存貨週轉天數、缺貨或庫存過多。若有庫存表，可以再加進來。']);
-    miss.push(['交易日期（日）', '單號前 5 碼只到「年月」，所以天數類的指標（購買頻率、應收帳款天數）是用月份推估。']);
+    const dts = ds.dates || { dated: 0, mode: 'ord' };
+    if (!dts.dated) miss.push(['實際出貨日期', '這份資料是總表，沒有實際出貨日期（DELIVDATE），月份是用單號前 5 碼判斷，月底、月初的單可能算到別的月份。改匯入系統的 JMSSAL、JMSSBK 原始資料就會依實際日期。']);
+    else if (dts.dated < ds.n) miss.push(['部分資料沒有實際日期', `${nf0.format(ds.n - dts.dated)} 筆沒有實際日期，這些用單號判斷月份。`]);
+    if (dts.mode === 'ord' && dts.dated) miss.push(['月份依據', '目前設定為「依單號」判斷月份；到「資料與設定」可以改回依實際出貨／退貨日期。']);
     const noSize = (() => { let c = 0; ds.str.sku.dict.forEach((s) => { if (!Dataset.splitSku(s)[1]) c++; }); return c; })();
     if (noSize) miss.push(['看不出尺寸的商品代號', `${nf0.format(noSize)} 個商品代號後面沒有尺寸（例如配件、運費），尺寸分析會顯示「（無尺寸）」。`]);
     const otherRegion = (E.pivot({ rows: ['region'], cols: null, measures: ['net'], filter: fil(F) }).rows.find((r) => r.labels[0] === '其他地區') || { vals: [[0]] }).vals[0][0];

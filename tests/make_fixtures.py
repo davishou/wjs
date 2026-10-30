@@ -211,6 +211,88 @@ def encrypt_agile(src, dst, pw, spin=100000):
     print(f'{os.path.basename(dst)}: Agile 加密，密碼 {pw}')
 
 
+# ---------- 系統原始資料（JMSSAL 出貨、JMSSBK 退貨）：英文欄位，W／V 欄是實際日期 ----------
+SAL_FIELDS = [('DELIVNO', 'C', 10, 0), ('DELIVORD', 'C', 2, 0), ('CODE', 'C', 2, 0), ('STYLE', 'C', 15, 0), ('COLO', 'C', 2, 0), ('UNIT_NM', 'C', 2, 0),
+              ('TRAN_RATE', 'N', 4, 0), ('PRICE', 'N', 10, 1), ('OUTPRICE', 'N', 10, 1), ('PRC', 'N', 10, 1), ('OUTQTY', 'N', 8, 1), ('UNIT', 'C', 1, 0),
+              ('SALEGET', 'N', 12, 1), ('RECEIVE', 'N', 12, 1), ('CUT', 'L', 1, 0), ('TOTBKPAY', 'N', 12, 1), ('PAY', 'L', 1, 0), ('BUY', 'L', 1, 0),
+              ('ID', 'C', 6, 0), ('SNAME', 'C', 20, 0), ('AMOUNT', 'N', 12, 0), ('EMPNO', 'C', 3, 0), ('DELIVDATE', 'C', 7, 0)]
+BK_FIELDS = [('DELIVNO', 'C', 10, 0), ('SERIES', 'C', 4, 0), ('DELIVORD', 'C', 2, 0), ('CODE', 'C', 2, 0), ('STYLE', 'C', 15, 0), ('COLO', 'C', 2, 0), ('UNIT_NM', 'C', 2, 0),
+             ('TRAN_RATE', 'N', 4, 0), ('PRICE', 'N', 10, 1), ('OUTPRICE', 'N', 10, 1), ('OUTQTY', 'N', 8, 1), ('UNIT', 'C', 1, 0), ('SALEGET', 'N', 12, 1),
+             ('RECEIVE', 'N', 12, 1), ('TOTBKPAY', 'N', 12, 1), ('PAY', 'L', 1, 0), ('HOLD', 'L', 1, 0), ('ID', 'C', 6, 0), ('SNAME', 'C', 20, 0),
+             ('AMOUNT', 'N', 12, 0), ('EMPNO', 'C', 3, 0), ('DELIVDATE', 'C', 7, 0)]
+RAW_CUSTS = [('2T06', '甲商行'), ('5X03', '乙公司'), ('3A11', '丙店'), ('7K02', '丁行')]
+
+
+def raw_rows():
+    """回傳 (出貨列, 退貨列)，每列是 dict。114/09～114/11；單號 11411… 的單有一部分實際在 10/30、10/31 出貨。"""
+    random.seed(7)
+    sal, bk = [], []
+    no = 0
+    for ym in (11409, 11410, 11411):
+        for k in range(40):
+            no += 1
+            cid, name = random.choice(RAW_CUSTS)
+            day = random.randint(1, 28)
+            date = ym * 100 + day
+            if ym == 11411 and k < 10: date = 11410 * 100 + 30 + (k % 2)   # 11 月的單號，10 月底就出貨
+            delivno = f'{ym}{no:05d}'
+            for line in range(1, random.randint(2, 3) + 1):
+                cat, pat, sizes, price = random.choice(PRODUCTS[:5])
+                sku = pat.format(random.choice(sizes))
+                dozen = random.random() < 0.5
+                q = random.choice([0.5, 1, 2]) if dozen else random.randint(1, 10)
+                amt = round(q * price * (12 if dozen else 1), 1)
+                sal.append(dict(DELIVNO=delivno, DELIVORD=f'{line:02d}', CODE=cat, STYLE=sku, COLO=random.choice(COLORS[:2]), UNIT_NM='打' if dozen else '件',
+                                TRAN_RATE=12 if dozen else 1, PRICE=round(price * (12 if dozen else 1) * 0.7, 1), OUTPRICE=price * (12 if dozen else 1), PRC=0.0, OUTQTY=q,
+                                UNIT='2' if dozen else '1', SALEGET=amt, RECEIVE=0.0, CUT=False, TOTBKPAY=0.0, PAY=False, BUY=False, ID=cid, SNAME=name,
+                                AMOUNT=0, EMPNO='22', DELIVDATE=str(date)))
+    for i in range(6):   # 退貨：9 月單號但 10 月 2 日才退回 2 筆
+        ym = 11409 + (i // 2)
+        date = (11410 * 100 + 2) if i < 2 else ym * 100 + 15
+        cid, name = RAW_CUSTS[i % 4]
+        bk.append(dict(DELIVNO=f'{ym}9{i:04d}', SERIES='', DELIVORD='01', CODE='54', STYLE='5401-M', COLO='01', UNIT_NM='件', TRAN_RATE=1, PRICE=105.0,
+                       OUTPRICE=150.0, OUTQTY=2.0, UNIT='1', SALEGET=300.0, RECEIVE=0.0, TOTBKPAY=0.0, PAY=False, HOLD=True, ID=cid, SNAME=name,
+                       AMOUNT=300, EMPNO='21', DELIVDATE=str(date)))
+    return sal, bk
+
+
+def write_dbf(path, fields, rows, deleted=()):
+    """dBase III 檔，中文用 Big5（和系統匯出的 DBF 一樣）。deleted：要標成已刪除的列號。"""
+    rec_len = 1 + sum(f[2] for f in fields)
+    head_len = 32 + 32 * len(fields) + 1
+    out = bytearray(struct.pack('<BBBBIHH20x', 0x03, 126, 10, 30, len(rows), head_len, rec_len))
+    for name, typ, ln, dec in fields:
+        out += name.encode('ascii').ljust(11, b'\0') + typ.encode() + b'\0' * 4 + bytes([ln, dec]) + b'\0' * 14
+    out += b'\r'
+    for i, r in enumerate(rows):
+        out += b'*' if i in deleted else b' '
+        for name, typ, ln, dec in fields:
+            v = r[name]
+            if typ == 'C': b = str(v).encode('big5').ljust(ln, b' ')[:ln]
+            elif typ == 'L': b = b'T' if v else b'F'
+            else: b = (f'{v:.{dec}f}' if dec else f'{int(v)}').rjust(ln).encode()
+            out += b
+    out += b'\x1a'
+    open(path, 'wb').write(bytes(out))
+
+
+def write_raw_xlsx(path, sheet, fields, rows):
+    """像 WPS 把 DBF 另存成 Excel：工作表名稱是檔名、英文表頭、文字欄位存成文字。"""
+    wb = openpyxl.Workbook(); s = wb.active; s.title = sheet
+    s.append([f[0] for f in fields])
+    for r in rows: s.append([r[f[0]] for f in fields])
+    wb.save(path)
+
+
+def make_raw(fx):
+    sal, bk = raw_rows()
+    write_dbf(os.path.join(fx, 'JMSSAL.DBF'), SAL_FIELDS, sal + [dict(sal[0], DELIVNO='1141199999')], deleted={len(sal)})
+    write_dbf(os.path.join(fx, 'JMSSBK.DBF'), BK_FIELDS, bk)
+    write_raw_xlsx(os.path.join(fx, 'JMSSAL.xlsx'), 'JMSSAL', SAL_FIELDS, sal)
+    write_raw_xlsx(os.path.join(fx, 'JMSSBK.xlsx'), 'JMSSBK', BK_FIELDS, bk)
+    print(f'JMSSAL／JMSSBK（.DBF 與 .xlsx）: {len(sal)} 筆出貨（DBF 另有 1 筆已刪除）、{len(bk)} 筆退貨')
+
+
 if __name__ == '__main__':
     os.makedirs(FX, exist_ok=True)
     p = lambda n: os.path.join(FX, n)
@@ -218,6 +300,7 @@ if __name__ == '__main__':
     make_xlsx(p('mid_plain.xlsx'), 1500)
     make_month_xlsx(p('month.xlsx'))
     make_class_xlsx(p('class.xlsx'))
+    make_raw(FX)
     encrypt_agile(p('class.xlsx'), p('class_agile.xlsx'), AGILE_PW)
     encrypt_agile(p('month.xlsx'), p('month_agile.xlsx'), AGILE_PW)
     encrypt_agile(p('plain.xlsx'), p('agile.xlsx'), AGILE_PW)

@@ -2,7 +2,7 @@
 (function (root) {
   const MAGIC = 'DVDS1';
   const STR = ['ord', 'cat', 'sku', 'color', 'unit', 'cust', 'cname', 'rep'];
-  const NUM = ['cost', 'price', 'qty', 'unitn', 'amt'];
+  const NUM = ['cost', 'price', 'qty', 'unitn', 'amt', 'date']; // date：實際出貨／退貨日期（民國 yyymmdd，沒有就是 0）
   const enc = new TextEncoder(), dec = new TextDecoder();
 
   // ---- 序列化：JSON 標頭 + 二進位欄位 ----
@@ -50,6 +50,7 @@
     const T = { Uint16Array, Int32Array, Float64Array, Uint8Array, Float32Array, Uint32Array };
     const get = (name) => {
       const c = head.cols.find((x) => x.name === name);
+      if (!c) return new Float64Array(head.n); // 舊資料沒有這個欄位（例如實際日期）
       const Ctor = T[c.type];
       return new Ctor(buf, base + c.off, c.len);
     };
@@ -211,7 +212,8 @@
   function makeDict() { const map = new Map(), list = []; return { list, code(s) { let c = map.get(s); if (c === undefined) { c = list.length; list.push(s); map.set(s, c); } return c; } }; }
 
   // meta.cat.map = { 代碼: [類別名稱, 大類] }（使用者匯入的商品類別代碼表）
-  function hydrate(raw, meta) {
+  // opts.ymMode：'date'（預設，依實際出貨／退貨日期；沒有日期的列改用單號）或 'ord'（依單號前 5 碼）
+  function hydrate(raw, meta, opts = {}) {
     const n = raw.n;
     const ds = { n, nSales: raw.nSales, nReturns: raw.nReturns, createdAt: raw.createdAt, sourceName: raw.sourceName, added: raw.added || [], str: {}, num: {}, src: raw.src };
     for (const k of STR) ds.str[k] = raw.str[k];
@@ -219,7 +221,13 @@
     const ordD = raw.str.ord.dict, ordC = raw.str.ord.codes;
     const ymOf = Int32Array.from(ordD, ymOfOrd);
     const ym = new Int32Array(n);
-    for (let r = 0; r < n; r++) ym[r] = ymOf[ordC[r]];
+    const dt = raw.num.date, byDate = opts.ymMode !== 'ord';
+    let dated = 0, moved = 0;
+    for (let r = 0; r < n; r++) {
+      const o = ymOf[ordC[r]], d = dt ? dt[r] : 0;
+      if (d > 0) { dated++; const dm = Math.floor(d / 100); if (dm !== o) moved++; ym[r] = byDate ? dm : o; } else ym[r] = o;
+    }
+    ds.dates = { dated, moved, mode: byDate ? 'date' : 'ord' };
     // 客戶 = 代號 + 客戶名
     const ckD = makeDict(); const ck = new Int32Array(n); const pair = new Map();
     const cC = raw.str.cust.codes, nC = raw.str.cname.codes, cD = raw.str.cust.dict, nD = raw.str.cname.dict;

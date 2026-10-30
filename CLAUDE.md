@@ -25,8 +25,9 @@ js/engine.js          樞紐分析、客戶與商品指標（維度含 季度、
 js/dashboard.js       儀表板：提醒、排名與毛利貢獻、佔比、毛利率／退貨率比較、損益兩平、應收帳款天數、客戶動態、商品結構、缺少的資料
 js/dataset.js         資料序列化、衍生欄位、資料包加解密、加密的本機儲存（Vault）
 js/xlsx-stream.js     Excel 串流讀取（自己解 ZIP，接受 File/Blob 或 Uint8Array）
+js/dbf.js             系統原始資料 .DBF 讀取（JMSSAL、JMSSBK），中文用 Big5
 js/office-crypto.js   有開啟密碼的 Excel 解密（[MS-OFFCRYPTO] Agile 與 Standard）
-js/ingest.js          依表頭名稱讀「原始進貨表」「原始退貨表」
+js/ingest.js          依表頭名稱讀總表的「原始進貨表」「原始退貨表」，或系統原始資料 JMSSAL／JMSSBK（.DBF 或另存的 Excel，可一次選多個檔案）
 js/worker.js          背景執行緒：解密＋讀 Excel、打包／解開資料包
 js/chart.js           圖表
 sw.js                 離線快取
@@ -38,6 +39,15 @@ sw.js                 離線快取
 BB/BC/BI 對照表整張改成和 AK/AT/BM 一樣，其他對照表只加進貨的新值；AR2 填下個月，最後另存新檔。
 啟動時記住上次的資料夾（`%LOCALAPPDATA%\總表更新工具\settings.json`，只存路徑），自動挑最新的總表／JMSSAL／JMSSBK，跳確認視窗。
 說明在 `excel-tool/README.md`。`.ps1` 必須存成 UTF-8 含 BOM。測試：`powershell -NoProfile -ExecutionPolicy Bypass -File tests\excel_tool_test.ps1`（需要 Excel）。
+
+### 兩種資料來源
+1. **總表**（中文表頭）。A 欄表頭叫「出貨日期」但其實是發貨單號；沒有實際出貨日期。
+2. **系統原始資料**（建議）：JMSSAL（出貨，A～W）、JMSSBK（退貨，A～V），英文欄位。對照：DELIVNO 單號、CODE 商品類別、STYLE 商品代號、COLO 顏色、
+   UNIT_NM 單位、PRICE 單價（成本）、OUTPRICE 售價、OUTQTY 數量、UNIT 單位(數字)、SALEGET 品項金額、ID 客戶代號、SNAME 客戶名、EMPNO 業務員、
+   **DELIVDATE 實際出貨／退貨日期（民國 yyymmdd 文字，例如 1150801）**。AMOUNT 是整張單的總額（只在第一列），不要拿來加總。
+   使用者在 Mac 用 WPS 開 DBF 時中文會變亂碼（編碼錯），所以網站直接讀 .DBF 並用 Big5 解碼；請使用者直接選 .DBF，不要先轉 Excel。
+- **月份依據**（`S.ymMode`，存在這台裝置的 localStorage）：預設 `date` 依 DELIVDATE；`ord` 依單號前 5 碼。沒有實際日期的列一律用單號。
+  兩種都保留，在「資料與設定」切換。每列的日期存在 `num.date`（民國 yyymmdd，沒有就 0）；舊資料沒有這欄時讀出來是 0。
 
 ### 資料流程
 - **電腦匯入 Excel**：worker 讀檔頭；若是加密檔（D0 CF 11 E0）就用 `OfficeCrypto.decryptXlsx` 在記憶體內解密成 Uint8Array（不建立 Blob，避免被暫存到硬碟），讀完 `fill(0)` 清空。→ `Dataset.serialize` → `Vault.save` 加密存進 IndexedDB。
@@ -53,7 +63,7 @@ BB/BC/BI 對照表整張改成和 AK/AT/BM 一樣，其他對照表只加進貨�
 ## 儀表板的定義（改之前先問使用者）
 - 毛利率 = 銷貨毛利 ÷ 銷貨金額（和總覽、Excel 一樣，未扣退貨）；毛利貢獻 = 淨毛利（扣退貨）；毛利貢獻率 = 佔全部淨毛利的比例。
 - 損益兩平 = 每月固定費用 ÷ 淨毛利率；應收帳款天數 = 應收帳款餘額 ÷ 近 3 個月淨銷售 × 91。
-- 總表的 RECEIVE、PAY 欄可能是收款紀錄，意思尚未和使用者確認；確認後可改成自動算應收帳款。
+- 總表的 RECEIVE、PAY 欄可能是收款紀錄，意思尚未和使用者確認。使用者說應收帳款資料之後會另外提供，先不要自己推算。
 
 ## 修改時要注意
 - **新增或改名 js/css 檔**：要加進 `sw.js` 的 `SHELL` 清單；任何程式檔有變動就把 `sw.js` 的 `VERSION` 加 1（例如 v7 → v8），手機才會拿到新版。

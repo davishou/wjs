@@ -1,5 +1,5 @@
 // 背景執行緒：讀取 Excel 並轉成資料集，不會卡住畫面。
-importScripts('office-crypto.js', 'xlsx-stream.js', 'ingest.js', 'dataset.js');
+importScripts('office-crypto.js', 'xlsx-stream.js', 'dbf.js', 'ingest.js', 'dataset.js');
 
 let last = 0;
 function report(s) {
@@ -7,23 +7,28 @@ function report(s) {
   if (now - last > 150) { last = now; self.postMessage({ type: 'progress', ...s }); }
 }
 
-// 讀取 Excel。有開啟密碼的：在記憶體內解密，不寫入任何檔案；用完立刻清空
-async function readExcel(file, password) {
-  let src = file, plain = null;
-  const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
-  if (self.OfficeCrypto.isCfb(head)) {
-    plain = await self.OfficeCrypto.decryptXlsx(new Uint8Array(await file.arrayBuffer()), password, report);
-    src = plain;
-  }
+// 讀取一個或多個檔案（Excel 或 DBF）。有開啟密碼的 Excel：在記憶體內解密，不寫入任何檔案；用完立刻清空
+async function readExcel(fileOrFiles, password) {
+  const files = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles];
+  const sources = [], plains = [];
   try {
-    return await self.Ingest.ingestXlsx(src, plain ? (s) => report({ ...s, pct: 0.2 + 0.8 * (s.pct || 0) }) : report, file.name);
-  } finally { if (plain) plain.fill(0); }
+    for (const file of files) {
+      const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+      if (self.OfficeCrypto.isCfb(head)) {
+        const plain = await self.OfficeCrypto.decryptXlsx(new Uint8Array(await file.arrayBuffer()), password, report);
+        plains.push(plain); sources.push({ src: plain, name: file.name, dbf: false });
+      } else sources.push({ src: file, name: file.name, dbf: self.Dbf.isDbf(head, file.name) });
+    }
+    const dec = plains.length ? (s) => report({ ...s, pct: 0.2 + 0.8 * (s.pct || 0) }) : report;
+    return await self.Ingest.ingestFiles(sources, dec);
+  } finally { plains.forEach((p) => p.fill(0)); }
 }
 
 // 不是總表時，試著當作商品類別代碼表讀；是總表就回傳 null
 async function readOther(file, password) {
   let src = file, plain = null;
   const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+  if (self.Dbf.isDbf(head, file.name)) return null; // DBF 一定是原始資料
   if (self.OfficeCrypto.isCfb(head)) { plain = await self.OfficeCrypto.decryptXlsx(new Uint8Array(await file.arrayBuffer()), password, report); src = plain; }
   try {
     if ((await self.Ingest.detectKind(src)) === 'master') return null;
@@ -35,16 +40,20 @@ async function readOther(file, password) {
 }
 
 self.onmessage = async (e) => {
-  const { type, file, password } = e.data;
+  const { type, password } = e.data;
+  const file = e.data.file || (e.data.files && e.data.files[0]);
   try {
     if (type === 'ingest') {
-      // 先看是總表還是商品類別代碼表（使用者可能把分類表拖進同一個地方）
-      const cls = await readOther(file, password);
-      if (cls) { self.postMessage({ type: 'done', classification: cls }); return; }
-      const raw = await readExcel(file, password);
+      const files = e.data.files || [file];
+      // 只選一個 Excel 時，先看是不是商品類別代碼表（使用者可能把分類表拖進同一個地方）
+      if (files.length === 1) {
+        const cls = await readOther(file, password);
+        if (cls) { self.postMessage({ type: 'done', classification: cls }); return; }
+      }
+      const raw = await readExcel(files, password);
       self.postMessage({ type: 'progress', stage: '整理資料', pct: 1, rows: raw.n });
       const buf = self.Dataset.serialize(raw);
-      self.postMessage({ type: 'done', buf, ms: raw.parseMs }, [buf]);
+      self.postMessage({ type: 'done', buf, ms: raw.parseMs, info: { dated: raw.dated, nSales: raw.nSales, nReturns: raw.nReturns, warning: raw.warning || '' } }, [buf]);
     } else if (type === 'classify') {
       const cls = await readOther(file, password);
       if (!cls) throw new Error('這是總表，不是商品類別代碼表。總表請拖到上面的「更新資料」。');

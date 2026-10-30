@@ -187,10 +187,10 @@
       <div class="panel" id="importPanel">
         <div class="panel-head"><h2>更新資料</h2></div>
         <div class="drop" id="drop">
-          <input type="file" id="fileXlsx" accept=".xlsx,.xlsm" hidden>
+          <input type="file" id="fileXlsx" accept=".xlsx,.xlsm,.dbf,.DBF" multiple hidden>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm-1 7V3.5L18.5 9zM8 13h2l1 2 1-2h2l-2 3 2 3h-2l-1-2-1 2H8l2-3z"/></svg>
-          <p><strong>把總表 Excel 拖到這裡</strong>，或 <button class="btn primary" id="pickXlsx">選擇檔案</button></p>
-          <p class="hint">只會讀取「原始進貨表」A～AE 欄與「原始退貨表」A～AB 欄，其他工作表一律忽略。檔案只在這台裝置上處理，不會上傳。有開啟密碼的 Excel 也可以直接匯入，會請你輸入密碼，在瀏覽器內解密。</p>
+          <p><strong>把總表 Excel，或系統的 JMSSAL、JMSSBK（.DBF）拖到這裡</strong>，或 <button class="btn primary" id="pickXlsx">選擇檔案</button></p>
+          <p class="hint">可以選總表，也可以一次選系統匯出的 JMSSAL 和 JMSSBK（.DBF 直接選就好，不用先轉 Excel，中文才不會變亂碼）。原始資料有實際出貨日期，月份會更準。總表只讀「原始進貨表」「原始退貨表」，其他工作表一律忽略。檔案只在這台裝置上處理，不會上傳。有開啟密碼的 Excel 也可以直接匯入，會請你輸入密碼，在瀏覽器內解密。</p>
         </div>
         <div class="add-month" id="addMonth" hidden>
           <h3>每月加入新資料</h3>

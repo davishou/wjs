@@ -40,6 +40,7 @@
   // ---------- 狀態 ----------
   const S = {
     E: null, raw: null, vault: null, locked: false, meta: null, // meta：分類表、固定費用、應收帳款（存在加密的資料裡）
+    ymMode: store.get('ymMode', 'date'), // 月份依據：'date' 實際出貨／退貨日期（預設）、'ord' 單號
     dash: Object.assign({ period: 'ytd', rankDim: 'ck', rankSort: 'net', cmp: 'quarter' }, store.get('dash', {})), // vault.key 只放記憶體，不會存下來
     view: 'overview',
     ref: store.get('ref', null),
@@ -467,6 +468,7 @@
 
   const DETAIL_COLS = [
     { key: 'src', label: '來源' }, { key: 'ord', label: '單號' }, { key: 'ym', label: '年月', fmt: 'ym' },
+    { key: 'date', label: '實際日期', fmtFn: (v) => (v ? `${Math.floor(v / 10000)}/${String(Math.floor(v / 100) % 100).padStart(2, '0')}/${String(v % 100).padStart(2, '0')}` : '') },
     { key: 'cust', label: '客戶代號' }, { key: 'cname', label: '客戶名' }, { key: 'region', label: '區域' }, { key: 'rep', label: '業務員' },
     { key: 'cat', label: '類別' }, { key: 'sku', label: '商品代號' }, { key: 'color', label: '顏色' },
     { key: 'qty', label: '數量', n: 1, fmt: 'int' }, { key: 'unit', label: '單位' }, { key: 'sold', label: '賣出數', n: 1, fmt: 'int' },
@@ -479,6 +481,7 @@
       const k = c.key;
       if (k === 'src') o.src = ds.src[i] ? '退貨' : '進貨';
       else if (ds.str[k]) o[k] = ds.str[k].dict[ds.str[k].codes[i]];
+      else if (c.fmtFn) o[k] = c.fmtFn(ds.num[k] ? ds.num[k][i] : 0);
       else o[k] = ds.num[k][i];
     }
     return o;
@@ -816,37 +819,45 @@
     return h[0] === 0xd0 && h[1] === 0xcf && h[2] === 0x11 && h[3] === 0xe0;
   }
 
-  async function importXlsx(file, { force } = {}) {
-    if (!file) return;
-    if (!force && /\.xls$/i.test(file.name)) { toast('舊版 .xls 格式無法讀取，請在 Excel「另存新檔」為 .xlsx 再匯入', 5000); return; }
-    if (!force && !/\.xls[xm]$/i.test(file.name)) { toast('請選擇 .xlsx 檔案'); return; }
+  // 可以一次選多個檔案：總表一個，或系統原始資料 JMSSAL + JMSSBK（.DBF 或另存的 Excel）
+  async function importXlsx(fileOrFiles, { force } = {}) {
+    const files = (Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles]).filter(Boolean);
+    if (!files.length) return;
+    const file = files[0];
+    const old = files.find((f) => /\.xls$/i.test(f.name));
+    if (!force && old) { toast(`「${old.name}」是舊版 .xls 格式，無法讀取，請在 Excel「另存新檔」為 .xlsx 再匯入`, 5000); return; }
+    const bad = files.find((f) => !/\.(xls[xm]|dbf)$/i.test(f.name));
+    if (!force && bad) { toast(`「${bad.name}」不是 Excel（.xlsx）或 DBF 檔`, 4000); return; }
     if (force) toast('這是 Excel 檔，直接匯入', 3000);
     go('data');
-    const encrypted = await isCfbFile(file);
+    const names = files.map((f) => f.name).join('、');
+    let encrypted = false; for (const f of files) if (await isCfbFile(f)) encrypted = true;
     let xlsPw = null, appPw = null, same = false;
     if (encrypted || !S.vault) {
-      const r = await askImportPasswords(file.name, encrypted, !S.vault, '');
+      const r = await askImportPasswords(names, encrypted, !S.vault, '');
       if (!r) { toast('已取消匯入'); return; }
       ({ xlsPw, appPw, same } = r);
     }
     for (;;) {
       const t0 = performance.now();
-      showProgress(0, '準備讀取 ' + file.name);
+      showProgress(0, '準備讀取 ' + names);
       try {
-        const d = await runWorker({ type: 'ingest', file, password: xlsPw }, [], (s) => showProgress(s.pct || 0, `${s.stage}… ${s.rows ? nf0.format(s.rows) + ' 筆' : ''}`));
+        const d = await runWorker({ type: 'ingest', files, password: xlsPw }, [], (s) => showProgress(s.pct || 0, `${s.stage}… ${s.rows ? nf0.format(s.rows) + ' 筆' : ''}`));
         xlsPw = null;
         if (d.classification) { appPw = null; showProgress(1, '這是商品類別代碼表，已套用'); await applyClassification(d.classification); return; }
         showProgress(1, '加密並儲存到這台裝置…');
         if (appPw) { S.vault = await Dataset.Vault.create(appPw); appPw = null; }
-        await loadBuffer(d.buf, { name: file.name, save: true });
-        showProgress(1, `完成：${nf0.format(S.E.ds.nSales)} 筆進貨、${nf0.format(S.E.ds.nReturns)} 筆退貨，花了 ${((performance.now() - t0) / 1000).toFixed(1)} 秒`);
+        await loadBuffer(d.buf, { name: names, save: true });
+        const di = S.E.ds.dates;
+        showProgress(1, `完成：${nf0.format(S.E.ds.nSales)} 筆進貨、${nf0.format(S.E.ds.nReturns)} 筆退貨，花了 ${((performance.now() - t0) / 1000).toFixed(1)} 秒` +
+          (di.dated ? `。${nf0.format(di.dated)} 筆有實際日期，其中 ${nf0.format(di.moved)} 筆的單號月份和實際月份不同` : '') + (d.info && d.info.warning ? '。注意：' + d.info.warning : ''));
         toast('資料已更新，已加密保存在這台裝置');
         return;
       } catch (err) {
         worker && worker.terminate(); worker = null;
         if (err.code === 'BAD_PASSWORD' || err.code === 'NEED_PASSWORD') {
           showProgress(0, 'Excel 密碼不正確');
-          const r = await askImportPasswords(file.name, true, false, err.code === 'BAD_PASSWORD' ? 'Excel 密碼不正確，請再試一次。' : '');
+          const r = await askImportPasswords(names, true, false, err.code === 'BAD_PASSWORD' ? 'Excel 密碼不正確，請再試一次。' : '');
           if (!r) { xlsPw = appPw = null; showProgress(0, '已取消匯入'); return; }
           xlsPw = r.xlsPw;
           if (same) appPw = r.xlsPw; // 開啟密碼選擇「也用這組」時，跟著改成正確的 Excel 密碼
@@ -920,7 +931,7 @@
       await Dataset.Vault.save(S.vault, buf); // 只存加密後的內容
     }
     S.raw = buf;
-    S.E = new Engine(Dataset.hydrate(raw, S.meta));
+    S.E = new Engine(Dataset.hydrate(raw, S.meta, { ymMode: S.ymMode }));
     if (S.ref && !S.E.ymIndex.has(S.ref)) S.ref = null;
     // 檢查樞紐設定中的期間仍有效
     if (S.pivot.from && !S.E.ymIndex.has(S.pivot.from)) S.pivot.from = 0;
@@ -983,18 +994,27 @@
     ];
     const last = ds.added && ds.added[ds.added.length - 1];
     if (last) items.splice(2, 0, ['最近加入', `${last.name}（${new Date(last.at).toLocaleDateString('zh-TW')}）`]);
+    const dt = ds.dates || { dated: 0, moved: 0 };
+    items.push(['實際日期', dt.dated ? `${nf0.format(dt.dated)} 筆有（共 ${nf0.format(ds.n)} 筆），其中 ${nf0.format(dt.moved)} 筆的單號月份和實際月份不同` : '這份資料沒有實際出貨日期（總表沒有 DELIVDATE），月份依單號']);
     f.innerHTML = items.map(([a, b]) => `<div><dt>${a}</dt><dd>${esc(b)}</dd></div>`).join('') +
-      `<div><dt>基準月（計算靜止、滯銷月數）</dt><dd><select id="dataRef"></select></dd></div>`;
+      `<div><dt>基準月（計算靜止、滯銷月數）</dt><dd><select id="dataRef"></select></dd></div>` +
+      `<div class="wide"><dt>月份依據</dt><dd><div class="seg" id="ymMode"><button data-v="date" class="${S.ymMode === 'date' ? 'on' : ''}">實際出貨／退貨日期</button><button data-v="ord" class="${S.ymMode === 'ord' ? 'on' : ''}">單號</button></div>` +
+      `<small class="muted">${dt.dated ? '預設依實際日期；沒有實際日期的資料改用單號前 5 碼判斷月份。' : '這份資料沒有實際日期，兩個選項結果相同。'}</small></dd></div>`;
     fillRefSelect($('#dataRef'));
+    $('#ymMode').onclick = (e) => {
+      const b = e.target.closest('button'); if (!b || b.dataset.v === S.ymMode) return;
+      S.ymMode = b.dataset.v; store.set('ymMode', S.ymMode);
+      loadBuffer(S.raw).then(() => toast(S.ymMode === 'date' ? '月份改依實際出貨／退貨日期' : '月份改依單號'));
+    };
   }
 
   function bindData() {
     const drop = $('#drop'), fx = $('#fileXlsx');
     $('#pickXlsx').addEventListener('click', () => fx.click());
-    fx.addEventListener('change', () => { importXlsx(fx.files[0]); fx.value = ''; });
+    fx.addEventListener('change', () => { importXlsx([...fx.files]); fx.value = ''; });
     ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
     ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
-    drop.addEventListener('drop', (e) => importXlsx(e.dataTransfer.files[0]));
+    drop.addEventListener('drop', (e) => importXlsx([...e.dataTransfer.files]));
     const fc = $('#fileClass');
     $('#pickClass').addEventListener('click', () => fc.click());
     fc.addEventListener('change', () => { importClassification(fc.files[0]); fc.value = ''; });
@@ -1005,7 +1025,7 @@
     fa.addEventListener('change', () => { addMonthXlsx(fa.files[0]); fa.value = ''; });
     // 整個視窗也可拖放
     window.addEventListener('dragover', (e) => e.preventDefault());
-    window.addEventListener('drop', (e) => { if (S.locked) { e.preventDefault(); return; } if (!drop.contains(e.target)) { e.preventDefault(); const f2 = e.dataTransfer.files[0]; if (f2) (/\.xls[xm]?$/i.test(f2.name) ? importXlsx(f2) : openPackFile(f2)); } });
+    window.addEventListener('drop', (e) => { if (S.locked) { e.preventDefault(); return; } if (!drop.contains(e.target)) { e.preventDefault(); const fs2 = [...e.dataTransfer.files]; if (fs2.length) (fs2.some((x) => /\.dvp$/i.test(x.name)) || (fs2.length === 1 && !/\.(xls[xm]?|dbf)$/i.test(fs2[0].name)) ? openPackFile(fs2.find((x) => /\.dvp$/i.test(x.name)) || fs2[0]) : importXlsx(fs2)); } });
     $('#themePick').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setTheme(b.dataset.theme); });
     $('#packExport').addEventListener('click', async () => {
       if (!S.raw) { toast('請先載入資料'); return; }
@@ -1079,6 +1099,7 @@
       const sig = String.fromCharCode(...head.slice(0, 4));
       if (sig === 'DVPK') { await openPackBuffer(await file.arrayBuffer(), $('#openPw').value); return; }
       if (!file.size) throw new Error('這個檔案是空的（0 KB），可能還沒下載完成。請重新傳送一次資料包。');
+      if (/\.dbf$/i.test(file.name)) { importXlsx([file], { force: true }); return; } // 系統原始資料（DBF）
       if (head[0] === 0xd0 && head[1] === 0xcf) { importXlsx(file, { force: true }); return; } // 有密碼的 Excel
       if (sig.startsWith('PK')) {
         const zip = await XlsxStream.openZip(file);
