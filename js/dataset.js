@@ -28,7 +28,7 @@
     push('src', raw.src);
     const head = enc.encode(JSON.stringify({
       magic: MAGIC, n: raw.n, nSales: raw.nSales, nReturns: raw.nReturns,
-      createdAt: raw.createdAt, sourceName: raw.sourceName, added: raw.added || [], dicts, cols,
+      createdAt: raw.createdAt, sourceName: raw.sourceName, added: raw.added || [], meta: raw.meta || null, dicts, cols,
     }));
     const total = 8 + head.length + ((8 - ((8 + head.length) % 8)) % 8) + off;
     const out = new Uint8Array(total);
@@ -53,7 +53,7 @@
       const Ctor = T[c.type];
       return new Ctor(buf, base + c.off, c.len);
     };
-    const raw = { n: head.n, nSales: head.nSales, nReturns: head.nReturns, createdAt: head.createdAt, sourceName: head.sourceName, added: head.added || [], str: {}, num: {} };
+    const raw = { n: head.n, nSales: head.nSales, nReturns: head.nReturns, createdAt: head.createdAt, sourceName: head.sourceName, added: head.added || [], meta: head.meta || null, str: {}, num: {} };
     for (const k of STR) raw.str[k] = { dict: head.dicts[k], codes: get('s.' + k) };
     for (const k of NUM) raw.num[k] = get('n.' + k);
     raw.src = get('src');
@@ -105,6 +105,9 @@
   }
 
   // 單號前 5 碼是民國年月（例如 11501 = 115 年 1 月）；讀不出來時為 0
+  // 在資料裡換上新的 meta（分類表、固定費用、應收帳款），回傳新的資料
+  function withMeta(buf, meta) { const raw = deserialize(buf); raw.meta = meta || null; return serialize(raw); }
+
   function ymOfOrd(s) { const v = parseInt(String(s).slice(0, 5), 10); return Number.isNaN(v) ? 0 : v; }
 
   // ---- 每月加入新資料 ----
@@ -136,7 +139,7 @@
     const now = new Date().toISOString();
     const out = {
       n, nSales: base.nSales - removed[0] + added[0], nReturns: base.nReturns - removed[1] + added[1],
-      createdAt: now, sourceName: base.sourceName,
+      createdAt: now, sourceName: base.sourceName, meta: base.meta || null,
       added: (base.added || []).concat([{ name: name || '', at: now, sales: added[0], returns: added[1] }]).slice(-24),
       str: {}, num: {}, src: new Uint8Array(n),
     };
@@ -178,9 +181,37 @@
     if (b >= 0) p = Math.min(p, b);
     return sku.slice(0, p);
   }
+  // 商品類別代碼：Excel 可能把 03 存成數字 3，統一補成兩碼；「(空白)」視為空白
+  function normCat(v) {
+    const t = String(v == null ? '' : v).trim();
+    if (t === '(空白)' || t === '（空白）') return '';
+    return /^\d$/.test(t) ? '0' + t : t;
+  }
+  // 商品代號 → [款號, 尺寸]。尺寸在「/」或「-」之後，也可能直接接在數字後面：
+  //   A100-1 → A100 / 1；B200/3 → B200 / 3；5401/M-L → 5401 / M-L；AR9006XXL → AR9006 / XXL；6872XL-XXL → 6872 / XL-XXL
+  function splitSku(sku) {
+    const t = String(sku || '').trim();
+    const sl = t.indexOf('/');
+    if (sl > 0) return [t.slice(0, sl).trim(), t.slice(sl + 1).trim().toUpperCase()];
+    const m = /^([A-Za-z]*\d+)(.*)$/.exec(t);
+    if (m) return [m[1], m[2].replace(/^[\s\-_.]+/, '').trim().toUpperCase()];
+    const d = t.indexOf('-');
+    if (d > 0) return [t.slice(0, d), t.slice(d + 1).toUpperCase()];
+    return [t, ''];
+  }
+  // 尺寸排序：數字由小到大，再來 XS < S < M < L < XL < XXL…，M-L 這種範圍以第一個尺寸排
+  const SIZE_ORDER = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', 'XXXL', '3XL', '4XL', '5XL', 'F', 'FREE'];
+  function sizeRank(s) {
+    if (!s) return 1e6;
+    if (/^\d+(\.\d+)?$/.test(s)) return +s;
+    const first = s.split('-')[0];
+    const i = SIZE_ORDER.indexOf(first);
+    return i >= 0 ? 1000 + i * 10 + (s.includes('-') ? 5 : 0) : 5000;
+  }
   function makeDict() { const map = new Map(), list = []; return { list, code(s) { let c = map.get(s); if (c === undefined) { c = list.length; list.push(s); map.set(s, c); } return c; } }; }
 
-  function hydrate(raw) {
+  // meta.cat.map = { 代碼: [類別名稱, 大類] }（使用者匯入的商品類別代碼表）
+  function hydrate(raw, meta) {
     const n = raw.n;
     const ds = { n, nSales: raw.nSales, nReturns: raw.nReturns, createdAt: raw.createdAt, sourceName: raw.sourceName, added: raw.added || [], str: {}, num: {}, src: raw.src };
     for (const k of STR) ds.str[k] = raw.str[k];
@@ -213,6 +244,29 @@
     ds.str.ck = { dict: ckD.list, codes: ck };
     ds.str.region = { dict: regD.list, codes: region };
     ds.str.sku2 = { dict: s2D.list, codes: sku2 };
+    // 款號、尺寸（由商品代號拆出來，不改動原始資料）
+    const stD = makeDict(), szD = makeDict();
+    const stOf = new Int32Array(raw.str.sku.dict.length), szOf = new Int32Array(raw.str.sku.dict.length);
+    raw.str.sku.dict.forEach((s, i) => { const [a, b] = splitSku(s); stOf[i] = stD.code(a); szOf[i] = szD.code(b); });
+    const style = new Int32Array(n), size = new Int32Array(n);
+    for (let r = 0; r < n; r++) { style[r] = stOf[sC[r]]; size[r] = szOf[sC[r]]; }
+    ds.str.style = { dict: stD.list, codes: style };
+    ds.str.size = { dict: szD.list.map((x) => x || '（無尺寸）'), codes: size, rank: szD.list.map(sizeRank) };
+    // 商品類別：有分類表時顯示「代碼 名稱」，並加上大類（男／女／童／配件）
+    const cmap = (meta && meta.cat && meta.cat.map) || null;
+    const catRaw = raw.str.cat.dict;
+    const bigD = makeDict(); const bigOf = new Int32Array(catRaw.length);
+    const catLabel = catRaw.map((c, i) => {
+      const k = normCat(c), hit = cmap ? cmap[k] : null;
+      bigOf[i] = bigD.code(hit && hit[1] ? hit[1] : (cmap ? '未分類' : '（未匯入分類表）'));
+      if (!k) return '（空白）';
+      return hit && hit[0] ? k + ' ' + hit[0] : k;
+    });
+    ds.str.cat = { dict: catLabel, codes: raw.str.cat.codes, mapped: catRaw.map((c) => !!(cmap && cmap[normCat(c)] && cmap[normCat(c)][0])) };
+    const big = new Int32Array(n); const catC = raw.str.cat.codes;
+    for (let r = 0; r < n; r++) big[r] = bigOf[catC[r]];
+    ds.str.big = { dict: bigD.list, codes: big };
+    ds.meta = meta || null;
     ds.num.ym = ym; ds.num.sold = sold; ds.num.profit = profit;
     return ds;
   }
@@ -274,5 +328,5 @@
     async clear() { await idbDel('vault'); await idbDel('data'); },
   };
 
-  root.Dataset = { Vault, serialize, deserialize, hydrate, merge, makePack, openPack, packNeedsPassword, gzip, gunzip, idbSet, idbGet, idbDel, regionOf, simplify };
+  root.Dataset = { Vault, serialize, deserialize, hydrate, merge, withMeta, normCat, splitSku, sizeRank, makePack, openPack, packNeedsPassword, gzip, gunzip, idbSet, idbGet, idbDel, regionOf, simplify };
 })(typeof self !== 'undefined' ? self : globalThis);

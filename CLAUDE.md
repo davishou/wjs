@@ -21,7 +21,8 @@
 index.html            所有畫面（含開鎖畫面 #lock、密碼對話框 #dlg）
 css/app.css           三種介面風格：indigo 藍染、night 夜航、market 市集（用 [data-theme] 切換）
 js/app.js             介面邏輯（匯入、開鎖、資料包、樞紐、客戶、商品）
-js/engine.js          樞紐分析、客戶與商品指標
+js/engine.js          樞紐分析、客戶與商品指標（維度含 季度、商品大類、款號、尺寸）
+js/dashboard.js       儀表板：提醒、排名與毛利貢獻、佔比、毛利率／退貨率比較、損益兩平、應收帳款天數、客戶動態、商品結構、缺少的資料
 js/dataset.js         資料序列化、衍生欄位、資料包加解密、加密的本機儲存（Vault）
 js/xlsx-stream.js     Excel 串流讀取（自己解 ZIP，接受 File/Blob 或 Uint8Array）
 js/office-crypto.js   有開啟密碼的 Excel 解密（[MS-OFFCRYPTO] Agile 與 Standard）
@@ -42,7 +43,17 @@ BB/BC/BI 對照表整張改成和 AK/AT/BM 一樣，其他對照表只加進貨�
 - **電腦匯入 Excel**：worker 讀檔頭；若是加密檔（D0 CF 11 E0）就用 `OfficeCrypto.decryptXlsx` 在記憶體內解密成 Uint8Array（不建立 Blob，避免被暫存到硬碟），讀完 `fill(0)` 清空。→ `Dataset.serialize` → `Vault.save` 加密存進 IndexedDB。
 - **開啟密碼（Vault）**：IndexedDB 資料庫 `dv-analytics`、store `kv`、key `vault` = `{v, iter, salt, iv, ct}`。AES-256-GCM，PBKDF2-SHA256 60 萬次，內容先 gzip。金鑰只放記憶體（`S.vault`），重新整理就上鎖。舊版的未加密 key `data` 會在第一次開啟時轉成加密並刪除。
 - **資料包（.dvp）**：`'DVPK'` + flag + salt + iv + AES-GCM(gzip(serialize))。手機開啟資料包後，開啟密碼沿用資料包密碼。LINE 會把資料包包成 zip，`openPackFile` 會自動解開；選到 Excel 會直接匯入。
+- **meta（分類表與設定）**：存在資料標頭的 `meta`（`serialize`／`deserialize`）：`cat.map = {類別代碼: [名稱, 大類]}`、`fixedCost`（每月固定費用）、`ar = {amount, ym}`（應收帳款餘額）。
+  跟著資料一起加密進 Vault、跟著資料包到手機；重新匯入總表或每月加入時沿用目前的 meta（`loadBuffer`）。
+  **商品類別代碼表是使用者的公司資料，不可以寫進程式或 repo**，只能由使用者在「資料與設定」匯入（也可以直接拖進更新資料的框框，會自動辨識）。
+- **衍生欄位**：款號、尺寸由商品代號拆出（`splitSku`：「/」或「-」後面，或數字後面的字母，例如 AR9006XXL → AR9006 / XXL、6872XL-XXL → 6872 / XL-XXL），不改動原始資料，也不改「簡化代碼」（它要和 Excel 公式一致）。
+  商品類別代碼會補成兩碼（Excel 可能把 03 存成 3）。大類＝男／女／童／配件，用來分男女商品。
 - **忘記密碼**：沒有後門。開鎖畫面「忘記密碼？」→ 清除資料 → 電腦重新匯入 Excel／手機重新開啟資料包。
+
+## 儀表板的定義（改之前先問使用者）
+- 毛利率 = 銷貨毛利 ÷ 銷貨金額（和總覽、Excel 一樣，未扣退貨）；毛利貢獻 = 淨毛利（扣退貨）；毛利貢獻率 = 佔全部淨毛利的比例。
+- 損益兩平 = 每月固定費用 ÷ 淨毛利率；應收帳款天數 = 應收帳款餘額 ÷ 近 3 個月淨銷售 × 91。
+- 總表的 RECEIVE、PAY 欄可能是收款紀錄，意思尚未和使用者確認；確認後可改成自動算應收帳款。
 
 ## 修改時要注意
 - **新增或改名 js/css 檔**：要加進 `sw.js` 的 `SHELL` 清單；任何程式檔有變動就把 `sw.js` 的 `VERSION` 加 1（例如 v7 → v8），手機才會拿到新版。

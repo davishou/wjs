@@ -7,13 +7,17 @@
     { key: 'src', label: '資料來源' },
     { key: 'year', label: '年份' },
     { key: 'ym', label: '年月' },
+    { key: 'quarter', label: '季度' },
     { key: 'month', label: '月份' },
     { key: 'region', label: '區域' },
     { key: 'rep', label: '業務員' },
     { key: 'ck', label: '客戶' },
     { key: 'cust', label: '客戶代號' },
     { key: 'cname', label: '客戶名' },
+    { key: 'big', label: '商品大類' },
     { key: 'cat', label: '商品類別' },
+    { key: 'style', label: '款號' },
+    { key: 'size', label: '尺寸' },
     { key: 'sku2', label: '商品代碼(簡化)' },
     { key: 'sku', label: '商品代號' },
     { key: 'color', label: '顏色代號' },
@@ -67,7 +71,7 @@
       if (this._codeCache[key]) return this._codeCache[key];
       const ds = this.ds; let res;
       if (ds.str[key]) {
-        res = { codes: ds.str[key].codes, labels: ds.str[key].dict, sortNum: false };
+        res = { codes: ds.str[key].codes, labels: ds.str[key].dict, sortNum: false, rank: ds.str[key].rank || null };
       } else if (key === 'src') {
         res = { codes: ds.src, labels: SRC_NAMES };
       } else if (key === 'ym') {
@@ -79,6 +83,12 @@
         const codes = new Int32Array(this.n); const ym = ds.num.ym;
         for (let i = 0; i < this.n; i++) codes[i] = ix.get(Math.floor(ym[i] / 100)) ?? 0;
         res = { codes, labels: this.yearList.map((y) => y + '年'), ordered: true };
+      } else if (key === 'quarter') {
+        const qs = [...new Set(this.ymList.map((v) => Math.floor(v / 100) * 10 + Math.ceil((v % 100) / 3)))].sort((a, b) => a - b);
+        const ix = new Map(qs.map((v, i) => [v, i]));
+        const codes = new Int32Array(this.n); const ym = ds.num.ym;
+        for (let i = 0; i < this.n; i++) { const v = ym[i]; codes[i] = ix.get(Math.floor(v / 100) * 10 + Math.ceil((v % 100) / 3)) ?? 0; }
+        res = { codes, labels: qs.map((q) => `${Math.floor(q / 10)}年Q${q % 10}`), raw: qs, ordered: true };
       } else if (key === 'month') {
         const codes = new Int32Array(this.n); const ym = ds.num.ym;
         for (let i = 0; i < this.n; i++) codes[i] = Math.max(0, (ym[i] % 100) - 1);
@@ -248,7 +258,10 @@
       const coll = new Intl.Collator('zh-Hant', { numeric: true });
       out.sort((a, b) => {
         for (let d = 0; d < rowDims.length; d++) {
-          if (rowDims[d].ordered) { if (a.codes[d] !== b.codes[d]) return a.codes[d] - b.codes[d]; } else {
+          if (rowDims[d].ordered) { if (a.codes[d] !== b.codes[d]) return a.codes[d] - b.codes[d]; } else if (rowDims[d].rank) {
+            const r = rowDims[d].rank[a.codes[d]] - rowDims[d].rank[b.codes[d]]; if (r) return r;
+            const r2 = coll.compare(String(a.labels[d]), String(b.labels[d])); if (r2) return r2;
+          } else {
             const r = coll.compare(String(a.labels[d]), String(b.labels[d]));
             if (r) return r;
           }
@@ -339,13 +352,15 @@
         let st = custs[c]; if (!st) st = custs[c] = new Set(); st.add(ck[i]);
       }
       const list = [];
-      const catD = ds.str.cat.dict, catC = ds.str.cat.codes;
+      const catD = ds.str.cat.dict, catC = ds.str.cat.codes, bigD = ds.str.big ? ds.str.big.dict : null, bigC = ds.str.big ? ds.str.big.codes : null;
       for (let c = 0; c < N; c++) {
         if (!has[c]) continue;
         list.push({
           code: ds.str[level].dict[c],
           cat: catD[catC[firstRow[c]]],
+          big: bigD ? bigD[bigC[firstRow[c]]] : '',
           sku2: level === 'sku' ? ds.str.sku2.dict[ds.str.sku2.codes[firstRow[c]]] : '',
+          style: level !== 'style' ? ds.str.style.dict[ds.str.style.codes[firstRow[c]]] : '',
           first: first[c], last: last[c],
           tenure: ymDiff(ref, first[c]) + 1, // 110年至今月份
           idle: ymDiff(ref, last[c]), // 滯銷/停售月份

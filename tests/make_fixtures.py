@@ -9,6 +9,7 @@
   standard.xlsx    plain.xlsx 加上 Excel 2007 的開啟密碼（AES-128 + SHA-1）
   month.xlsx       每月加入用的新月份資料（115/01 新增、114/12 取代）
   month_agile.xlsx month.xlsx 加密
+  class.xlsx       假的商品類別代碼表；class_agile.xlsx 是加密版
   mid_standard.xlsx
 
 需要：pip install openpyxl cryptography
@@ -24,6 +25,21 @@ AGILE_PW = '測試pw123'      # agile.xlsx 的密碼（含中文，順便測 UTF
 STANDARD_PW = 'Abc!2007'   # standard.xlsx 的密碼
 
 
+# 假的商品：(類別代碼, 商品代號樣式, 尺寸, 售價)。代號寫法涵蓋「-」「/」和直接接在數字後面（AR9006XXL、6872XL-XXL）
+PRODUCTS = [
+    ('54', '5401-{}', ['M', 'L', 'XL'], 150),
+    ('60', '6001/{}', ['M-L', 'XL-XXL'], 120),
+    ('6-', '6872{}', ['M-L', 'XL-XXL'], 200),
+    ('25', 'AR9006{}', ['L', 'XL', 'XXL'], 300),
+    ('79', '7901-{}', ['90', '100', '110'], 100),
+    ('92', '9200', [''], 50),          # 沒有尺寸（像運費）
+    ('94', '9401-{}', ['F'], 80),      # 分類表裡沒有名稱的代碼
+]
+# 客戶：(代號, 名稱, 業務員)。9 開頭 → 其他地區；丁行 114 年起沒再買（可能流失）
+CUSTS = [('1001', '甲商行', '01'), ('1002', '己百貨', '01'), ('3002', '乙公司', '02'), ('5003', '丙店', '03'), ('7004', '丁行', '02'), ('9005', '庚批發', '03')]
+COLORS = ['01', '02', '05']
+
+
 def make_xlsx(path, per_month):
     random.seed(1)
     wb = openpyxl.Workbook()
@@ -31,22 +47,41 @@ def make_xlsx(path, per_month):
     wb.active['A1'] = '這張工作表應該被忽略'
     s = wb.create_sheet('原始進貨表')
     s.append(['出貨日期', '商品類別', '商品代號', '顏色代號', '單位', '單價', '售價', '數量', '單位(數字)', '品項總額', '客戶代號', '客戶名', '業務員'])
-    custs = [('1001', '甲商行'), ('3002', '乙公司'), ('5003', '丙店'), ('7004', '丁行')]
     n = 0
     for y in (112, 113, 114):
+        cost_ratio = 0.6 if y < 114 else 0.65   # 114 年毛利率變差
+        custs = [c for c in CUSTS if not (y == 114 and c[1] == '丁行')]
         for m in range(1, 13):
             for k in range(per_month):
-                c = random.choice(custs); sku = random.choice(['A100-1', 'A100-2', 'B200/3', 'C300'])
-                q = random.randint(1, 20); price = random.choice([100, 150, 200])
-                s.append([f'{y}{m:02d}{k:04d}', '類' + sku[0], sku, 'R', '雙', price * 0.6, price, q, 1, q * price, c[0], c[1], '王'])
+                c = random.choice(custs)
+                cat, pat, sizes, price = random.choices(PRODUCTS, weights=[5, 4, 3, 3, 2, 1, 1])[0]
+                size = random.choices(sizes, weights=list(range(len(sizes), 0, -1)))[0]   # 第一個尺寸最好賣
+                color = random.choices(COLORS, weights=[3, 2, 1])[0]                       # 01 最好賣
+                sku = pat.format(size) if '{}' in pat else pat
+                q = random.randint(1, 20)
+                unit, unitn = ('打', 2) if cat == '79' and k % 7 == 0 else ('件', 1)
+                s.append([f'{y}{m:02d}{k:04d}', cat, sku, color, unit, round(price * cost_ratio, 2), price, q, unitn, q * price, c[0], c[1], c[2]])
                 n += 1
     r = wb.create_sheet('原始退貨表')
     r.append(['退貨單號', '商品類別', '商品代號', '顏色代號', '單位', '單價', '售價', '數量', '單位(數字)', '退貨金額', '客戶代號', '客戶名', '業務員'])
     for y in (113, 114):
         for m in range(1, 13, 3):
-            r.append([f'{y}{m:02d}900', '類A', 'A100-1', 'R', '雙', 60, 100, 2, 1, 200, '1001', '甲商行', '王'])
+            r.append([f'{y}{m:02d}900', '54', '5401-M', '01', '件', 90, 150, 2, 1, 300 if y == 113 else 3000, '1001', '甲商行', '01'])
     wb.save(path)
     print(f'{os.path.basename(path)}: {n} 筆進貨、8 筆退貨')
+
+
+def make_class_xlsx(path):
+    """假的商品類別代碼表（和使用者的格式一樣：商品類別(代碼)、商品類別、大類）。名稱都是假的。"""
+    wb = openpyxl.Workbook()
+    s = wb.active; s.title = '商品類別代碼'
+    s.append(['商品類別(代碼)', '商品類別', '大類'])
+    for row in [('54', '測試男褲', '男'), ('60', '測試女褲', '女'), ('6-', '測試女無縫', '女'), ('25', '測試男衣', '男'),
+                ('79', '測試童褲', '童'), ('92', '測試運費', '配件'), (3, '測試手帕', '配件'), ('94', None, None), ('(空白)', None, None)]:
+        s.append(list(row))
+    wb.create_sheet('工作表2')
+    wb.save(path)
+    print(f'{os.path.basename(path)}: 商品類別代碼表（假資料）')
 
 
 def make_month_xlsx(path):
@@ -182,6 +217,8 @@ if __name__ == '__main__':
     make_xlsx(p('plain.xlsx'), 30)
     make_xlsx(p('mid_plain.xlsx'), 1500)
     make_month_xlsx(p('month.xlsx'))
+    make_class_xlsx(p('class.xlsx'))
+    encrypt_agile(p('class.xlsx'), p('class_agile.xlsx'), AGILE_PW)
     encrypt_agile(p('month.xlsx'), p('month_agile.xlsx'), AGILE_PW)
     encrypt_agile(p('plain.xlsx'), p('agile.xlsx'), AGILE_PW)
     encrypt_standard(p('plain.xlsx'), p('standard.xlsx'), STANDARD_PW)

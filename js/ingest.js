@@ -178,5 +178,49 @@
     return ds;
   }
 
-  root.Ingest = { ingestXlsx };
+  // ---- 商品類別代碼表（使用者另外提供的 Excel：商品類別(代碼)、商品類別、大類）----
+  // 找到表頭同時有「代碼」與「大類」的工作表；回傳 { map: {代碼: [名稱, 大類]}, rows, sheet }，沒有就回傳 null
+  async function readClassification(blob) {
+    const zip = await X.openZip(blob);
+    const sheets = await X.listSheets(zip);
+    const sst = X.parseSharedStrings(zip.entries['xl/sharedStrings.xml'] ? await zip.text('xl/sharedStrings.xml') : '');
+    for (const sh of sheets) {
+      if (!zip.entries[sh.path]) continue;
+      const rows = []; let cur = [];
+      const h = {
+        maxCol: 12, stop: false,
+        onCell(col, kind, val) { cur[col] = kind === 1 ? sst[val] : val; },
+        onRowEnd() { rows.push(cur); cur = []; if (rows.length > 20000) h.stop = true; },
+      };
+      await X.scanSheet(zip, sh.path, h);
+      const hi = rows.findIndex((r) => r && r.some((v) => String(v || '').includes('大類')));
+      if (hi < 0) continue;
+      const head = rows[hi].map((v) => String(v == null ? '' : v).trim());
+      const ci = head.findIndex((v) => v.includes('代碼'));
+      const bi = head.findIndex((v) => v.includes('大類'));
+      const ni = head.findIndex((v, i) => i !== ci && i !== bi && v.includes('類別'));
+      if (ci < 0 || bi < 0) continue;
+      const map = {}; let n = 0;
+      for (const r of rows.slice(hi + 1)) {
+        if (!r || r[ci] == null || String(r[ci]).trim() === '') continue;
+        const t = String(r[ci]).trim();
+        const code = t === '(空白)' || t === '（空白）' ? '' : (/^\d$/.test(t) ? '0' + t : t);
+        const name = ni >= 0 && r[ni] != null ? String(r[ni]).trim() : '';
+        const big = r[bi] != null ? String(r[bi]).trim() : '';
+        if (!name && !big) continue; // 沒有名稱也沒有大類的代碼，當作未分類
+        map[code] = [name, big]; n++;
+      }
+      if (n) return { map, rows: n, sheet: sh.name };
+    }
+    return null;
+  }
+  // 這個 Excel 是總表（有原始進貨表）還是分類表？
+  async function detectKind(blob) {
+    const sheets = await X.listSheets(await X.openZip(blob));
+    const names = sheets.map((s) => s.name.trim());
+    if (names.some((n) => ['原始進貨表', '進貨表', '原始出貨表'].includes(n))) return 'master';
+    return 'other';
+  }
+
+  root.Ingest = { ingestXlsx, readClassification, detectKind };
 })(typeof self !== 'undefined' ? self : globalThis);

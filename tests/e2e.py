@@ -207,8 +207,130 @@ async def main():
         await page.evaluate(f"localStorage.setItem('dv.theme','{th}')"); await page.reload(); await page.wait_for_selector('#lock:not([hidden])'); await page.screenshot(path=SH+f'/9_lock_{th}.png')
     await c3.close()
     await picker(b)
+    await dashboard(b)
     await b.close()
     print('全部通過')
+
+def expected_114():
+    """不經過網站，直接用 Python 從 plain.xlsx 和 class.xlsx 算出 114 年（基準月 114/12、今年累計）的數字，用來核對儀表板。"""
+    import openpyxl
+    wb = openpyxl.load_workbook(FX + '/plain.xlsx', read_only=True)
+    cls = {}
+    for r in list(openpyxl.load_workbook(FX + '/class.xlsx', read_only=True)['商品類別代碼'].iter_rows(values_only=True))[1:]:
+        c = str(r[0]).strip(); c = '0' + c if c.isdigit() and len(c) == 1 else c
+        if r[1] or r[2]: cls[c] = (r[1], r[2])
+    rows = []
+    for sheet, src in (('原始進貨表', 0), ('原始退貨表', 1)):
+        it = wb[sheet].iter_rows(values_only=True); head = next(it)
+        h = {k: i for i, k in enumerate(head)}
+        for r in it:
+            o = str(r[0]); amt = r[h['品項總額' if src == 0 else '退貨金額']]
+            rows.append(dict(src=src, ym=int(o[:5]), ord=o, cat=str(r[h['商品類別']]), sku=r[h['商品代號']], color=str(r[h['顏色代號']]),
+                             cost=r[h['單價']], price=r[h['售價']], qty=r[h['數量']], unitn=r[h['單位(數字)']], amt=amt, cust=str(r[h['客戶代號']]) + r[h['客戶名']]))
+    for r in rows: r['profit'] = r['amt'] * (1 - r['cost'] / r['price']) if r['price'] else 0
+    def tot(a, b):
+        sel = [r for r in rows if a <= r['ym'] <= b]
+        S = sum(r['amt'] for r in sel if r['src'] == 0); R = sum(r['amt'] for r in sel if r['src'] == 1)
+        PS = sum(r['profit'] for r in sel if r['src'] == 0); PR = sum(r['profit'] for r in sel if r['src'] == 1)
+        return dict(sales=S, returns=R, net=S - R, profit=PS, netProfit=PS - PR, orders=len({r['ord'] for r in sel if r['src'] == 0}), sel=sel)
+    cur = tot(11401, 11412)
+    by = {}
+    for r in cur['sel']: by[r['cust']] = by.get(r['cust'], 0) + (r['amt'] if r['src'] == 0 else -r['amt'])
+    top10 = sum(sorted(by.values(), reverse=True)[:10]) / cur['net']
+    big = {}
+    for r in cur['sel']:
+        b = cls.get(r['cat'], (None, None))[1] or '未分類'
+        big[b] = big.get(b, 0) + (r['amt'] if r['src'] == 0 else -r['amt'])
+    q1 = tot(11401, 11403)
+    s3 = tot(11410, 11412)['net']
+    # AR9006 款號：各尺寸賣出件數（單位(數字) 1 = 件，2 = 打 × 12）
+    size = {}
+    for r in rows:
+        if r['src'] == 0 and str(r['sku']).startswith('AR9006'):
+            k = str(r['sku'])[6:]; size[k] = size.get(k, 0) + (r['qty'] if r['unitn'] == 1 else r['qty'] * 12 if r['unitn'] == 2 else 0)
+    return dict(cur=cur, top10=top10, big={k: v / cur['net'] for k, v in big.items()}, q1margin=q1['profit'] / q1['sales'], s3=s3, size=size)
+
+
+async def dashboard(b):
+    """儀表板：數字和 Python 獨立計算的結果一致；分類表、固定費用、應收帳款會加密保存、跟著資料包走；尺寸與顏色。"""
+    exp = expected_114()
+    c = await b.new_context(viewport={'width': 1366, 'height': 900}, accept_downloads=True)
+    pg = await c.new_page(); errs = []
+    pg.on('pageerror', lambda e: errs.append(str(e)))
+    await pg.goto(URL); await pg.wait_for_timeout(300)
+    # 先匯入分類表（還沒有資料）→ 再匯入總表，分類表要套用上去
+    await pg.set_input_files('#fileXlsx', FX + '/plain.xlsx'); await dlg_fill(page=pg, vals={'app': 'dash1', 'app2': 'dash1'}); await wait_done(pg)
+    await pg.set_input_files('#fileClass', FX + '/class_agile.xlsx'); await dlg_fill(pg, {'xls': '測試pw123'})
+    await pg.wait_for_function("document.querySelector('#classState').textContent.includes('已匯入')")
+    ok('7 個代碼' in await pg.text_content('#classState') and '1 個類別代碼' in await pg.text_content('#classState'), '匯入有密碼的商品類別代碼表：' + await pg.text_content('#classState'))
+    await pg.click('a[data-view=dashboard]'); await pg.wait_for_selector('#dbAlerts .alerts')
+    d = await pg.evaluate('window.__dash')
+    close = lambda a, b, tol=0.005: abs(a - b) <= tol * max(1, abs(b))
+    e = exp['cur']
+    ok(all(close(d['cur'][k], e[k]) for k in ('sales', 'returns', 'net', 'profit', 'netProfit', 'orders')),
+       f"114 年累計：淨銷售 {d['cur']['net']:.0f}（Python {e['net']:.0f}）、淨毛利 {d['cur']['netProfit']:.0f}（{e['netProfit']:.0f}）、單數 {d['cur']['orders']}（{e['orders']}）")
+    ok(close(d['top10Share'], exp['top10']), f"前 10 大客戶佔比 {d['top10Share']:.4f}（Python {exp['top10']:.4f}）")
+    share = await pg.evaluate("Object.fromEntries([...document.querySelectorAll('#dbShare .share')[1].querySelectorAll('.srow')].map(r => [r.querySelector('.sl span').textContent, r.querySelector('.sl b').textContent]))")
+    ok(all(share.get(k) == f"{v * 100:.1f}%".replace('.0%', '%') for k, v in exp['big'].items()), f'商品大類佔比 {share}（Python {dict((k, round(v * 100, 1)) for k, v in exp["big"].items())}）')
+    al = await pg.text_content('#dbAlerts')
+    ok('毛利率下降 5 個百分點' in al and '丁行' not in al and '1 位去年同期有買的客戶' in al and '1 個商品類別代碼沒有分類' in al, '重點提醒：毛利率下降、可能流失、未分類代碼')
+    ok('7004 丁行' in await pg.text_content('#dbCust'), '可能流失名單有丁行（114 年沒再買）')
+    q1 = await pg.evaluate("[...document.querySelectorAll('#dbCmpBody table')[0].rows].find(r => r.cells[0].textContent.startsWith('114')).cells[1].querySelector('div').textContent")
+    ok(q1 == f"{exp['q1margin'] * 100:.0f}%", f"114 年 Q1 毛利率 {q1}（Python {exp['q1margin'] * 100:.2f}%）")
+    for v in ('year', 'month'):
+        await pg.click(f'#dbCmp button[data-v={v}]'); ok(await pg.locator('#dbCmpBody table').count() == 2, f'比較表切換「{v}」')
+    # 排名：切換維度、依毛利貢獻
+    for k in ('style', 'rep', 'region', 'big', 'cat', 'ck'):
+        await pg.click(f'#dbRankDim button[data-v={k}]')
+    await pg.click('#dbRankSort button[data-v=netProfit]')
+    pct = await pg.evaluate("[...document.querySelectorAll('#dbRank tbody tr')].map(r => parseFloat(r.cells[5].textContent))")
+    ok(abs(sum(pct) - 100) < 1, f'毛利貢獻率加起來約 100%：{pct}')
+    # 損益兩平與應收帳款天數
+    ok('缺少：每月固定費用' in await pg.text_content('#dbBep'), '沒填固定費用時說明缺少什麼')
+    await pg.fill('#dbFixed', '100,000'); await pg.click('#dbFixedForm button'); await pg.wait_for_selector('#dbBepChart svg')
+    bep = await pg.text_content('#dbBep .kpi .v')
+    want = 100000 / (e['netProfit'] / e['net'])
+    ok(bep.replace(' 萬', '') == f'{want / 1e4:.0f}', f'損益兩平 {bep}（Python {want:,.0f}）')
+    await pg.fill('#dbAr', '300000'); await pg.click('#dbArForm button'); await pg.wait_for_function("document.querySelector('#dbDso .kpi .v') && document.querySelector('#dbDso .kpi .v').textContent.includes('天')")
+    dso = await pg.text_content('#dbDso .kpi .v'); want = 300000 / exp['s3'] * 91
+    ok(dso == f'{want:.0f} 天', f'應收帳款天數 {dso}（Python {want:.1f}）')
+    # 解釋：每一區都有「這代表什麼」
+    ok(await pg.locator('#dbBody details.explain').count() >= 13, '每個數字和區塊都有說明')
+    await pg.screenshot(path=SH + '/20_dashboard.png', full_page=True)
+    # 重新開啟：分類表、固定費用、應收帳款都還在（加密保存）
+    await pg.reload(); await pg.fill('#lockPw', 'dash1'); await pg.click('#lockGo'); await pg.wait_for_selector('#lock[hidden]', state='attached')
+    await pg.click('a[data-view=dashboard]'); await pg.wait_for_selector('#dbBepChart svg')
+    ok('天' in await pg.text_content('#dbDso') and '測試男衣' in await pg.text_content('#dbShare'), '重新開啟後分類表、固定費用、應收帳款都還在')
+    st = await pg.evaluate(IDB_DUMP); ok(st['keys'] == ['vault'], 'IndexedDB 只有加密的資料')
+    # 重新匯入整份總表 → 設定保留
+    await pg.click('a[data-view=data]'); await pg.set_input_files('#fileXlsx', FX + '/plain.xlsx'); await wait_done(pg)
+    ok('7 個代碼' in await pg.text_content('#classState') and '100,000' in await pg.text_content('#metaState'), '重新匯入總表後，分類表與設定保留')
+    # 商品：款號層級、尺寸與顏色
+    await pg.click('a[data-view=products]'); await pg.click('#prLevel button[data-v=style]'); await pg.fill('#prSearch', 'AR9006'); await pg.wait_for_timeout(400)
+    await pg.click('#prTable tbody tr:first-child'); await pg.wait_for_selector('#dwSize .best')
+    best = await pg.text_content('#dwSize .best'); top = max(exp['size'], key=exp['size'].get)
+    sizes = await pg.evaluate("[...document.querySelectorAll('#dwSize .share')[0].querySelectorAll('.srow')].map(r => r.querySelector('.sl').textContent)")
+    ok(f'尺寸 {top}' in best and all(any(s.replace('🏆 ', '').startswith(k) and f'{v:,} 件'.replace(',', ',') in s for s in sizes) for k, v in exp['size'].items()),
+       f'款號 AR9006：{best}；各尺寸 {sizes}（Python {exp["size"]}）')
+    ok(await pg.locator('#dwMatrix table').count() == 1, '尺寸 × 顏色表')
+    await pg.locator('#drawer .drawer-body').screenshot(path=SH + '/21_size_color.png')
+    await pg.keyboard.press('Escape')
+    # 資料包帶著分類表和設定到手機
+    await pg.click('a[data-view=data]'); await pg.fill('#packPw', 'packdash')
+    async with pg.expect_download() as dl: await pg.click('#packExport')
+    await (await dl.value).save_as(FX + '/pack_dash.dvp')
+    ok(not errs, '電腦端儀表板沒有 JS 錯誤 ' + str(errs))
+    await c.close()
+    m = await b.new_context(viewport={'width': 390, 'height': 844}, is_mobile=True, has_touch=True)
+    pm = await m.new_page(); errs = []; pm.on('pageerror', lambda e: errs.append(str(e)))
+    await pm.goto(URL + '#data'); await pm.wait_for_timeout(300)
+    await pm.fill('#openPw', 'packdash'); await pm.set_input_files('#filePack', FX + '/pack_dash.dvp'); await pm.wait_for_selector('#view-overview:not([hidden])')
+    await pm.click('a[data-view=dashboard]'); await pm.wait_for_selector('#dbBepChart svg')
+    ok('測試男衣' in await pm.text_content('#dbShare') and '天' in await pm.text_content('#dbDso'), '手機開資料包：分類表、固定費用、應收帳款都帶過來了')
+    ok(await pm.evaluate('document.documentElement.scrollWidth') <= 390, '手機儀表板沒有把畫面撐寬')
+    await pm.screenshot(path=SH + '/22_dashboard_phone.png', full_page=True)
+    ok(not errs, '手機儀表板沒有 JS 錯誤 ' + str(errs))
+    await m.close()
 
 async def picker(b):
     """手機選資料包時，各種被改過的檔案都要有正確反應。"""
@@ -223,7 +345,7 @@ async def picker(b):
         pg = await c.new_page(); errs=[]; pg.on('pageerror', lambda e: errs.append(str(e)))
         await pg.goto(URL+'#data'); await pg.wait_for_timeout(400)
         await pg.fill('#openPw', 'packpw88'); await pg.set_input_files('#filePack', FX+'/'+f)
-        await pg.wait_for_function("document.querySelector('#toast').classList.contains('show')", timeout=60000)
+        await pg.wait_for_function("(() => { const t = document.querySelector('#toast'); return t.classList.contains('show') && !t.textContent.includes('正在'); })()", timeout=60000)
         await pg.wait_for_timeout(300)
         t = await pg.text_content('#toast'); d = await pg.evaluate("document.querySelector('#dlg').open")
         ok(expect in t and d == dialog and not errs, f'選擇資料包：{f} → {t}')

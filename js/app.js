@@ -39,7 +39,8 @@
 
   // ---------- 狀態 ----------
   const S = {
-    E: null, raw: null, vault: null, locked: false, // vault.key 只放記憶體，不會存下來
+    E: null, raw: null, vault: null, locked: false, meta: null, // meta：分類表、固定費用、應收帳款（存在加密的資料裡）
+    dash: Object.assign({ period: 'ytd', rankDim: 'ck', rankSort: 'net', cmp: 'quarter' }, store.get('dash', {})), // vault.key 只放記憶體，不會存下來
     view: 'overview',
     ref: store.get('ref', null),
     pivot: store.get('pivot', { src: 'all', rows: ['region'], col: 'year', measures: ['sales', 'returns', 'net', 'margin'], filters: {}, from: 0, to: 0, mode: 'agg' }),
@@ -59,7 +60,7 @@
     $$('#themePick button').forEach((b) => b.classList.toggle('on', b.dataset.theme === t));
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.content = { indigo: '#26437A', night: '#0E1726', market: '#13805F' }[t];
-    if (S.E) setTimeout(() => { if (S.view === 'overview') drawOverviewChart(); }, 30);
+    if (S.E) setTimeout(() => { if (S.view === 'overview') drawOverviewChart(); if (S.view === 'dashboard') renderDashboard(); }, 30);
   }
 
   // ---------- 導覽 ----------
@@ -74,7 +75,7 @@
   }
   function renderView() {
     if (!S.E) { renderData(); return; }
-    ({ overview: renderOverview, pivot: renderPivot, customers: renderCustomers, products: renderProducts, data: renderData })[S.view]();
+    ({ overview: renderOverview, dashboard: renderDashboard, pivot: renderPivot, customers: renderCustomers, products: renderProducts, data: renderData })[S.view]();
   }
 
   // ---------- 表格元件 ----------
@@ -282,6 +283,31 @@
   }
 
   // =====================================================
+  // 儀表板（計算與版面在 js/dashboard.js）
+  // =====================================================
+  function renderDashboard() {
+    fillRefSelect($('#dbRef'));
+    $('#dbPeriod').innerHTML = Dashboard.PERIODS.map((p) => `<button data-v="${p.v}" class="${p.v === S.dash.period ? 'on' : ''}">${p.label}</button>`).join('');
+    const ctx = {
+      S, E: S.E, fmt, nf0, nf1, esc, $, $$, table, Charts, refYm, repName, toast, after: [],
+      saveDash: () => store.set('dash', S.dash),
+      saveMeta: async (patch) => { await saveMeta(patch); renderDashboard(); },
+      openCustomer, drill: dashDrill,
+    };
+    window.__dash = Dashboard.render(ctx); // 測試用：儀表板算出的數字
+    ctx.after.forEach((f) => f());
+    $('#dbSub').textContent = `以 ${ymLabel(refYm())} 為基準月。點排名、佔比的項目可以看明細；每個數字下面的 ⓘ 有說明。`;
+  }
+  // 從儀表板點進去：客戶、款號開明細；其他到樞紐分析
+  function dashDrill(dim, code, label) {
+    if (dim === 'ck') { const c = S.E.customers({}, refYm()).list.find((x) => x.ck === code); if (c) openCustomer(c); return; }
+    if (dim === 'style') { const p = S.E.products({}, refYm(), 'style').list.find((x) => x.code === label); if (p) openProduct(p, 'style'); return; }
+    const rows = dim === 'rep' || dim === 'region' ? ['ck'] : ['style'];
+    S.pivot = { ...S.pivot, mode: 'agg', src: 'all', rows, col: 'year', measures: ['net', 'netProfit', 'margin', 'retRate'], filters: { [dim]: [code] } };
+    savePivot(); go('pivot');
+  }
+
+  // =====================================================
   // 樞紐分析
   // =====================================================
   const PRESETS = [
@@ -293,6 +319,9 @@
     { name: '客戶 × 類別', rows: ['ck', 'cat'], col: null, measures: ['sales', 'soldQty', 'returns'] },
     { name: '商品排行', rows: ['sku2'], col: null, measures: ['soldQty', 'retQty', 'sales', 'retRate', 'custs'] },
     { name: '月份 × 年（季節性）', rows: ['month'], col: 'year', measures: ['net'] },
+    { name: '大類 × 年', rows: ['big'], col: 'year', measures: ['net', 'netProfit', 'margin', 'retRate'] },
+    { name: '季度毛利率、退貨率', rows: ['quarter'], col: null, measures: ['net', 'margin', 'retRate'] },
+    { name: '款號 × 尺寸', rows: ['style'], col: 'size', measures: ['soldQty'] },
   ];
   const PIVOT_DIMS = DIMS.map((d) => d.key);
 
@@ -495,7 +524,7 @@
   // =====================================================
   // 客戶
   // =====================================================
-  const CUST_FILTER_DIMS = ['region', 'rep', 'cat', 'sku2', 'year'];
+  const CUST_FILTER_DIMS = ['region', 'rep', 'big', 'cat', 'sku2', 'year'];
   function idleMatch(v, rule) {
     if (rule === 'all') return true;
     const [a, b] = rule.split('-'); return v >= +a && (b === '' || v <= +b);
@@ -543,18 +572,22 @@
   // =====================================================
   // 商品
   // =====================================================
-  const PROD_FILTER_DIMS = ['cat', 'region', 'rep', 'ck', 'color', 'year'];
+  const PROD_FILTER_DIMS = ['big', 'cat', 'size', 'color', 'region', 'rep', 'ck', 'year'];
   function prodData() {
     const res = S.E.products({ dims: toDims(S.prod.filters) }, refYm(), S.prod.level);
     const q = S.prod.q.toLowerCase();
-    let list = res.list.filter((p) => idleMatch(p.idle, S.prod.idle) && (!q || p.code.toLowerCase().includes(q) || (p.sku2 || '').toLowerCase().includes(q)));
+    let list = res.list.filter((p) => idleMatch(p.idle, S.prod.idle) && (!q || p.code.toLowerCase().includes(q) || (p.sku2 || '').toLowerCase().includes(q) || (p.style || '').toLowerCase().includes(q)));
     list = sortRows(list, S.prod.sort, S.prod.sort.key === 'retRate' ? (r) => (r.sales ? r.returns / r.sales : null) : null);
     return { list, res };
   }
+  const LEVEL_NAME = { sku: '商品代號', sku2: '簡化代碼', style: '款號' };
   function prodCols() {
-    const c = [{ key: 'code', label: S.prod.level === 'sku' ? '商品代號' : '簡化代碼', cls: 'lbl' }];
-    if (S.prod.level === 'sku') c.push({ key: 'sku2', label: '簡化代碼', cls: 'dim2' });
+    const lv = S.prod.level;
+    const c = [{ key: 'code', label: LEVEL_NAME[lv], cls: 'lbl' }];
+    if (lv === 'sku') c.push({ key: 'sku2', label: '簡化代碼', cls: 'dim2' });
+    if (lv !== 'style') c.push({ key: 'style', label: '款號', cls: 'dim2' });
     c.push(
+      { key: 'big', label: '大類' },
       { key: 'cat', label: '類別' },
       { key: 'first', label: '第一筆售出', fmt: 'ym' }, { key: 'last', label: '最近售出', fmt: 'ym' },
       { key: 'tenure', label: '已賣(月)', n: 1, fmt: 'int' },
@@ -638,6 +671,34 @@
     $('#dwPivot').onclick = () => { closeDrawer(); S.pivot = { ...S.pivot, mode: 'agg', rows: ['sku2'], col: 'year', measures: ['soldQty', 'net'], filters: { ck: [c.ck] } }; savePivot(); go('pivot'); };
   }
 
+  // 哪個尺寸、哪個顏色賣最好：依賣出數排名，再列出尺寸 × 顏色的賣出數
+  function renderSizeColor(box, dims) {
+    const E = S.E;
+    const by = (dim) => E.pivot({ rows: [dim], cols: null, measures: ['soldQty', 'sales', 'retRate'], filter: { dims } }).rows
+      .map((r) => ({ code: r.codes[0], label: r.labels[0], qty: r.vals[0][0], sales: r.vals[0][1], rr: r.vals[0][2] })).filter((r) => r.sales || r.qty);
+    const useAmt = (rows) => rows.every((r) => !r.qty); // 單位不是件／打時賣出數會是 0，改用金額
+    const sizes = by('size'), colors = by('color');
+    const key = useAmt(sizes) ? 'sales' : 'qty';
+    const vfmt = key === 'qty' ? (v) => nf0.format(v) + ' 件' : (v) => fmt.money(v) + ' 元';
+    const tot = sizes.reduce((s, r) => s + r[key], 0) || 1;
+    const top = (rows) => rows.slice().sort((a, b) => b[key] - a[key]);
+    const ss = top(sizes), cs = top(colors);
+    const list = (rows) => rows.slice(0, 10).map((r, i) => `<div class="srow"><div class="sl"><span>${i === 0 ? '🏆 ' : ''}${esc(r.label || '（空白）')}</span><b>${vfmt(r[key])}・${fmt.pct(r[key] / tot)}</b></div><div class="sb"><i class="b1" style="width:${Math.max(1, r[key] / (rows[0][key] || 1) * 100)}%"></i></div>${r.rr ? `<small class="muted">退貨率 ${fmt.pct(r.rr)}</small>` : ''}</div>`).join('');
+    const best = ss[0] && cs[0] ? `<p class="best">最好賣：尺寸 <b>${esc(ss[0].label)}</b>（${fmt.pct(ss[0][key] / tot)}）、顏色 <b>${esc(cs[0].label || '（空白）')}</b>（${fmt.pct(cs[0][key] / tot)}）</p>` : '';
+    box.innerHTML = `<div class="panel-head"><h2>哪個尺寸、顏色賣最好</h2></div>${best}
+      <div class="grid2 tight"><div class="share"><h3>尺寸</h3>${list(ss)}</div><div class="share"><h3>顏色</h3>${list(cs)}</div></div>
+      ${ss.length > 1 && cs.length > 1 ? '<h3>尺寸 × 顏色（' + (key === 'qty' ? '賣出件數' : '銷貨金額') + '）</h3><div id="dwMatrix" class="db-scroll"></div>' : ''}
+      <p class="hint">${key === 'qty' ? '依賣出件數排名（打 × 12）。' : '這個商品的單位不是件或打，改用銷貨金額排名。'}尺寸是從商品代號「/」「-」後面，或數字後面的字母判斷。</p>`;
+    if (ss.length > 1 && cs.length > 1) {
+      const p = E.pivot({ rows: ['size'], cols: 'color', measures: [key === 'qty' ? 'soldQty' : 'sales'], filter: { dims } });
+      const cTot = p.colTotals.map((v) => v[0]);
+      const order = cTot.map((v, i) => i).sort((a, b) => cTot[b] - cTot[a]).slice(0, 12);
+      const max = Math.max(1, ...p.rows.flatMap((r) => order.map((c) => r.vals[c][0] || 0)));
+      $('#dwMatrix', box).innerHTML = `<table class="dt cmp heat"><tr><th>尺寸＼顏色</th>${order.map((c) => `<th class="n">${esc(p.colLabels[c] || '（空白）')}</th>`).join('')}<th class="n">合計</th></tr>` +
+        p.rows.map((r) => `<tr><td class="lbl">${esc(r.labels[0])}</td>${order.map((c) => { const v = r.vals[c][0] || 0; return `<td class="n" style="--h:${(v / max).toFixed(2)}">${v ? nf0.format(v) : ''}</td>`; }).join('')}<td class="n"><b>${nf0.format(r.rowTotal[0])}</b></td></tr>`).join('') + '</table>';
+    }
+  }
+
   function openProduct(pr, level) {
     const code = S.E.ds.str[level].dict.indexOf(pr.code);
     const dims = { [level]: new Set([code]) };
@@ -649,8 +710,10 @@
       { k: '退貨金額', v: fmt.big(pr.returns), d: `退貨數 ${nf0.format(pr.retQty)}` },
       { k: '購買客戶', v: nf0.format(pr.custs), d: `類別 ${pr.cat}` },
     ]) + `<div class="panel"><div class="panel-head"><h2>近 24 個月賣出數</h2></div><div class="chart" id="dwChart"></div></div>
+      <div class="panel" id="dwSize"></div>
       <div class="panel"><div class="panel-head"><h2>誰在買</h2><button class="btn" id="dwPivot">在樞紐分析中查看</button></div><div id="dwTop"></div></div>`;
-    openDrawer(pr.code, (level === 'sku' ? '商品代號' : '簡化代碼') + `・類別 ${pr.cat}`, html);
+    openDrawer(pr.code, LEVEL_NAME[level] + `・${pr.big && !pr.big.startsWith('（') ? pr.big + '・' : ''}類別 ${pr.cat}`, html);
+    renderSizeColor($('#dwSize'), dims);
     const ms = monthlySeries(dims);
     Charts.render($('#dwChart'), { type: 'bar', labels: ms.labels, series: [{ name: '賣出數', values: ms.q, cls: 's1' }], fmt: fmt.int, axisFmt: fmt.axis });
     const cl = S.E.customers({ dims }, refYm()).list.sort((a, b) => b.sales - a.sales);
@@ -772,6 +835,7 @@
       try {
         const d = await runWorker({ type: 'ingest', file, password: xlsPw }, [], (s) => showProgress(s.pct || 0, `${s.stage}… ${s.rows ? nf0.format(s.rows) + ' 筆' : ''}`));
         xlsPw = null;
+        if (d.classification) { appPw = null; showProgress(1, '這是商品類別代碼表，已套用'); await applyClassification(d.classification); return; }
         showProgress(1, '加密並儲存到這台裝置…');
         if (appPw) { S.vault = await Dataset.Vault.create(appPw); appPw = null; }
         await loadBuffer(d.buf, { name: file.name, save: true });
@@ -847,13 +911,16 @@
   }
 
   async function loadBuffer(buf, { save } = {}) {
+    // 資料裡有 meta（分類表、固定費用、應收帳款）就用它；沒有（例如重新匯入整份總表）就沿用目前的
+    let raw = Dataset.deserialize(buf);
+    if (raw.meta) S.meta = raw.meta;
+    else if (S.meta) { buf = Dataset.withMeta(buf, S.meta); raw = Dataset.deserialize(buf); }
     if (save) {
       if (!S.vault) throw new Error('尚未設定開啟密碼');
       await Dataset.Vault.save(S.vault, buf); // 只存加密後的內容
     }
-    const raw = Dataset.deserialize(buf);
     S.raw = buf;
-    S.E = new Engine(Dataset.hydrate(raw));
+    S.E = new Engine(Dataset.hydrate(raw, S.meta));
     if (S.ref && !S.E.ymIndex.has(S.ref)) S.ref = null;
     // 檢查樞紐設定中的期間仍有效
     if (S.pivot.from && !S.E.ymIndex.has(S.pivot.from)) S.pivot.from = 0;
@@ -863,7 +930,43 @@
     renderData();
   }
 
+  // 更新 meta 並加密保存
+  async function saveMeta(patch) {
+    S.meta = { ...(S.meta || {}), ...patch };
+    if (S.raw && S.vault) await loadBuffer(Dataset.withMeta(S.raw, S.meta), { save: true });
+  }
+  // 匯入商品類別代碼表（可以有開啟密碼）
+  async function importClassification(file) {
+    if (!file) return;
+    let pw = null;
+    if (await isCfbFile(file)) { const r = await askImportPasswords(file.name, true, false, ''); if (!r) return; pw = r.xlsPw; }
+    try {
+      const d = await runWorker({ type: 'classify', file, password: pw }, []);
+      await applyClassification(d.classification);
+    } catch (e) {
+      worker && worker.terminate(); worker = null;
+      if (e.code === 'BAD_PASSWORD') { toast('Excel 密碼不正確'); return; }
+      toast(e.message, 6000);
+    }
+  }
+  async function applyClassification(c) {
+    await saveMeta({ cat: { map: c.map, file: c.file || '', rows: c.rows, at: new Date().toISOString() } });
+    renderData();
+    toast(S.raw ? `已套用商品類別代碼表（${c.rows} 個代碼）` : `已讀取商品類別代碼表（${c.rows} 個代碼），匯入總表後會套用`, 4000);
+  }
+  function renderClassState() {
+    const c = S.meta && S.meta.cat;
+    $('#classState').innerHTML = c
+      ? `已匯入「${esc(c.file || '分類表')}」，共 ${nf0.format(c.rows)} 個代碼（${new Date(c.at).toLocaleDateString('zh-TW')}）。` +
+        (S.E ? `目前資料裡有 ${nf0.format(S.E.ds.str.cat.mapped.filter((x, i) => !x && S.E.ds.str.cat.dict[i] !== '（空白）').length)} 個類別代碼在表裡找不到名稱或大類（儀表板最下面有列出）。` : '')
+      : '尚未匯入。匯入後，商品類別會顯示名稱，並可以看商品大類（男、女、童、配件）。';
+    $('#classClear').hidden = !c;
+    const m = S.meta || {};
+    $('#metaState').textContent = `每月固定費用：${m.fixedCost ? fmt.money(m.fixedCost) + ' 元' : '未填'}；應收帳款餘額：${m.ar ? fmt.money(m.ar.amount) + ' 元（' + ymLabel(m.ar.ym) + ' 月底）' : '未填'}。在儀表板的「損益兩平」「應收帳款天數」填寫。`;
+  }
+
   function renderData() {
+    renderClassState();
     $$('#themePick button').forEach((b) => b.classList.toggle('on', b.dataset.theme === document.documentElement.dataset.theme));
     $('#lockState').textContent = S.vault
       ? '已啟用：資料加密保存在這台裝置上，每次開啟軟體都要輸入開啟密碼。'
@@ -892,6 +995,11 @@
     ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
     ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
     drop.addEventListener('drop', (e) => importXlsx(e.dataTransfer.files[0]));
+    const fc = $('#fileClass');
+    $('#pickClass').addEventListener('click', () => fc.click());
+    fc.addEventListener('change', () => { importClassification(fc.files[0]); fc.value = ''; });
+    $('#classClear').addEventListener('click', async () => { const m = { ...(S.meta || {}) }; delete m.cat; S.meta = m; if (S.raw) await loadBuffer(Dataset.withMeta(S.raw, m), { save: true }); renderData(); toast('已移除商品類別代碼表'); });
+    $('#dbPeriod').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.dash.period = b.dataset.v; store.set('dash', S.dash); renderDashboard(); });
     const fa = $('#fileAdd');
     $('#pickAdd').addEventListener('click', () => fa.click());
     fa.addEventListener('change', () => { addMonthXlsx(fa.files[0]); fa.value = ''; });
@@ -922,7 +1030,7 @@
       const b = $('#clearData');
       if (!b.dataset.sure) { b.dataset.sure = '1'; b.textContent = '確定要清除？再按一次'; setTimeout(() => { delete b.dataset.sure; b.textContent = '清除這台裝置上的資料'; }, 5000); return; }
       delete b.dataset.sure; b.textContent = '清除這台裝置上的資料';
-      await Dataset.Vault.clear(); S.E = null; S.raw = null; S.vault = null; $('#brandSub').textContent = '尚未載入資料'; renderData(); toast('已清除這台裝置上的資料');
+      await Dataset.Vault.clear(); S.E = null; S.raw = null; S.vault = null; S.meta = null; $('#brandSub').textContent = '尚未載入資料'; renderData(); toast('已清除這台裝置上的資料');
     });
     $('#lockNow').addEventListener('click', () => location.reload()); // 金鑰只在記憶體中，重新載入就會上鎖
     $('#changePw').addEventListener('click', async () => {
@@ -1041,7 +1149,7 @@
         if (!reset.dataset.sure) { reset.dataset.sure = '1'; reset.textContent = '確定要清除？再按一次'; setTimeout(() => { delete reset.dataset.sure; reset.textContent = '清除資料，重新開始'; }, 5000); return; }
         delete reset.dataset.sure;
         await Dataset.Vault.clear();
-        S.E = null; S.raw = null; S.vault = null;
+        S.E = null; S.raw = null; S.vault = null; S.meta = null;
         done();
         toast('已清除。電腦請重新匯入 Excel；手機請重新開啟資料包', 6000);
       };
@@ -1060,7 +1168,7 @@
     }));
     $$('.tabs a').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); go(a.dataset.view); }));
     window.addEventListener('hashchange', () => go(location.hash.slice(1) || 'overview'));
-    let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (S.view === 'overview' && S.E) drawOverviewChart(); }, 200); });
+    let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (S.view === 'overview' && S.E) drawOverviewChart(); if (S.view === 'dashboard' && S.E) renderDashboard(); }, 200); });
     const start = (location.hash.slice(1) || 'overview');
     try {
       if (await Dataset.Vault.exists()) await lockScreen('unlock');
