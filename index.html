@@ -63,6 +63,7 @@
   </header>
 
   <main id="main">
+    <div class="demo-bar" id="demoBar" role="status" hidden><span><b>示範資料</b>：全部是假的，只用來看畫面，不會儲存，也不會影響你的資料。</span><button class="btn" id="demoExit">回到我的資料</button></div>
     <!-- 總覽 -->
     <section class="view" id="view-overview" hidden>
       <div class="view-head">
@@ -199,6 +200,12 @@
     <section class="view" id="view-data" hidden>
       <div class="view-head"><div><h1>資料與設定</h1><p class="sub">更新 Excel、切換介面風格、匯出手機用資料包。</p></div></div>
 
+      <div class="panel demo-panel">
+        <div class="panel-head"><h2>先看看示範</h2></div>
+        <p class="hint">用一組假的公司資料（約 3 年、60 多家虛構客戶），看每一頁的樣子：總覽、儀表板、圖表報告、樞紐分析、客戶、商品。示範資料只放在畫面上，不會存進這台裝置，也不會蓋掉你的資料；看完按上方的「回到我的資料」。</p>
+        <div class="row"><button class="btn" id="demoStart">看示範資料</button></div>
+      </div>
+
       <div class="panel" id="importPanel">
         <div class="panel-head"><h2>更新資料</h2></div>
         <div class="drop" id="drop">
@@ -286,6 +293,7 @@
 <script src="js/chart.js"></script>
 <script src="js/dashboard.js"></script>
 <script src="js/report.js"></script>
+<script src="js/demo.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

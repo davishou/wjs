@@ -119,7 +119,7 @@
       const s3 = [-2, -1, 0].reduce((s, k) => { const m = root.Dashboard.addM(meta.ar.ym, k); return s + (E.pivot({ rows: [], cols: null, measures: ['net'], filter: { ymFrom: m, ymTo: m } }).grand[0] || 0); }, 0);
       if (s3 > 0) kp.push(['應收帳款天數', nf0.format(meta.ar.amount / s3 * 91) + ' 天', `${ymLabel(meta.ar.ym)} 月底`]);
     }
-    cards.push(`<article class="panel rp-card rp-cover" id="rpCover"><header class="rp-head"><p class="rp-kicker">銷售報告</p><h2 class="rp-title">${pLabel}</h2>
+    cards.push(`<article class="panel rp-card rp-cover" id="rpCover"><header class="rp-head"><p class="rp-kicker">銷售報告${S.demo ? '（示範資料，全部是假的）' : ''}</p><h2 class="rp-title">${pLabel}</h2>
       <p class="rp-take">${hasPrev ? `和去年同期（${prevLabel}）比較` : '沒有去年同期的資料可以比較'}・製表 ${new Date().toLocaleDateString('zh-TW')}</p></header>
       <div class="rp-kpis">${kp.map(([k, v, d]) => `<div class="rp-kpi"><div class="k">${k}</div><div class="v">${v}</div><div class="d">${d}</div></div>`).join('')}</div></article>`);
 

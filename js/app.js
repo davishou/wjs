@@ -40,6 +40,7 @@
   // ---------- 狀態 ----------
   const S = {
     E: null, raw: null, vault: null, locked: false, meta: null, // meta：分類表、固定費用、應收帳款（存在加密的資料裡）
+    demo: false, // 正在看示範資料（只在記憶體，絕不存檔）
     report: Object.assign({ year: null }, store.get('report', {})), slide: 0,
     ymMode: store.get('ymMode', 'date'), // 月份依據：'date' 實際出貨／退貨日期（預設）、'ord' 單號
     dash: Object.assign({ period: 'ytd', rankDim: 'ck', rankSort: 'net', cmp: 'quarter' }, store.get('dash', {})), // vault.key 只放記憶體，不會存下來
@@ -880,7 +881,23 @@
   }
 
   // 可以一次選多個檔案：總表一個，或系統原始資料 JMSSAL + JMSSBK（.DBF 或另存的 Excel）
+  // ---------- 示範資料 ----------
+  // 看示範時，任何會存檔、匯出、改密碼、蓋掉真正資料的動作都先擋下
+  function demoBlock() { if (!S.demo) return false; toast('目前是示範資料。請先按上方的「回到我的資料」', 4000); return true; }
+  async function startDemo() {
+    closeDrawer();
+    const buf = Dataset.serialize(Demo.build());
+    S.demo = true;
+    await loadBuffer(buf); // 不存檔
+    $('#brandSub').textContent = '示範資料（假的）';
+    $('#demoBar').hidden = false;
+    go('overview');
+    toast('已載入示範資料。全部是假的，不會儲存', 4000);
+  }
+  function exitDemo() { location.hash = '#data'; location.reload(); } // 重新整理：示範資料消失，真正的資料要輸入開啟密碼才會打開
+
   async function importXlsx(fileOrFiles, { force } = {}) {
+    if (demoBlock()) return;
     const files = (Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles]).filter(Boolean);
     if (!files.length) return;
     const file = files[0];
@@ -932,6 +949,7 @@
 
   // 每月加入新資料：讀新的 Excel，先讓使用者確認哪些月份會加入／取代，再加密存檔
   async function addMonthXlsx(file) {
+    if (demoBlock()) return;
     if (!file) return;
     if (/\.xls$/i.test(file.name)) { toast('舊版 .xls 格式無法讀取，請在 Excel「另存新檔」為 .xlsx 再加入', 5000); return; }
     if (!/\.xls[xm]$/i.test(file.name)) { toast('請選擇 .xlsx 檔案'); return; }
@@ -987,6 +1005,7 @@
     if (raw.meta) S.meta = raw.meta;
     else if (S.meta) { buf = Dataset.withMeta(buf, S.meta); raw = Dataset.deserialize(buf); }
     if (save) {
+      if (S.demo) throw new Error('示範資料不會儲存');
       if (!S.vault) throw new Error('尚未設定開啟密碼');
       await Dataset.Vault.save(S.vault, buf); // 只存加密後的內容
     }
@@ -1004,10 +1023,12 @@
   // 更新 meta 並加密保存
   async function saveMeta(patch) {
     S.meta = { ...(S.meta || {}), ...patch };
+    if (S.demo) { await loadBuffer(Dataset.withMeta(S.raw, S.meta)); return; } // 示範中：只改記憶體
     if (S.raw && S.vault) await loadBuffer(Dataset.withMeta(S.raw, S.meta), { save: true });
   }
   // 匯入商品類別代碼表（可以有開啟密碼）
   async function importClassification(file) {
+    if (demoBlock()) return;
     if (!file) return;
     let pw = null;
     if (await isCfbFile(file)) { const r = await askImportPasswords(file.name, true, false, ''); if (!r) return; pw = r.xlsPw; }
@@ -1078,7 +1099,8 @@
     const fc = $('#fileClass');
     $('#pickClass').addEventListener('click', () => fc.click());
     fc.addEventListener('change', () => { importClassification(fc.files[0]); fc.value = ''; });
-    $('#classClear').addEventListener('click', async () => { const m = { ...(S.meta || {}) }; delete m.cat; S.meta = m; if (S.raw) await loadBuffer(Dataset.withMeta(S.raw, m), { save: true }); renderData(); toast('已移除商品類別代碼表'); });
+    $('#classClear').addEventListener('click', async () => {
+      if (demoBlock()) return; const m = { ...(S.meta || {}) }; delete m.cat; S.meta = m; if (S.raw) await loadBuffer(Dataset.withMeta(S.raw, m), { save: true }); renderData(); toast('已移除商品類別代碼表'); });
     $('#dbPeriod').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.dash.period = b.dataset.v; store.set('dash', S.dash); renderDashboard(); });
     const fa = $('#fileAdd');
     $('#pickAdd').addEventListener('click', () => fa.click());
@@ -1088,6 +1110,7 @@
     window.addEventListener('drop', (e) => { if (S.locked) { e.preventDefault(); return; } if (!drop.contains(e.target)) { e.preventDefault(); const fs2 = [...e.dataTransfer.files]; if (fs2.length) (fs2.some((x) => /\.dvp$/i.test(x.name)) || (fs2.length === 1 && !/\.(xls[xm]?|dbf)$/i.test(fs2[0].name)) ? openPackFile(fs2.find((x) => /\.dvp$/i.test(x.name)) || fs2[0]) : importXlsx(fs2)); } });
     $('#themePick').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setTheme(b.dataset.theme); });
     $('#packExport').addEventListener('click', async () => {
+      if (demoBlock()) return;
       if (!S.raw) { toast('請先載入資料'); return; }
       const pw = $('#packPw').value;
       if (pw && pw.length < 6) { toast('密碼至少 6 碼'); return; }
@@ -1107,6 +1130,7 @@
     $('#pickPack').addEventListener('click', () => fp.click());
     fp.addEventListener('change', () => { openPackFile(fp.files[0]); fp.value = ''; });
     $('#clearData').addEventListener('click', async () => {
+      if (demoBlock()) return;
       const b = $('#clearData');
       if (!b.dataset.sure) { b.dataset.sure = '1'; b.textContent = '確定要清除？再按一次'; setTimeout(() => { delete b.dataset.sure; b.textContent = '清除這台裝置上的資料'; }, 5000); return; }
       delete b.dataset.sure; b.textContent = '清除這台裝置上的資料';
@@ -1114,6 +1138,7 @@
     });
     $('#lockNow').addEventListener('click', () => location.reload()); // 金鑰只在記憶體中，重新載入就會上鎖
     $('#changePw').addEventListener('click', async () => {
+      if (demoBlock()) return;
       if (!S.vault || !S.raw) return;
       const v = await ask({
         title: '更改開啟密碼', submit: '更改',
@@ -1153,6 +1178,7 @@
   // 手機上選到的檔案不一定是原本的資料包：可能被 LINE／雲端硬碟包成 zip、存成網頁，或選到了 Excel。
   // 先看檔案內容判斷，能處理的直接處理，不能處理的說清楚原因。
   async function openPackFile(file) {
+    if (demoBlock()) return;
     if (!file) return;
     try {
       const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
@@ -1241,6 +1267,8 @@
   async function boot() {
     setTheme(document.documentElement.dataset.theme || 'indigo');
     bindPivot(); bindCustomers(); bindProducts(); bindData(); bindReport();
+    $('#demoStart').addEventListener('click', () => { startDemo().catch((e) => toast('示範資料載入失敗：' + e.message)); });
+    $('#demoExit').addEventListener('click', exitDemo);
     $('#ovRange').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; $$('#ovRange button').forEach((x) => x.classList.toggle('on', x === b)); drawOverviewChart(); });
     $$('[data-goto]').forEach((a) => a.addEventListener('click', (e) => {
       e.preventDefault();

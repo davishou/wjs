@@ -353,6 +353,13 @@ p.missing { background: var(--surface-2); border-radius: var(--radius); padding:
 .muted { color: var(--muted); }
 .best { background: var(--primary-soft); border-radius: var(--radius); padding: 8px 12px; margin: 0 0 14px; }
 
+/* ============ 示範資料 ============ */
+.demo-bar { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; margin: 0 0 16px; padding: 10px 14px; border-radius: var(--radius); background: #FFF4D6; color: #4A3500; border: 1px solid #E8C770; font-size: .9rem; }
+[data-theme="night"] .demo-bar { background: #3A2E10; color: #F6E2A8; border-color: #6B5520; }
+[data-theme="market"] .demo-bar { top: 76px; }
+body.presenting .demo-bar { display: none !important; }
+@media print { .demo-bar { display: none !important; } }
+
 /* ============ 圖表報告 ============ */
 .rp { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap); align-items: start; }
 .rp-card { margin: 0; display: flex; flex-direction: column; min-width: 0; }

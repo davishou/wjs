@@ -210,6 +210,7 @@ async def main():
     await dashboard(b)
     await raw_import(b)
     await report_page(b)
+    await demo_mode(b)
     await b.close()
     print('全部通過')
 
@@ -452,6 +453,42 @@ async def report_page(b):
     ok('需要先匯入商品類別代碼表' in await pm.text_content('#rpBig'), '沒有分類表時，男女童比例說明缺少什麼')
     await pm.screenshot(path=SH + '/42_report_phone.png', full_page=True)
     await m.close()
+
+
+async def demo_mode(b):
+    """示範資料：只在記憶體，不會存檔、不會蓋掉真正的資料；看完回到自己的資料。"""
+    VAULT_CT = "async () => { const db = await new Promise((r)=>{const q=indexedDB.open('dv-analytics',1);q.onupgradeneeded=()=>q.result.createObjectStore('kv');q.onsuccess=()=>r(q.result)}); const v = await new Promise(r=>{const q=db.transaction('kv').objectStore('kv').get('vault');q.onsuccess=()=>r(q.result)}); if (!v) return null; const h = await crypto.subtle.digest('SHA-256', v.ct); return Array.from(new Uint8Array(h)).map(x=>x.toString(16).padStart(2,'0')).join(''); }"
+    c = await b.new_context(viewport={'width': 1366, 'height': 900})
+    pg = await c.new_page(); errs = []
+    pg.on('pageerror', lambda e: errs.append(str(e)))
+    await pg.goto(URL); await pg.wait_for_timeout(300)
+    # 沒有資料時也可以看示範
+    await pg.click('#demoStart'); await pg.wait_for_selector('#view-overview:not([hidden])')
+    ok(await pg.is_visible('#demoBar') and '示範' in await pg.text_content('#brandSub') and await pg.evaluate(VAULT_CT) is None, '沒有資料也能看示範；畫面上有「示範資料」提示，裝置上沒有存任何東西')
+    for v in ('dashboard', 'report', 'pivot', 'customers', 'products', 'data'):
+        await pg.click(f'a[data-view={v}]'); await pg.wait_for_timeout(300)
+    ok(not errs and '示範資料' in await pg.text_content('#rpBody') if await pg.click('a[data-view=report]') is None else False, '每一頁都能用示範資料打開；圖表報告封面註明是示範資料')
+    await pg.click('#demoExit'); await pg.wait_for_timeout(800)
+    ok(await pg.is_hidden('#demoBar') and '尚未載入資料' in await pg.text_content('#brandSub'), '回到我的資料：沒有資料就回到空白狀態')
+    # 有真正的資料時
+    await pg.set_input_files('#fileXlsx', FX + '/plain.xlsx'); await dlg_fill(pg, {'app': 'demo12', 'app2': 'demo12'}); await wait_done(pg)
+    before = await pg.evaluate(VAULT_CT)
+    await pg.click('a[data-view=data]'); await pg.click('#demoStart'); await pg.wait_for_selector('#demoBar:not([hidden])')
+    ok(await pg.evaluate('window.__app.E.ds.n') > 10000, '有真正的資料時切換到示範資料')
+    await pg.click('a[data-view=dashboard]'); await pg.fill('#dbFixed', '123456'); await pg.click('#dbFixedForm button'); await pg.wait_for_timeout(500)
+    ok('123,456' in await pg.input_value('#dbFixed') and await pg.evaluate(VAULT_CT) == before, '示範中改固定費用只改畫面，裝置上的資料沒有變')
+    await pg.click('a[data-view=data]'); await pg.set_input_files('#fileXlsx', FX + '/plain.xlsx'); await pg.wait_for_timeout(400)
+    ok('回到我的資料' in await pg.text_content('#toast') and await pg.evaluate(VAULT_CT) == before, '示範中匯入 Excel 會被擋下，請先回到自己的資料')
+    for sel in ('#packExport', '#changePw'):
+        await pg.evaluate("document.querySelector('#toast').textContent = ''")
+        if await pg.is_visible(sel): await pg.click(sel); await pg.wait_for_timeout(200)
+        ok('回到我的資料' in await pg.text_content('#toast'), f'示範中「{sel}」被擋下')
+    ok(await pg.evaluate(VAULT_CT) == before, '整個示範過程，裝置上加密的資料完全沒變')
+    await pg.click('#demoExit'); await pg.wait_for_selector('#lock:not([hidden])')
+    await pg.fill('#lockPw', 'demo12'); await pg.click('#lockGo'); await pg.wait_for_selector('#lock[hidden]', state='attached')
+    ok(await pg.evaluate('window.__app.E.ds.nSales') == 1080 and await pg.is_hidden('#demoBar') and not await pg.evaluate('window.__app.demo'), '回到我的資料：輸入開啟密碼後是原本的 1,080 筆')
+    ok(not errs, '示範資料沒有 JS 錯誤 ' + str(errs))
+    await c.close()
 
 
 async def picker(b):
