@@ -179,9 +179,9 @@ async def main():
     await page.fill('#lockPw','packpw88'); await page.click('#lockGo'); await page.wait_for_selector('#lock[hidden]', state='attached')
     ok(True, '手機：開啟密碼沿用資料包密碼')
     # 有資料時，每個畫面、三種風格都不能比手機螢幕寬（不然整頁會被縮小、選單跑到畫面外）
-    for th in ['pop', 'indigo', 'night', 'market']:
+    for th in ['indigo', 'night', 'market']:
         await page.evaluate(f"document.documentElement.dataset.theme='{th}'")
-        for vw in ['overview', 'dashboard', 'compare', 'reps', 'pivot', 'customers', 'products', 'data']:
+        for vw in ['overview', 'board', 'dashboard', 'compare', 'reps', 'pivot', 'customers', 'products', 'data']:
             await page.evaluate(f"location.hash='{vw}'"); await page.wait_for_timeout(400)
             w = await page.evaluate("document.documentElement.scrollWidth")
             ok(w <= 392, f'手機寬度：{th} 風格的 {vw} 畫面沒有超出螢幕（{w}px）')
@@ -278,6 +278,7 @@ async def dashboard(b):
     ok('毛利率下降 5 個百分點' in al and '丁行' not in al and '1 位去年同期有買的客戶' in al and '1 個商品類別代碼沒有分類' in al, '重點提醒：毛利率下降、可能流失、未分類代碼')
     ok('7004 丁行' in await pg.text_content('#dbCust'), '可能流失名單有丁行（114 年沒再買）')
     ok(await pg.locator('#dbIdleCust').count() == 1 and await pg.locator('#dbCmpBody').count() == 0, '儀表板：「需要跟進」搬進來，毛利率／退貨率比較搬到「比較」頁')
+    await board_page(pg, d, exp)
     await compare_page(pg, exp)
     await reps_page(pg, d)
     await pg.click('a[data-view=overview]'); await pg.wait_for_selector('#tdBody .notice')
@@ -332,6 +333,27 @@ async def dashboard(b):
     ok(not errs, '手機儀表板沒有 JS 錯誤 ' + str(errs))
     await m.close()
 
+async def board_page(pg, d, exp):
+    """儀表板三個方案：數字和儀表板（提醒）、Python 一致；沒有實際日期時方案 B 說明。"""
+    await pg.click('a[data-view=board]'); await pg.wait_for_selector('#bdBody')
+    await pg.click('#bdOpt button[data-v=A]'); await pg.click('#bdPer button[data-v=ytd]'); await pg.wait_for_timeout(200)
+    a = await pg.evaluate('window.__board')
+    ok(abs(a['cur']['net'] - exp['cur']['net']) < 0.01 and abs(a['cur']['netProfit'] - exp['cur']['netProfit']) < 0.01, f"方案 A：今年淨銷售 {a['cur']['net']:.0f}、淨毛利 {a['cur']['netProfit']:.0f}（Python {exp['cur']['net']:.0f}、{exp['cur']['netProfit']:.0f}）")
+    await pg.click('.bd-kpi[data-k=margin]'); await pg.wait_for_timeout(200)
+    ok((await pg.evaluate('window.__board'))['metric'] == 'margin' and '毛利率' in await pg.text_content('#bdBody .panel h2'), '方案 A：點「毛利率」，大圖改看毛利率')
+    ok(await pg.locator('#bdRegion .donut path').count() >= 3 and await pg.locator('#bdRep .hb-row').count() >= 2, '方案 A：區域圓餅、業務橫條')
+    await pg.screenshot(path=SH + '/25_board_A.png', full_page=True)
+    await pg.click('#bdOpt button[data-v=B]'); await pg.wait_for_timeout(200)
+    b = await pg.evaluate('window.__board')
+    ok(b['reps'] >= 2 and await pg.locator('#bdHeat td').count() == b['reps'] * 12 and '需要實際日期' in await pg.text_content('#bdBody'), f"方案 B：業務 × 12 個月熱度表（{b['reps']} 位、{b['warn']} 格掉下來），沒有日期時說明「該來買沒來」需要實際日期")
+    await pg.screenshot(path=SH + '/26_board_B.png', full_page=True)
+    await pg.click('#bdOpt button[data-v=C]'); await pg.wait_for_timeout(200)
+    c = await pg.evaluate('window.__board')
+    ok(abs(c['top10'] - exp['top10']) < 0.001 and await pg.locator('#bdStack svg rect').count() >= 12, f"方案 C：前 10 大客戶佔 {c['top10']:.4f}（Python {exp['top10']:.4f}）、每月依大類堆疊")
+    await pg.screenshot(path=SH + '/27_board_C.png', full_page=True)
+    await pg.click('#bdOpt button[data-v=A]')
+
+
 async def compare_page(pg, exp):
     """比較頁：每月、每季、每年的數字和 Python 一致；切換「上一期」；自選兩段期間。"""
     rows = exp['rows']
@@ -365,7 +387,7 @@ async def compare_page(pg, exp):
 
 async def reps_page(pg, d):
     """業務頁：每位業務加起來等於全公司；搜尋一位業務看詳細情形。"""
-    await pg.click('a[data-view=reps]'); await pg.click('#rsPeriod button[data-v=ytd]'); await pg.wait_for_selector('#rsTable tbody tr')
+    await pg.click('a[data-view=reps]'); await pg.click('#rsPeriod button[data-v=ytd]'); await pg.wait_for_selector('#rsBars .hb-row')
     r = await pg.evaluate('window.__reps')
     ok(r['mode'] == 'all' and abs(sum(x['net'] for x in r['rows']) - d['cur']['net']) < 0.01, f"業務：每位業務的淨銷售加起來 {sum(x['net'] for x in r['rows']):.0f} = 全公司 {d['cur']['net']:.0f}（{len(r['rows'])} 位）")
     ok(await pg.locator('#rsMonthChart svg').count() == 1 and await pg.locator('#rsYears table').count() == 1, '業務：每月曲線、每年表')
@@ -375,7 +397,7 @@ async def reps_page(pg, d):
     ok(o['mode'] == 'one' and o['rep'] == one['rep'] and abs(o['cur']['net'] - one['net']) < 0.01 and await pg.locator('#rsOneYears svg').count() == 1,
        f"業務：搜尋「{one['rep']}」→ 詳細情形，淨銷售 {o['cur']['net']:.0f}，客戶 {o['custs']} 位、每年的每月曲線")
     await pg.screenshot(path=SH + '/24_rep.png', full_page=True)
-    await pg.click('#rsBack'); await pg.wait_for_selector('#rsTable')
+    await pg.click('#rsBack'); await pg.wait_for_selector('#rsBars .hb-row')
 
 
 def expected_raw():
@@ -440,8 +462,8 @@ async def raw_import(b):
     await pg.select_option('#tdDay', str(exp['firstOct'])); await pg.wait_for_timeout(300)
     ok((await pg.evaluate('window.__today'))['date'] == exp['firstOct'], '今日：可以切換日期')
     await pg.screenshot(path=SH + '/32_today.png', full_page=True)
-    await pg.click('#tdReps tbody tr'); await pg.wait_for_selector('#rsBack')
-    ok((await pg.evaluate('window.__reps'))['mode'] == 'one', '今日：點業務 → 業務頁的詳細情形')
+    await pg.click('#tdRepBars .hb-row'); await pg.wait_for_selector('#rsBack')
+    ok((await pg.evaluate('window.__reps'))['mode'] == 'one', '今日：點業務的橫條 → 業務頁的詳細情形')
     # 切換成依單號
     await pg.click('a[data-view=data]'); await pg.click('#ymMode button[data-v=ord]'); await pg.wait_for_timeout(500)
     got = await pg.evaluate(NET_BY_YM)
@@ -487,7 +509,7 @@ async def report_page(b):
     ok(abs(r['top10Share'] - exp['top10']) < 0.001, f"TOP10 客戶合計佔比 {r['top10Share']:.4f}（Python {exp['top10']:.4f}）")
     big = {x['n']: x['cs'] for x in r['big']}
     ok(all(abs(big.get(k, 0) - v) < 0.001 for k, v in exp['big'].items()), f'男女童比例 {big}（Python {exp["big"]}）')
-    ok(await pg.locator('#rpBody .rp-card').count() == 9 and await pg.locator('#rpCust .rb-row').count() >= 5 and await pg.locator('#rpRegion .sg').count() == 2, '9 張圖：封面、每月、歷年、TOP10 客戶、TOP15 商品、區域、品項、男女童、毛利貢獻；區域有今年和去年兩條')
+    ok(await pg.locator('#rpBody .rp-card').count() == 9 and await pg.locator('#rpCust .rb-row').count() >= 5 and await pg.locator('#rpRegion .rp-pie svg').count() == 2, '9 張圖：封面、每月、歷年、TOP10 客戶、TOP15 商品、區域、品項、男女童、毛利貢獻；區域有今年和去年兩條')
     yrs = await pg.evaluate("[...document.querySelectorAll('#rpYears .rb-row .rb-name')].map(e => e.textContent)")
     want = [f'{y}年' for y in sorted({r['ym'] // 100 for r in exp['rows']}) if y <= 114][-6:]
     ok(yrs == want, f'歷年比較列出每一年：{yrs}（Python {want}）')
@@ -538,11 +560,15 @@ async def demo_mode(b):
     await pg.goto(URL); await pg.wait_for_timeout(300)
     # 沒有資料時也可以看示範
     await pg.click('#demoStart'); await pg.wait_for_selector('#view-overview:not([hidden])')
-    c1 = await pg.evaluate("[document.documentElement.dataset.theme, getComputedStyle(document.body).getPropertyValue('--pg').trim()]")
-    await pg.click('a[data-view=dashboard]'); c2 = await pg.evaluate("getComputedStyle(document.body).getPropertyValue('--pg').trim()"); await pg.click('a[data-view=overview]')
-    ok(c1[0] == 'pop' and c1[1] and c2 and c1[1] != c2, f'預設是「繽紛」風格，每一頁有自己的顏色（今日 {c1[1]}、提醒 {c2}）')
+    ok(await pg.evaluate("document.documentElement.dataset.theme") == 'indigo', '預設是原本的「藍染」風格')
+    ok(await pg.locator('#tdRepPie .donut svg path').count() >= 3 and await pg.locator('#tdCust .hb-row').count() >= 5, '今日：業務佔比用圓餅圖、前 10 大客戶用橫條圖')
+    await pg.click('a[data-view=board]')
+    for o in 'ABC':
+        await pg.click(f'#bdOpt button[data-v={o}]'); await pg.wait_for_timeout(300)
+        ok((await pg.evaluate('window.__board'))['opt'] == o and (await pg.locator('#bdBody svg').count() >= 2 or await pg.locator('#bdHeat td').count() >= 12), f'儀表板方案 {o} 用示範資料可以打開，有圖')
+    await pg.click('#bdOpt button[data-v=A]'); await pg.click('a[data-view=overview]')
     ok(await pg.is_visible('#demoBar') and '示範' in await pg.text_content('#brandSub') and await pg.evaluate(VAULT_CT) is None, '沒有資料也能看示範；畫面上有「示範資料」提示，裝置上沒有存任何東西')
-    for v in ('dashboard', 'compare', 'reps', 'report', 'pivot', 'customers', 'products', 'data'):
+    for v in ('board', 'dashboard', 'compare', 'reps', 'report', 'pivot', 'customers', 'products', 'data'):
         await pg.click(f'a[data-view={v}]'); await pg.wait_for_timeout(300)
     ok(not errs and '示範資料' in await pg.text_content('#rpBody') if await pg.click('a[data-view=report]') is None else False, '每一頁都能用示範資料打開；圖表報告封面註明是示範資料')
     await pg.click('#demoExit'); await pg.wait_for_timeout(800)

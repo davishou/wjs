@@ -160,7 +160,7 @@
       if (safety < 0) alerts.push({ lv: 'bad', t: `平均每月淨銷售 ${fmt.big(avg)}，低於損益兩平 ${fmt.big(bep)}`, s: '毛利不夠付固定費用：要提高銷售或毛利率，或降低固定費用。' });
       else if (safety < 0.1) alerts.push({ lv: 'warn', t: `安全邊際只有 ${fmt.pct(safety)}`, s: '業績再掉一點就會虧損。' });
       if (below.length >= 3) alerts.push({ lv: 'warn', t: `近 12 個月有 ${below.length} 個月低於損益兩平`, s: '看這些月份是淡季還是特殊原因。' });
-      ctx.after.push(() => Charts.render($('#dbBepChart'), { type: 'bar', labels: months12.map(ymLabel), series: [{ name: '淨銷售', cls: 's1', values: months12.map((m) => (mp.get(m) || [0])[0]) }, { name: '損益兩平', cls: 's2', values: months12.map(() => bep) }], fmt: fmt.money, axisFmt: fmt.axis }));
+      ctx.after.push(() => Charts.render($('#dbBepChart'), { type: 'combo', labels: months12.map(ymLabel), series: [{ name: '淨銷售', kind: 'bar', cls: 'c1', values: months12.map((m) => (mp.get(m) || [0])[0]) }, { name: '損益兩平', kind: 'line', dash: true, cls: 'c8', values: months12.map(() => bep) }], fmt: fmt.money, axisFmt: fmt.axis }));
     }
     $('#dbBep').innerHTML = bepHtml;
 

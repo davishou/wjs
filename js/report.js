@@ -92,8 +92,13 @@
       const pTot = pRows.reduce((s, r) => s + Math.max(0, r.net), 0), cTot = cRows.reduce((s, r) => s + Math.max(0, r.net), 0);
       const table = names.map((n) => ({ n, c: cMap.get(n) || 0, p: pMap.get(n) || 0 }));
       const shiftRows = table.map((t) => ({ ...t, cs: rate(Math.max(0, t.c), cTot), ps: hasPrev ? rate(Math.max(0, t.p), pTot) : null }));
+      void bar; void legend;
+      // 圓餅：今年、去年同期並排；顏色跟著名稱
+      const pie = (rs, title, total) => ({ title, total, items: names.map((nm) => ({ label: nm, value: Math.max(0, (rs.find((r) => r.label === nm) || {}).net || 0), cls: ctx.colorOf(dim, nm) })) });
+      const pies = [pie(cRows, pLabel, cur.net)].concat(hasPrev ? [pie(pRows, prevLabel, prev.net)] : []);
       return {
-        html: bar(cRows, cur.net, pLabel) + (hasPrev ? bar(pRows, prev.net, prevLabel) : '') + legend,
+        pies,
+        html: `<div class="rp-pies">${pies.map((pp, i) => `<div class="rp-pie-wrap"><h3>${esc(pp.title)}</h3><div class="rp-pie" data-k="${dim}" data-i="${i}"></div></div>`).join('')}</div>`,
         rows: shiftRows,
         tableHtml: `<table class="dt"><tr><th>${esc(dim === 'region' ? '區域' : '大類')}</th><th class="n">${pLabel}</th><th class="n">佔比</th>${hasPrev ? `<th class="n">${prevLabel}</th><th class="n">佔比</th><th class="n">比例變化</th>` : ''}</tr>${shiftRows.map((t) => `<tr><td>${esc(t.n)}</td><td class="n">${fmt.money(t.c)}</td><td class="n">${pct(t.cs)}</td>${hasPrev ? `<td class="n">${fmt.money(t.p)}</td><td class="n">${pct(t.ps)}</td><td class="n">${arrow(t.cs - t.ps, true, true)}</td>` : ''}</tr>`).join('')}</table>`,
       };
@@ -160,21 +165,21 @@
 
     // 各品項（商品類別）佔比
     const ct = withPrev('cat');
-    let cl = ct.list.slice(0, 12);
+    let cl = ct.list.slice(0, 12); void cl;
     if (ct.list.length > 12) {
       const rest = ct.list.slice(12);
       cl = cl.concat([{ other: true, label: `其他 ${rest.length} 項`, net: rest.reduce((s, r) => s + r.net, 0), share: rest.reduce((s, r) => s + (r.share || 0), 0), prevNet: 0 }]);
     }
     const noCat = !(meta.cat && meta.cat.map);
     cards.push(card('rpCat', '各品項佔比（商品類別）', ct.list.length ? `最大的品項是「${esc(ct.list[0].label)}」，佔 ${pct(ct.list[0].share)}${noCat ? '。<span class="muted">還沒匯入商品類別代碼表，所以只顯示代碼。</span>' : ''}` : '沒有資料',
-      rankBars(cl), table(['#', '品項', '淨營收', '佔比', ...(hasPrev ? ['去年同期', '成長'] : [])], ct.list.map((r, i) => [i + 1, esc(r.label), fmt.money(r.net), pct(r.share), ...(hasPrev ? [fmt.money(r.prevNet), arrow(chg(r.net, r.prevNet))] : [])])), prevLegend));
+      `<div id="rpCatPie"></div>`, table(['#', '品項', '淨營收', '佔比', ...(hasPrev ? ['去年同期', '成長'] : [])], ct.list.map((r, i) => [i + 1, esc(r.label), fmt.money(r.net), pct(r.share), ...(hasPrev ? [fmt.money(r.prevNet), arrow(chg(r.net, r.prevNet))] : [])])), ''));
 
     // 男女童百貨比例（大類）
-    let bigRows = null;
+    let bigRows = null, bgSeg = null;
     if (noCat) {
       cards.push(card('rpBig', '男女童百貨比例', '需要先匯入商品類別代碼表（資料與設定 → 商品類別代碼表），才分得出男、女、童、百貨。', '<p class="missing">缺少：商品類別代碼表</p>', ''));
     } else {
-      const bg = segBars('big', BIG_ORDER); bigRows = bg.rows;
+      const bg = segBars('big', BIG_ORDER); bigRows = bg.rows; bgSeg = bg;
       const bTop = bg.rows.slice().sort((a, b) => (b.cs || 0) - (a.cs || 0));
       cards.push(card('rpBig', '男女童百貨比例', bTop.length ? bTop.slice(0, 3).map((t) => `${esc(t.n)} ${pct(t.cs)}${t.ps != null ? `（去年 ${pct(t.ps)}）` : ''}`).join('、') : '沒有資料', bg.html, bg.tableHtml));
     }
@@ -189,6 +194,11 @@
       `<p class="rp-legend"><span><i class="lg-bar soft"></i>淨營收</span><span><i class="lg-bar"></i>其中的淨毛利</span>${hasPrev ? `<span><i class="lg-prev"></i>去年同期淨營收</span>` : ''}　右邊的 % 是佔全部毛利的比例</p>`));
 
     $('#rpBody').innerHTML = cards.join('');
+    // 圓餅圖
+    const drawPies = (seg) => seg.pies.forEach((pp, i) => { const el = $(`#rpBody .rp-pie[data-k="${seg.dim}"][data-i="${i}"]`); if (el) root.Charts.donut(el, { items: pp.items, fmt: fmt.big, title: pp.title, center: { value: fmt.big(pp.total), label: '淨營收' }, sort: false }); });
+    rg.dim = 'region'; drawPies(rg); if (bgSeg) { bgSeg.dim = 'big'; drawPies(bgSeg); }
+    const catEl = $('#rpCatPie');
+    if (catEl) root.Charts.donut(catEl, { items: ct.list.map((r) => ({ label: r.label, value: r.net })), fmt: fmt.big, title: '各品項佔比', center: { value: fmt.big(cur.net), label: pLabel }, max: 8 });
 
     // 每月折線（今年 vs 去年，同一個刻度）
     const drawMonthly = () => {
@@ -196,9 +206,9 @@
       const p = E.pivot({ rows: ['ym'], cols: null, measures: ['net'], filter: { ymFrom: (year - 1) * 100 + 1, ymTo: year * 100 + 12 } });
       const by = new Map(p.rows.map((r) => [E.ymList[r.codes[0]], r.vals[0][0]]));
       const labels = Array.from({ length: 12 }, (_, i) => (i + 1) + '月');
-      const series = [{ name: year + '年', cls: 's1', values: labels.map((_, i) => (i + 1 <= endM || year !== refY) && by.has(year * 100 + i + 1) ? by.get(year * 100 + i + 1) : null) }];
-      if (hasPrev) series.unshift({ name: (year - 1) + '年', cls: 's3', values: labels.map((_, i) => (by.has((year - 1) * 100 + i + 1) ? by.get((year - 1) * 100 + i + 1) : null)) });
-      root.Charts.render(el, { type: 'line', labels, series, fmt: fmt.money, axisFmt: fmt.axis, title: '每月淨營收' });
+      const series = [{ name: year + '年', kind: 'bar', cls: 'c1', values: labels.map((_, i) => (i + 1 <= endM || year !== refY) && by.has(year * 100 + i + 1) ? by.get(year * 100 + i + 1) : null) }];
+      if (hasPrev) series.push({ name: (year - 1) + '年', kind: 'line', cls: 'c2', values: labels.map((_, i) => (by.has((year - 1) * 100 + i + 1) ? by.get((year - 1) * 100 + i + 1) : null)) });
+      root.Charts.render(el, { type: 'combo', labels, series, fmt: fmt.money, axisFmt: fmt.axis, title: '每月淨營收' });
     };
     drawMonthly();
 

@@ -47,6 +47,7 @@
     today: { date: null }, // 今日頁選的日期（不存，每次開啟看最新一天）
     cmp: Object.assign({ metric: 'net', gran: 'month', vs: 'yoy', filters: {}, ab: { by: 'rep' } }, store.get('cmp', {})),
     rep: Object.assign({ sel: null, period: 'ytd', q: '' }, store.get('rep', {})),
+    board: Object.assign({ opt: 'A', period: 'ytd', metric: 'net' }, store.get('board', {})),
     view: 'overview',
     ref: store.get('ref', null),
     pivot: store.get('pivot', { src: 'all', rows: ['region'], col: 'year', measures: ['sales', 'returns', 'net', 'margin'], filters: {}, from: 0, to: 0, mode: 'agg' }),
@@ -65,12 +66,12 @@
     try { localStorage.setItem('dv.look', t); } catch (e) { /* */ }
     $$('#themePick button').forEach((b) => b.classList.toggle('on', b.dataset.theme === t));
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.content = { pop: '#4F46E5', indigo: '#26437A', night: '#0E1726', market: '#13805F' }[t];
-    if (S.E) setTimeout(() => { if (['overview', 'dashboard', 'compare', 'reps', 'report'].includes(S.view)) renderView(); }, 30);
+    if (meta) meta.content = { indigo: '#26437A', night: '#0E1726', market: '#13805F' }[t];
+    if (S.E) setTimeout(() => { if (['overview', 'board', 'dashboard', 'compare', 'reps', 'report'].includes(S.view)) renderView(); }, 30);
   }
 
   // ---------- 導覽 ----------
-  const VIEWS = ['overview', 'dashboard', 'compare', 'reps', 'customers', 'products', 'report', 'pivot', 'data'];
+  const VIEWS = ['overview', 'board', 'dashboard', 'compare', 'reps', 'customers', 'products', 'report', 'pivot', 'data'];
   function go(view) {
     if (!VIEWS.includes(view)) view = 'overview';
     if (!S.E && view !== 'data') view = 'data';
@@ -84,7 +85,7 @@
   }
   function renderView() {
     if (!S.E) { renderData(); return; }
-    (({ overview: renderToday, dashboard: renderDashboard, compare: renderCompare, reps: renderReps, report: renderReport, pivot: renderPivot, customers: renderCustomers, products: renderProducts, data: renderData })[S.view] || renderToday)();
+    (({ overview: renderToday, board: renderBoard, dashboard: renderDashboard, compare: renderCompare, reps: renderReps, report: renderReport, pivot: renderPivot, customers: renderCustomers, products: renderProducts, data: renderData })[S.view] || renderToday)();
   }
 
   // ---------- 表格元件 ----------
@@ -220,8 +221,25 @@
     sel.innerHTML = E.ymList.slice().reverse().map((y) => `<option value="${y}" ${y === ref ? 'selected' : ''}>${ymLabel(y)}</option>`).join('');
     sel.onchange = () => { S.ref = +sel.value; store.set('ref', S.ref); renderView(); };
   }
+  // 圖的顏色跟著名稱，不跟著名次：同一個區域、大類、業務在每張圖都是同一個顏色（--c1～--c8）
+  const COLOR_ORDER = { region: ['大台北地區', '桃竹苗', '中部', '南部', '其他地區'], big: ['男', '女', '童', '百貨', '配件', '未分類', '（未匯入分類表）'] };
+  function colorOf(dim, label) {
+    const E = S.E; if (!E) return 'c1';
+    E._colors = E._colors || {};
+    let list = COLOR_ORDER[dim] || E._colors[dim];
+    if (!list) {
+      list = E.pivot({ rows: [dim], cols: null, measures: ['net'], filter: {} }).rows.map((r) => r.labels[0]);
+      if (dim === 'rep') list.sort((a, b) => (+a || 9e9) - (+b || 9e9) || String(a).localeCompare(String(b)));
+      else list.sort((a, b) => String(a).localeCompare(String(b), 'zh-Hant', { numeric: true }));
+      E._colors[dim] = list;
+    }
+    let i = list.indexOf(label);
+    if (i < 0 && COLOR_ORDER[dim]) i = list.length + (String(label).length % 3);
+    return Charts.PAL[Math.max(0, i) % Charts.PAL.length];
+  }
+  window.__colorOf = colorOf;
   // 頁面共用的工具
-  const baseCtx = () => ({
+  const baseCtx = () => ({ colorOf,
     S, E: S.E, fmt, nf0, nf1, esc, $, $$, table, Charts, refYm, repName, toast, toDims, renderFilterChips,
     openCustomer, openProduct, drill: dashDrill, goRep, rerender: renderView,
   });
@@ -236,6 +254,9 @@
   // =====================================================
   // 比較（js/compare.js）
   // =====================================================
+  function renderBoard() {
+    window.__board = Board.render({ ...baseCtx(), save: () => store.set('board', S.board) }); // 測試用
+  }
   function renderCompare() {
     window.__cmp = Compare.render({ ...baseCtx(), save: () => store.set('cmp', S.cmp) }); // 測試用
   }
@@ -287,7 +308,7 @@
       S, E: S.E, fmt, nf0, nf1, esc, $, $$, table, Charts, refYm, repName, toast, after: [],
       saveDash: () => store.set('dash', S.dash),
       saveMeta: async (patch) => { await saveMeta(patch); renderDashboard(); },
-      openCustomer, openProduct, gotoIdle, drill: dashDrill,
+      openCustomer, openProduct, gotoIdle, drill: dashDrill, colorOf,
     };
     window.__dash = Dashboard.render(ctx); // 測試用：儀表板算出的數字
     ctx.after.forEach((f) => f());
@@ -297,7 +318,7 @@
   // 圖表報告（計算與版面在 js/report.js）：簡報模式、列印／存成 PDF
   // =====================================================
   function renderReport() {
-    const ctx = { S, E: S.E, fmt, nf0, nf1, esc, $, $$, refYm, repName, drill: dashDrill };
+    const ctx = { S, E: S.E, fmt, nf0, nf1, esc, $, $$, refYm, repName, drill: dashDrill, colorOf };
     window.__report = Report.render(ctx); // 測試用
     S.reportRedraw = window.__report.redraw;
     if (document.body.classList.contains('presenting')) showSlide();
@@ -717,10 +738,12 @@
       { k: '退貨金額', v: fmt.big(c.returns), d: `退貨率 ${fmt.pct(c.sales ? c.returns / c.sales : null)}` },
       { k: '淨銷售', v: fmt.big(c.net), d: `${c.region}・${repName(c.rep)}` },
     ]) + `<div class="panel"><div class="panel-head"><h2>近 24 個月</h2></div><div class="chart" id="dwChart"></div></div>
+      <div class="panel"><div class="panel-head"><h2>買哪些商品大類</h2></div><div id="dwBig"></div></div>
       <div class="panel"><div class="panel-head"><h2>買最多的商品</h2><button class="btn" id="dwPivot">在樞紐分析中查看</button></div><div id="dwTop"></div></div>`;
     openDrawer(c.name || c.code, `${c.code}・${c.region}`, html);
     const ms = monthlySeries(dims);
-    Charts.render($('#dwChart'), { type: 'bar', labels: ms.labels, series: [{ name: '銷貨', values: ms.s, cls: 's1' }, { name: '退貨', values: ms.r, cls: 's2' }], fmt: fmt.money, axisFmt: fmt.axis });
+    Charts.render($('#dwChart'), { type: 'bar', labels: ms.labels, series: [{ name: '銷貨', values: ms.s, cls: 'c1' }, { name: '退貨', values: ms.r, cls: 'c2' }], fmt: fmt.money, axisFmt: fmt.axis });
+    Charts.donut($('#dwBig'), { items: S.E.pivot({ rows: ['big'], cols: null, measures: ['net'], filter: { dims } }).rows.map((r) => ({ label: r.labels[0], value: r.vals[0][0], cls: colorOf('big', r.labels[0]) })), fmt: fmt.big, title: '商品大類' });
     const p = S.E.pivot({ rows: ['sku2'], cols: null, measures: ['soldQty', 'sales', 'returns'], filter: { dims } });
     const prodIdx = new Map(S.E.products({ dims }, refYm(), 'sku2').list.map((x) => [x.code, x]));
     const rows = p.rows.map((r) => ({ code: r.labels[0], qty: r.vals[0][0], sales: r.vals[0][1], ret: r.vals[0][2], last: (prodIdx.get(r.labels[0]) || {}).last })).sort((a, b) => b.sales - a.sales);
@@ -1261,7 +1284,7 @@
 
   // ---------- 啟動 ----------
   async function boot() {
-    setTheme(document.documentElement.dataset.theme || 'pop');
+    setTheme(document.documentElement.dataset.theme || 'indigo');
     bindPivot(); bindCustomers(); bindProducts(); bindData(); bindReport(); bindReps();
     $('#tdDay').addEventListener('change', (e) => { S.today.date = +e.target.value; renderToday(); });
     $('#demoStart').addEventListener('click', () => { startDemo().catch((e) => toast('示範資料載入失敗：' + e.message)); });
@@ -1269,7 +1292,7 @@
     $$('.tabs a').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); go(a.dataset.view); }));
     window.addEventListener('hashchange', () => go(location.hash.slice(1) || 'overview'));
     // 視窗大小改變：圖跟著重畫
-    const redrawOf = { overview: () => window.__today, compare: () => window.__cmp, reps: () => window.__reps };
+    const redrawOf = { board: () => window.__board, overview: () => window.__today, compare: () => window.__cmp, reps: () => window.__reps };
     let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => {
       if (!S.E) return;
       if (redrawOf[S.view]) { const r = redrawOf[S.view](); if (r && r.redraw) r.redraw(); }

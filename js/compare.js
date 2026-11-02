@@ -23,7 +23,7 @@
     { k: 'cat', label: '商品類別' }, { k: 'ck', label: '客戶' }, { k: 'style', label: '款號' },
   ];
   const FILTER_DIMS = ['region', 'rep', 'big', 'cat', 'ck', 'style'];
-  const COLORS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'];
+  const COLORS = ['c2', 'c3', 'c4', 'c5', 'c7', 'c6'];
 
   function render(ctx) {
     const { S, E, fmt, nf0, nf1, esc, $, $$, Charts, repName } = ctx;
@@ -122,20 +122,22 @@
       <div class="ab-pick"><span class="ab-a">期間 A</span><select id="abAF">${opt(aF)}</select><span>到</span><select id="abAT">${opt(aT)}</select>
         <span class="ab-b">期間 B</span><select id="abBF">${opt(bF)}</select><span>到</span><select id="abBT">${opt(bT)}</select></div>
       <div class="cfg-row"><span class="cfg-l">拆開看</span>${seg('abBy', BY.map((x) => ({ v: x.k, label: x.label })), st.ab.by)}</div>
-      <div id="abTable" class="db-scroll"></div></div>`);
+      <div class="chart" id="abChart"></div>
+      <details class="numtab" open><summary>數字表</summary><div id="abTable" class="db-scroll"></div></details></div>`);
     $('#cmpBody').innerHTML = html.join('');
 
     // 圖：每年 → 長條（全年、同期）；每季／每月 → 每年一條線
     const drawChart = () => {
       const el = $('#cmpChart'); if (!el) return;
       if (st.gran === 'year') {
-        const series = [{ name: '全年', cls: 's1', values: years.map((yy) => val(full, yy)) }];
-        if (refM < 12) series.push({ name: `1～${refM} 月`, cls: 's3', values: years.map((yy) => val(ytd, yy)) });
+        const series = [{ name: '全年', kind: 'bar', cls: 'c1', values: years.map((yy) => val(full, yy)) }];
+        if (refM < 12) series.push({ name: `1～${refM} 月`, kind: 'bar', cls: 'c3', values: years.map((yy) => val(ytd, yy)) });
         Charts.render(el, { type: 'bar', labels: years.map((yy) => yy + '年'), series, fmt: vfull, axisFmt: met.kind === 'pct' ? (v) => nf1.format(v * 100) + '%' : met.kind === 'int' ? (v) => nf0.format(v) : fmt.axis, title: met.label });
       } else {
+        // 複合圖：最新一年用長條，往年用線（同一個刻度），一眼看出今年每個月比往年高還是低
         const ys = years.slice(-COLORS.length);
-        const series = ys.map((yy, i) => ({ name: yy + '年', cls: COLORS[COLORS.length - ys.length + i], values: cols.map((c) => val(cell, yy + '|' + c.c)) }));
-        Charts.render(el, { type: 'line', labels: cols.map((c) => c.label), series, fmt: vfull, axisFmt: met.kind === 'pct' ? (v) => nf1.format(v * 100) + '%' : met.kind === 'int' ? (v) => nf0.format(v) : fmt.axis, title: met.label });
+        const series = ys.map((yy, i) => ({ name: yy + '年', kind: i === ys.length - 1 ? 'bar' : 'line', cls: i === ys.length - 1 ? 'c1' : COLORS[(ys.length - 1 - i) % COLORS.length], values: cols.map((c) => val(cell, yy + '|' + c.c)) }));
+        Charts.render(el, { type: 'combo', labels: cols.map((c) => c.label), series, fmt: vfull, axisFmt: met.kind === 'pct' ? (v) => nf1.format(v * 100) + '%' : met.kind === 'int' ? (v) => nf0.format(v) : fmt.axis, title: met.label });
       }
     };
     drawChart();
@@ -167,6 +169,9 @@
       ];
       if (met.kind !== 'pct' && by) cols.push({ key: 'share', label: 'A 佔比', n: 1, render: (r) => fmt.pct(rate(r.va, met.f(tA))) });
       const foot = by ? `<tr><td>合計</td><td class="n">${vfull(met.f(tA))}</td><td class="n">${vfull(met.f(tB))}</td><td class="n">${met.kind === 'pct' ? arrow(met.f(tA) - met.f(tB)) : vfull(met.f(tA) - met.f(tB))}</td><td class="n">${arrow(delta(met.f(tA), met.f(tB)))}</td>${met.kind !== 'pct' ? '<td></td>' : ''}</tr>` : '';
+      // 圖：A、B 並排的長條（前 12 項）
+      const top = list.slice(0, 12);
+      Charts.render($('#abChart'), { type: 'bar', labels: top.map((r) => r.label), series: [{ name: 'A：' + pt(A), cls: 'c1', values: top.map((r) => r.va) }, { name: 'B：' + pt(B), cls: 'c2', values: top.map((r) => r.vb) }], fmt: vfull, axisFmt: met.kind === 'pct' ? (v) => nf1.format(v * 100) + '%' : met.kind === 'int' ? (v) => nf0.format(v) : fmt.axis, title: '兩段期間比較' });
       ctx.table($('#abTable'), cols, list, { limit: 30, foot, onRow: by === 'ck' ? (r) => ctx.drill('ck', r.code, r.label) : by === 'style' ? (r) => ctx.drill('style', r.code, r.label) : by === 'rep' ? (r) => ctx.goRep(E.dim('rep').labels[r.code]) : null });
       window.__cmpAB = { A, B, by, metric: met.k, total: [met.f(tA), met.f(tB)], rows: list.length };
     };

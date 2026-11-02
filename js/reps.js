@@ -50,9 +50,11 @@
         const v = cur.get(r) || obj(null), pv = prev.get(r) || obj(null);
         return { rep: r, label: repName(r), ...v, share: rate(v.net, totNet), prevNet: pv.net, yoy: chg(v.net, pv.net), margin: rate(v.profit, v.sales), retRate: rate(v.returns, v.sales), avg: rate(v.sales, v.orders), prevCusts: pv.custs };
       }).filter((r) => r.sales || r.returns || r.prevNet).sort((a, b) => b.net - a.net);
-      body.innerHTML = `<div class="panel"><div class="panel-head"><h2>每位業務的銷售狀況</h2></div><p class="hint">點一列看那位業務的詳細情形；也可以在上面搜尋。</p><div id="rsTable" class="db-scroll"></div></div>
+      body.innerHTML = `<div class="panel"><div class="panel-head"><h2>每位業務的銷售狀況</h2></div><p class="hint">點圖或名字看那位業務的詳細情形；也可以在上面搜尋。</p>
+        <div class="grid2 tight"><div><h3>佔全公司淨銷售</h3><div id="rsPie"></div></div><div><h3>淨銷售${hasPrev ? '（細線 = 去年同期）' : ''}</h3><div id="rsBars"></div></div></div>
+        <details class="numtab"><summary>數字表（淨毛利、毛利率、退貨率、客戶數、單數）</summary><div id="rsTable" class="db-scroll"></div></details></div>
         <div class="panel"><div class="panel-head"><h2>每月淨銷售（近 24 個月）</h2></div><p class="hint">這段期間淨銷售最高的 ${Math.min(COLORS.length, rows.length)} 位業務，每人一條線。</p><div class="chart tall" id="rsMonthChart"></div></div>
-        <div class="panel"><div class="panel-head"><h2>每年淨銷售</h2></div><p class="hint">每位業務每一年的淨銷售，▲▼ 是和前一年比。${ref % 100 < 12 ? `今年還沒過完（到 ${ymLabel(E.maxYm)}），最右邊另外列出每年 1～${ref % 100} 月的同期比較；圖上有 * 的年份還沒過完。` : ''}</p><div id="rsYears" class="table-wrap db-scroll"></div><div class="chart" id="rsYearChart"></div></div>`;
+        <div class="panel"><div class="panel-head"><h2>每年淨銷售</h2></div><p class="hint">每位業務每一年的淨銷售，▲▼ 是和前一年比。${ref % 100 < 12 ? `今年還沒過完（到 ${ymLabel(E.maxYm)}），最右邊另外列出每年 1～${ref % 100} 月的同期比較；圖上有 * 的年份還沒過完。` : ''}</p><div class="chart" id="rsYearChart"></div><details class="numtab"><summary>數字表</summary><div id="rsYears" class="table-wrap db-scroll"></div></details></div>`;
       const cols = [
         { key: 'label', label: '業務員', cls: 'lbl' },
         { key: 'net', label: '淨銷售', n: 1, fmt: 'money' },
@@ -64,7 +66,10 @@
         { key: 'custs', label: '客戶數', n: 1, render: (r) => nf0.format(r.custs) + (hasPrev ? `<small class="muted">（去年 ${nf0.format(r.prevCusts)}）</small>` : '') },
         { key: 'orders', label: '出貨單數', n: 1, fmt: 'int' }, { key: 'avg', label: '平均每單', n: 1, fmt: 'money' },
       );
-      table($('#rsTable'), cols, rows, { limit: 50, onRow: (r) => { st.sel = r.rep; st.q = ''; ctx.save(); ctx.rerender(); window.scrollTo(0, 0); }, empty: '找不到符合的業務' });
+      const pick = (r) => { st.sel = r.rep; st.q = ''; ctx.save(); ctx.rerender(); window.scrollTo(0, 0); };
+      table($('#rsTable'), cols, rows, { limit: 50, onRow: pick, empty: '找不到符合的業務' });
+      Charts.donut($('#rsPie'), { items: rows.filter((r) => r.net > 0).map((r) => ({ label: r.label, value: r.net, cls: ctx.colorOf('rep', r.rep), rep: r.rep })), fmt: fmt.big, title: '各業務佔比', center: { value: fmt.big(totNet), label: '全公司' }, onClick: pick });
+      Charts.hbars($('#rsBars'), { rows: rows.map((r) => ({ label: r.label, value: r.net, prev: hasPrev ? r.prevNet : null, cls: ctx.colorOf('rep', r.rep), rep: r.rep, note: hasPrev ? (r.prevNet ? arrow(r.yoy) : '<span class="muted">新</span>') : '' })), fmt: fmt.big, onClick: pick, limit: 20 });
       const top = rows.slice(0, COLORS.length);
       const ymByRep = new Map(top.map((r) => [r.rep, yearMonth({ rep: new Set([rd.labels.indexOf(r.rep)]) })]));
       // 每年
@@ -79,8 +84,10 @@
           (ySame ? `<td class="n sep">${fmt.big(yr(ySame, r.rep, lastY) || 0)}</td><td class="n">${fmt.big(yr(ySame, r.rep, lastY - 1) || 0)}</td><td class="n">${yr(ySame, r.rep, lastY - 1) ? arrow(chg(yr(ySame, r.rep, lastY) || 0, yr(ySame, r.rep, lastY - 1))) : '<span class="muted">—</span>'}</td>` : '') + '</tr>').join('') + '</table>';
       $('#rsYears').onclick = (e) => { const tr = e.target.closest('tr[data-rep]'); if (!tr) return; st.sel = tr.dataset.rep; ctx.save(); ctx.rerender(); window.scrollTo(0, 0); };
       const draw = () => {
-        Charts.render($('#rsMonthChart'), { type: 'line', labels: last24.map(ymLabel), series: top.map((r, i) => ({ name: r.label, cls: COLORS[i], values: last24.map((m) => (E.ymIndex.has(m) ? ymByRep.get(r.rep).get(m) || 0 : null)) })), fmt: fmt.money, axisFmt: fmt.axis, title: '每位業務每月淨銷售' });
-        Charts.render($('#rsYearChart'), { type: 'line', labels: years.map((yy) => yy + '年' + (yy === Math.floor(E.maxYm / 100) && E.maxYm % 100 < 12 ? '*' : '')), series: top.map((r, i) => ({ name: r.label, cls: COLORS[i], values: years.map((yy) => yr(yFull, r.rep, yy) ?? null) })), fmt: fmt.money, axisFmt: fmt.axis, title: '每位業務每年淨銷售' });
+        Charts.render($('#rsMonthChart'), { type: 'line', labels: last24.map(ymLabel), series: top.map((r) => ({ name: r.label, cls: ctx.colorOf('rep', r.rep), values: last24.map((m) => (E.ymIndex.has(m) ? ymByRep.get(r.rep).get(m) || 0 : null)) })), fmt: fmt.money, axisFmt: fmt.axis, title: '每位業務每月淨銷售' });
+        // 每位業務一組長條，每一年一個顏色
+        const ys = years.slice(-COLORS.length);
+        Charts.render($('#rsYearChart'), { type: 'bar', labels: rows.slice(0, 10).map((r) => r.label), series: ys.map((yy, i) => ({ name: yy + '年' + (yy === Math.floor(E.maxYm / 100) && E.maxYm % 100 < 12 ? '*' : ''), cls: COLORS[(i + COLORS.length - ys.length) % COLORS.length], values: rows.slice(0, 10).map((r) => yr(yFull, r.rep, yy) ?? null) })), fmt: fmt.money, axisFmt: fmt.axis, title: '每位業務每年淨銷售' });
       };
       draw();
       return { mode: 'all', rows: rows.map((r) => ({ rep: r.rep, net: r.net, prevNet: r.prevNet, custs: r.custs })), redraw: draw };
@@ -117,12 +124,15 @@
           kpi('交易客戶數', nf0.format(c.custs), `新客戶 ${nf0.format(newC)} 位`, hasPrev ? `去年同期 ${nf0.format(p.custs)} 位、沒再買 ${nf0.format(lost.length)} 位` : ''),
           kpi('出貨單數', nf0.format(c.orders), `平均每單 ${fmt.money(rate(c.sales, c.orders))}`, hasPrev ? `去年同期 ${nf0.format(p.orders)} 張` : ''),
         ].join('')}</div></div>
-      <div class="grid2"><div class="panel"><div class="panel-head"><h2>近 24 個月每月淨銷售</h2></div><div class="chart" id="rsOneMonth"></div></div>
+      <div class="grid2"><div class="panel"><div class="panel-head"><h2>近 24 個月每月淨銷售</h2></div><p class="hint">長條是每個月，虛線是前一年同一個月。</p><div class="chart" id="rsOneMonth"></div></div>
         <div class="panel"><div class="panel-head"><h2>每年的每月曲線</h2></div><p class="hint">每一年一條線，同一個月份上下比就是和往年同期比。</p><div class="chart" id="rsOneYears"></div></div></div>
       <div class="panel"><div class="panel-head"><h2>每年</h2></div><div id="rsOneYearTbl" class="db-scroll"></div></div>
       <div class="panel"><div class="panel-head"><h2>客戶（${periodText(F)}）</h2></div><p class="hint">包含去年同期有買、這段期間沒再買的客戶。點一列看客戶明細。</p><div id="rsCust" class="db-scroll"></div></div>
       <div class="grid2"><div class="panel"><div class="panel-head"><h2>賣最多的商品（款號）</h2></div><div id="rsProd" class="db-scroll"></div></div>
-        <div class="panel"><div class="panel-head"><h2>商品大類、區域</h2></div><div class="grid2 tight"><div class="share"><h3>商品大類</h3>${shareRows(mix('big'))}</div><div class="share"><h3>區域</h3>${shareRows(mix('region'))}</div></div></div></div>`;
+        <div class="panel"><div class="panel-head"><h2>商品大類、區域</h2></div><div class="donuts"><div><h3>商品大類</h3><div id="rsBig"></div></div><div><h3>區域</h3><div id="rsRegion"></div></div></div></div></div>`;
+    Charts.donut($('#rsBig'), { items: mix('big').map((r) => ({ label: r.label, value: r.net, cls: ctx.colorOf('big', r.label) })), fmt: fmt.big, title: '商品大類' });
+    Charts.donut($('#rsRegion'), { items: mix('region').map((r) => ({ label: r.label, value: r.net, cls: ctx.colorOf('region', r.label) })), fmt: fmt.big, title: '區域' });
+    void shareRows;
     $('#rsBack').onclick = () => { st.sel = null; ctx.save(); ctx.rerender(); };
     // 每年表
     const yp = E.pivot({ rows: ['year'], cols: null, measures: MS, filter: { dims } }).rows.map((r) => ({ y: parseInt(r.labels[0], 10), ...obj(r.vals[0]) }));
@@ -147,9 +157,9 @@
       prodRows, { limit: 15, onRow: (r) => ctx.drill('style', r.code, r.label), empty: '沒有' });
     const ym = yearMonth(dims);
     const draw = () => {
-      Charts.render($('#rsOneMonth'), { type: 'bar', labels: last24.map(ymLabel), series: [{ name: '淨銷售', cls: 's1', values: last24.map((m) => ym.get(m) || 0) }], fmt: fmt.money, axisFmt: fmt.axis, title: '近 24 個月每月淨銷售' });
+      Charts.render($('#rsOneMonth'), { type: 'combo', labels: last24.map(ymLabel), series: [{ name: '淨銷售', kind: 'bar', cls: ctx.colorOf('rep', sel), values: last24.map((m) => ym.get(m) || 0) }, { name: '前一年同月', kind: 'line', dash: true, cls: 's3', values: last24.map((m) => (E.ymIndex.has(m - 100) ? ym.get(m - 100) || 0 : null)) }], fmt: fmt.money, axisFmt: fmt.axis, title: '近 24 個月每月淨銷售' });
       const ys = years.slice(-COLORS.length);
-      Charts.render($('#rsOneYears'), { type: 'line', labels: Array.from({ length: 12 }, (_, i) => (i + 1) + '月'), series: ys.map((yy, i) => ({ name: yy + '年', cls: COLORS[COLORS.length - ys.length + i], values: Array.from({ length: 12 }, (_, k) => (E.ymIndex.has(yy * 100 + k + 1) ? ym.get(yy * 100 + k + 1) || 0 : null)) })), fmt: fmt.money, axisFmt: fmt.axis, title: '每年的每月曲線' });
+      Charts.render($('#rsOneYears'), { type: 'line', labels: Array.from({ length: 12 }, (_, i) => (i + 1) + '月'), series: ys.map((yy, i) => ({ name: yy + '年', cls: COLORS[(i + COLORS.length - ys.length) % COLORS.length], values: Array.from({ length: 12 }, (_, k) => (E.ymIndex.has(yy * 100 + k + 1) ? ym.get(yy * 100 + k + 1) || 0 : null)) })), fmt: fmt.money, axisFmt: fmt.axis, title: '每年的每月曲線' });
     };
     draw();
     return { mode: 'one', rep: sel, cur: c, prev: p, custs: custRows.length, lost: lost.length, years: yp, redraw: draw };

@@ -77,10 +77,11 @@
       kpi(`本月預估${dd >= dim ? '（已過完）' : ''}`, fmt.big(dd >= dim ? T.mtd.net : pace), dd >= dim ? '' : `照目前每天的速度估算到 ${m}/${dim}`, hasLm ? `去年 ${m} 月全月 ${fmt.big(T.lmFull.net)}` : '', hasPm ? `上個月全月 ${fmt.big(T.pmFull.net)}` : ''),
     ].join('')}</div>`);
     html.push(`<div class="grid2"><div class="panel"><div class="panel-head"><h2>本月累計走勢</h2></div><p class="hint">每一天加起來的淨銷售。本月的線在上個月、去年同月的上面，就是表現比較好。</p><div class="chart" id="tdCumChart"></div></div>
-      <div class="panel"><div class="panel-head"><h2>最近 30 天每天的淨銷售</h2></div><p class="hint">沒有出貨的日子（例如假日）是空的。滑鼠移到長條上看數字。</p><div class="chart" id="tdDayChart"></div></div></div>`);
-    html.push(`<div class="panel"><div class="panel-head"><h2>本月各業務（${m}/1～${m}/${dd}）</h2><a href="#reps" class="link" id="tdAllReps">業務頁</a></div><p class="hint">點一列看那位業務的詳細情形。</p><div id="tdReps" class="db-scroll"></div></div>`);
-    html.push(`<div class="grid2"><div class="panel"><div class="panel-head"><h2>本月前 10 大客戶</h2></div><div id="tdCust" class="db-scroll"></div></div>
-      <div class="panel"><div class="panel-head"><h2>最近的出貨日</h2></div><p class="hint">點一列切換到那一天。</p><div id="tdRecent" class="db-scroll"></div></div></div>`);
+      <div class="panel"><div class="panel-head"><h2>最近 30 天每天的淨銷售</h2></div><p class="hint">長條是每天的淨銷售，線是前 7 天的平均（看趨勢）。沒有出貨的日子是空的。</p><div class="chart" id="tdDayChart"></div></div></div>`);
+    html.push(`<div class="panel"><div class="panel-head"><h2>本月各業務（${m}/1～${m}/${dd}）</h2><a href="#reps" class="link" id="tdAllReps">業務頁</a></div>
+      <div class="grid2 tight"><div><h3>佔本月的比例</h3><div id="tdRepPie"></div></div><div><h3>本月到今天${hasPm ? '（細線 = 上月同期）' : ''}</h3><div id="tdRepBars"></div></div></div>
+      <details class="numtab"><summary>數字表</summary><div id="tdReps" class="db-scroll"></div></details></div>`);
+    html.push(`<div class="panel"><div class="panel-head"><h2>本月前 10 大客戶</h2></div>${hasLm ? '<p class="hint">細線是去年同月同期。點客戶看明細。</p>' : ''}<div id="tdCust"></div></div>`);
     html.push(`<div class="panel"><div class="panel-head"><h2>${dayLabel(D)} 的單</h2></div><div id="tdOrders" class="db-scroll"></div></div>`);
     box.innerHTML = html.join('');
 
@@ -97,7 +98,10 @@
       const d0 = dayNum(D) - 29, last30 = [];
       for (let k = 0; k < 30; k++) last30.push(fromDayNum(d0 + k));
       const m30 = daily([last30[0], D]);
-      Charts.render($('#tdDayChart'), { type: 'bar', labels: last30.map((d) => `${Math.floor(d / 100) % 100}/${d % 100}`), series: [{ name: '淨銷售', cls: 's1', values: last30.map((d) => (m30.get(d) || {}).net || 0) }], fmt: fmt.money, axisFmt: fmt.axis, title: '最近 30 天每天的淨銷售' });
+      // 7 天平均：往前 7 個日曆天（含今天）的淨銷售 ÷ 7
+      const d7 = daily([fromDayNum(d0 - 6), D]);
+      const avg7 = last30.map((d) => { let s2 = 0; for (let k = 0; k < 7; k++) s2 += (d7.get(fromDayNum(dayNum(d) - k)) || {}).net || 0; return s2 / 7; });
+      Charts.render($('#tdDayChart'), { type: 'combo', labels: last30.map((d) => `${Math.floor(d / 100) % 100}/${d % 100}`), series: [{ name: '每天', kind: 'bar', cls: 'c1', values: last30.map((d) => (m30.get(d) || {}).net || 0) }, { name: '7 天平均', kind: 'line', cls: 'c2', values: avg7 }], fmt: fmt.money, axisFmt: fmt.axis, title: '最近 30 天每天的淨銷售' });
     };
     drawCharts();
 
@@ -119,6 +123,8 @@
     if (hasLm) rcols.push({ key: 'lnet', label: '去年同月同期', n: 1, fmt: 'money' }, { key: 'lchg', label: '比去年', n: 1, render: (r) => (r.lnet ? arrow(chg(r.net, r.lnet)) : '<span class="muted">新</span>') });
     rcols.push({ key: 'margin', label: '毛利率', n: 1, fmt: 'pct' }, { key: 'custs', label: '客戶數', n: 1, fmt: 'int' });
     table($('#tdReps'), rcols, reps, { limit: 30, onRow: (r) => ctx.goRep(r.rep), empty: '這個月還沒有資料' });
+    Charts.donut($('#tdRepPie'), { items: reps.filter((r) => r.net > 0).map((r) => ({ label: r.label, value: r.net, cls: ctx.colorOf('rep', r.rep), rep: r.rep })), fmt: fmt.big, title: '各業務佔本月的比例', center: { value: fmt.big(T.mtd.net), label: '本月' }, onClick: (d) => ctx.goRep(d.rep) });
+    Charts.hbars($('#tdRepBars'), { rows: reps.map((r) => ({ label: r.label, value: r.net, prev: hasPm ? r.pnet : null, cls: ctx.colorOf('rep', r.rep), rep: r.rep, note: hasPm && r.pnet ? arrow(chg(r.net, r.pnet)) : '' })), fmt: fmt.big, prevLabel: '上月同期', onClick: (r) => ctx.goRep(r.rep) });
     $('#tdAllReps').onclick = (e) => { e.preventDefault(); ctx.goRep(null); };
 
     // ---------- 本月前 10 大客戶 ----------
@@ -129,18 +135,8 @@
     const ccols = [{ key: 'name', label: '客戶', cls: 'lbl' }, { key: 'net', label: '本月累計', n: 1, fmt: 'money' }, { key: 'share', label: '佔比', n: 1, render: (r) => fmt.pct(rate(r.net, T.mtd.net)) }];
     if (hasLm) ccols.push({ key: 'lnet', label: '去年同月同期', n: 1, fmt: 'money' }, { key: 'x', label: '變化', n: 1, render: (r) => (r.lnet ? arrow(chg(r.net, r.lnet)) : '<span class="muted">新</span>') });
     const openCk = (r) => { const c = E.customers({ dims: { ck: new Set([r.ck]) } }, ctx.refYm()).list[0]; if (c) ctx.openCustomer(c); };
-    table($('#tdCust'), ccols, top, { onRow: openCk, empty: '這個月還沒有資料' });
-
-    // ---------- 最近的出貨日 ----------
-    const di = allDays.indexOf(D);
-    const recentDays = allDays.slice(Math.max(0, di - 9), di + 1).reverse();
-    const recentMap = daily([recentDays[recentDays.length - 1], D]);
-    const recent = recentDays.map((d) => ({ d, ...(recentMap.get(d) || { sales: 0, returns: 0, net: 0, orders: 0, custs: 0 }) }));
-    table($('#tdRecent'), [
-      { key: 'd', label: '日期', cls: 'lbl', render: (r) => `${esc(dayLabel(r.d))}（${weekday(r.d)}）${r.d === D ? ' <b>◀</b>' : ''}` },
-      { key: 'net', label: '淨銷售', n: 1, fmt: 'money' }, { key: 'returns', label: '退貨', n: 1, fmt: 'money' },
-      { key: 'orders', label: '單數', n: 1, fmt: 'int' }, { key: 'custs', label: '客戶', n: 1, fmt: 'int' },
-    ], recent, { onRow: (r) => { S.today.date = r.d; ctx.rerender(); } });
+    void ccols;
+    Charts.hbars($('#tdCust'), { rows: top.map((r) => ({ label: r.name, value: r.net, prev: hasLm ? r.lnet : null, ck: r.ck, cls: 'c1', note: hasLm ? (r.lnet ? arrow(chg(r.net, r.lnet)) : '<span class="muted">新</span>') : '' })), fmt: fmt.big, prevLabel: '去年同月同期', onClick: openCk, limit: 10 });
 
     // ---------- 當天的單 ----------
     const od = E.pivot({ rows: ['ord', 'src', 'ck', 'rep'], cols: null, measures: ['sales', 'returns', 'rows'], filter: { dFrom: D, dTo: D } });
