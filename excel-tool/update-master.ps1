@@ -363,9 +363,35 @@ function Merge-Kind($wb, $kind, $src) {
     $dateBlank = ($newLast - 1) - [int]$ws.Application.WorksheetFunction.CountA((Rng $ws 2 $dc $newLast $dc))
     $dateLetter = $ws.Cells.Item(1, $dc).Address($false, $false) -replace '\d', ''
   }
+  # 還沒有日期的單，分成兩種原因寫進報告：0 = 這次的原始資料裡找不到這張單；1 = 原始資料有這張單，但 DELIVDATE 本身是空的
+  $dateWhy = New-Object 'System.Collections.Generic.List[string]'
+  if ($dc -and $dateBlank -gt 0) {
+    $ka = Get-Values (Rng $ws 2 1 $newLast 1); $kd = Get-Values (Rng $ws 2 $dc $newLast $dc)
+    $cnt = @(0, 0)
+    $months = @((New-Object 'System.Collections.Generic.SortedDictionary[int,int]'), (New-Object 'System.Collections.Generic.SortedDictionary[int,int]'))
+    $samples = @((New-Object 'System.Collections.Generic.List[string]'), (New-Object 'System.Collections.Generic.List[string]'))
+    $lastYm = @(-1, -1)   # 每個月份舉一個例子
+    for ($i = 1; $i -le $newLast - 1; $i++) {
+      if ((Txt $kd[$i, 1]).Trim() -ne '') { continue }
+      $k = Key $ka[$i, 1]; if ($k -eq '') { continue }
+      $t = if ($groups.ContainsKey($k)) { 1 } else { 0 }
+      $cnt[$t]++
+      $ym = Ym $k; if ($months[$t].ContainsKey($ym)) { $months[$t][$ym]++ } else { $months[$t][$ym] = 1 }
+      if ($ym -ne $lastYm[$t] -and $samples[$t].Count -lt 12) { $samples[$t].Add("$k（第 $($i + 1) 列）"); $lastYm[$t] = $ym }
+    }
+    $why = @('這次的 JMSSAL／JMSSBK 裡找不到這張單（可能是原始資料沒有涵蓋那段期間，或單已作廢／單號不同）', '原始資料有這張單，但 DELIVDATE 本身是空的')
+    for ($t = 0; $t -lt 2; $t++) {
+      if (-not $cnt[$t]) { continue }
+      $ms = @(); foreach ($e in $months[$t].GetEnumerator()) { $ms += ('{0}：{1} 筆' -f $(if ($e.Key) { '{0}/{1:00}' -f [math]::Floor($e.Key / 100), ($e.Key % 100) } else { '看不出月份' }), $e.Value) }
+      $mtxt = if ($ms.Count -gt 12) { [string]::Join('、', $ms[0..11]) + "…等 $($ms.Count) 個月" } else { [string]::Join('、', $ms) }
+      $dateWhy.Add("$($why[$t])：$($cnt[$t]) 筆。月份：$mtxt")
+      $dateWhy.Add('      每個月的例子：' + [string]::Join('、', $samples[$t]))
+    }
+    $ka = $null; $kd = $null
+  }
   return [pscustomobject]@{
     Kind = $kind; Ws = $ws; Before = $last - 1; After = $newLast - 1; NewLast = $newLast; Sorted = $sorted; Trim = $trim
-    DateCol = $dc; DateLetter = $dateLetter; DateFill = $dateFill; DateNew = $dateNew; DateBlank = $dateBlank; DateNote = $dateNote
+    DateCol = $dc; DateLetter = $dateLetter; DateFill = $dateFill; DateNew = $dateNew; DateBlank = $dateBlank; DateNote = $dateNote; DateWhy = $dateWhy
     AddOrders = $addOrders; AddRows = $addRows; Dup = $dup; DupRows = $dupRows; KeptRep = $keptRep; Replace = $replace
     Changed = $changed; FCols = $fcols; MaxYm = (Ym $newMax)
   }
@@ -679,7 +705,11 @@ try {
     if ($res.DateNote) { $L.Add('  ' + $res.DateNote) }
     if ($res.DateCol) {
       $L.Add("  實際日期（$($res.DateLetter) 欄）：新加入的 $($res.DateNew) 筆有日期、總表原有的單補上 $($res.DateFill) 筆；目前還有 $($res.DateBlank) 筆沒有實際日期")
-      if ($res.DateBlank) { $L.Add('    （把含有那些月份的 JMSSAL／JMSSBK 放進資料夾再跑一次就會補上；重複的單會跳過，只補日期）') }
+      if ($res.DateBlank) {
+        $L.Add('    沒有日期的原因：')
+        foreach ($x in $res.DateWhy) { $L.Add('    ・' + $x.TrimStart()) }
+        $L.Add('    （找不到的單：把含有那些月份的 JMSSAL／JMSSBK 放進資料夾再跑一次就會補上；重複的單會跳過，只補日期。網站遇到沒有日期的單，會改用單號判斷月份）')
+      }
     }
   }
   if ($extra.Count) { $L.Add(''); $L.Add('【其他】'); foreach ($x in $extra) { $L.Add('  ' + $x) } }

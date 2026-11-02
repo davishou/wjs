@@ -275,6 +275,7 @@ ok ($rt.Contains('只有業務員不同、保留總表原本的：1 張單') -an
 ok ($rt.Contains('單號 1140800005：不同的欄位：數量') -and $rt.Contains('單號 1140800002：不同的欄位：售價') -and $rt.Contains('單號 1140700004：筆數不同')) '報告寫出每張單哪些欄位不同'
 ok ($rt.Contains('空白列和公式已清掉') -and $rt.Contains('和 AK 欄的清單一樣')) '報告寫出清掉空白列、對照表改成和 AK 一樣'
 ok ($rt.Contains('新增 AF 欄「實際出貨日期」') -and $rt.Contains('新增 AC 欄「實際退貨日期」') -and $rt.Contains('實際日期（AF 欄）')) '報告寫出新增的實際日期欄與筆數'
+ok ($rt.Contains('沒有日期的原因') -and $rt.Contains('找不到這張單') -and $rt.Contains('114/01')) '報告寫出沒有日期的原因、月份和例子（114/01 的單不在這次的原始資料裡）'
 
 # 同樣的檔案再跑一次 → 什麼都不會加
 Start-Sleep -Seconds 61   # 報告檔名到分鐘，等一分鐘避免同名
