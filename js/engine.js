@@ -23,6 +23,7 @@
     { key: 'color', label: '顏色代號' },
     { key: 'unit', label: '單位' },
     { key: 'ord', label: '單號' },
+    { key: 'day', label: '實際日期' },
   ];
   // 值欄位
   const MEASURES = [
@@ -48,6 +49,13 @@
 
   const ymDiff = (a, b) => (Math.floor(a / 100) - Math.floor(b / 100)) * 12 + (a % 100 - b % 100);
   const ymLabel = (ym) => ym ? `${Math.floor(ym / 100)}/${String(ym % 100).padStart(2, '0')}` : '';
+  // 實際日期（民國 yyymmdd，例如 1150801）的小工具
+  const pad2 = (v) => String(v).padStart(2, '0');
+  const dayLabel = (d) => (d ? `${Math.floor(d / 10000)}/${pad2(Math.floor(d / 100) % 100)}/${pad2(d % 100)}` : '');
+  const dayNum = (d) => Date.UTC(Math.floor(d / 10000) + 1911, Math.floor(d / 100) % 100 - 1, d % 100) / 864e5; // 第幾天，用來算相隔天數
+  const fromDayNum = (n) => { const t = new Date(n * 864e5); return (t.getUTCFullYear() - 1911) * 10000 + (t.getUTCMonth() + 1) * 100 + t.getUTCDate(); };
+  const daysInMonth = (ym) => new Date(Date.UTC(Math.floor(ym / 100) + 1911, ym % 100, 0)).getUTCDate();
+  const weekday = (d) => '日一二三四五六'[new Date(dayNum(d) * 864e5).getUTCDay()];
 
   class Engine {
     constructor(ds) {
@@ -64,6 +72,17 @@
       this.ymIndex = new Map(this.ymList.map((v, i) => [v, i]));
       this.yearList = [...new Set(this.ymList.map((v) => Math.floor(v / 100)))];
       this._codeCache = {};
+      // 實際日期：最新一天、有日期的筆數（總表沒有實際日期時都是 0）
+      const dt = ds.num.date; let md = 0, ms = 0, nd = 0;
+      if (dt) for (let i = 0; i < this.n; i++) { const d = dt[i]; if (d) { nd++; if (d > md) md = d; if (ds.src[i] === 0 && d > ms) ms = d; } }
+      this.maxDate = md; this.nDated = nd;
+      this.maxSalesDate = ms || md; // 最新一個有出貨的日子（今日頁預設看這天）
+    }
+    // 基準月對應的日期：基準月是最新月份 → 最新一天；否則 → 那個月的最後一天
+    refDate(refYm) {
+      if (!this.maxDate) return 0;
+      if (Math.floor(this.maxDate / 100) <= refYm) return this.maxDate;
+      return refYm * 100 + daysInMonth(refYm);
     }
 
     // 取得某維度每一列的代碼陣列與標籤
@@ -89,6 +108,13 @@
         const codes = new Int32Array(this.n); const ym = ds.num.ym;
         for (let i = 0; i < this.n; i++) { const v = ym[i]; codes[i] = ix.get(Math.floor(v / 100) * 10 + Math.ceil((v % 100) / 3)) ?? 0; }
         res = { codes, labels: qs.map((q) => `${Math.floor(q / 10)}年Q${q % 10}`), raw: qs, ordered: true };
+      } else if (key === 'day') {
+        const dt = this.ds.num.date || new Float64Array(this.n); const set = new Set();
+        for (let i = 0; i < this.n; i++) if (dt[i]) set.add(dt[i]);
+        const list = [0, ...[...set].sort((a, b) => a - b)]; const ix = new Map(list.map((v, i) => [v, i]));
+        const codes = new Int32Array(this.n);
+        for (let i = 0; i < this.n; i++) codes[i] = ix.get(dt[i]) || 0;
+        res = { codes, labels: list.map((v) => (v ? dayLabel(v) : '（沒有日期）')), raw: list, ordered: true };
       } else if (key === 'month') {
         const codes = new Int32Array(this.n); const ym = ds.num.ym;
         for (let i = 0; i < this.n; i++) codes[i] = Math.max(0, (ym[i] % 100) - 1);
@@ -99,13 +125,15 @@
     }
 
     // 回傳符合篩選條件的列索引
-    // filter = { src: 'all'|'sales'|'returns', ymFrom, ymTo, dims: {key: Set(codes)}, search: {key, text} }
+    // filter = { src: 'all'|'sales'|'returns', ymFrom, ymTo, dFrom, dTo（實際日期，沒有日期的列不算）, dims: {key: Set(codes)} }
     select(filter = {}) {
       const n = this.n, ds = this.ds;
       const out = new Uint32Array(n); let k = 0;
       const src = ds.src, ym = ds.num.ym;
       const sMode = filter.src === 'sales' ? 0 : filter.src === 'returns' ? 1 : -1;
       const from = filter.ymFrom || 0, to = filter.ymTo || 999999;
+      const dF = filter.dFrom || 0, dT = filter.dTo || 0, byDay = !!(dF || dT), dt = ds.num.date;
+      if (byDay && !dt) return new Uint32Array(0);
       const checks = [];
       for (const key in (filter.dims || {})) {
         const set = filter.dims[key];
@@ -119,6 +147,7 @@
         if (sMode >= 0 && src[i] !== sMode) continue;
         const y = ym[i];
         if (y < from || y > to) continue;
+        if (byDay) { const d = dt[i]; if (!d || (dF && d < dF) || (dT && d > dT)) continue; }
         let ok = true;
         for (let c = 0; c < checks.length; c++) { if (!checks[c][1][checks[c][0][i]]) { ok = false; break; } }
         if (ok) out[k++] = i;
@@ -289,9 +318,12 @@
       const custCode = new Int32Array(N), nameCode = new Int32Array(N), repCode = new Int32Array(N).fill(-1), regCode = new Int32Array(N);
       const has = new Uint8Array(N);
       const months = Array.from({ length: N }, () => null);
+      const days = Array.from({ length: N }, () => null); // 有買東西的日期（實際出貨日期，同一天多張單算一次）
+      const dt = ds.num.date;
       for (let j = 0; j < idx.length; j++) {
         const i = idx[j]; const c = ck[i];
         if (src[i] === 1) { ret[c] += amt[i]; continue; }
+        if (dt && dt[i]) { let dd = days[c]; if (!dd) dd = days[c] = new Set(); dd.add(dt[i]); }
         has[c] = 1;
         const y = ym[i];
         if (y && y < first[c]) first[c] = y;
@@ -306,6 +338,14 @@
         if (!has[c]) continue;
         const span = ymDiff(last[c], first[c]) + 1;
         const nOrd = orders[c].size;
+        // 購買頻率：有實際日期 → 第一次到最近一次相隔的天數 ÷（購買天數 − 1）；只買過 1 天 → 沒有頻率
+        // 沒有實際日期（舊的總表）→ 沿用 Excel 的算法：月數 ÷ 訂單數 × 30
+        let freq, freqBy = 'ord', buyDays = 0, firstDate = 0, lastDate = 0;
+        if (days[c]) {
+          buyDays = days[c].size; freqBy = 'date';
+          for (const d of days[c]) { if (!firstDate || d < firstDate) firstDate = d; if (d > lastDate) lastDate = d; }
+          freq = buyDays > 1 ? (dayNum(lastDate) - dayNum(firstDate)) / (buyDays - 1) : null;
+        } else freq = span / nOrd * 30;
         list.push({
           ck: c,
           key: ds.str.ck.dict[c],
@@ -316,7 +356,7 @@
           first: first[c], last: last[c],
           tenure: ymDiff(ref, first[c]) + 1, // 110年至今月份
           idle: ymDiff(ref, last[c]), // 靜止月份
-          freq: span / nOrd * 30, // 購買頻率(天)
+          freq, freqBy, buyDays, firstDate, lastDate, // 購買頻率(天)、依據、購買天數、第一次／最近一次的實際日期
           orders: nOrd, activeMonths: months[c].size,
           sales: sales[c], returns: ret[c], net: sales[c] - ret[c], profit: prof[c],
           margin: sales[c] ? prof[c] / sales[c] : null, qty: qty[c],
@@ -381,5 +421,5 @@
   }
 
   root.Engine = Engine;
-  root.EngineMeta = { DIMS, MEASURES, ymDiff, ymLabel, SRC_NAMES };
+  root.EngineMeta = { DIMS, MEASURES, ymDiff, ymLabel, SRC_NAMES, dayLabel, dayNum, fromDayNum, daysInMonth, weekday };
 })(typeof self !== 'undefined' ? self : globalThis);

@@ -62,7 +62,7 @@
       const max = Math.max(1, ...list.map((r) => Math.max(r[value] || 0, hasPrev ? r[prevKey] || 0 : 0, inner ? 0 : 0)));
       const w = (v) => Math.max(0, Math.min(100, (v / max) * 100));
       return `<div class="rb" role="list">${list.map((r, i) => {
-        const tip = [label(r), `今年：${fmt.money(r[value])}`].concat(hasPrev && !r.other ? [`去年同期：${fmt.money(r[prevKey])}`] : []).concat(share(r) != null ? [`佔比：${pct(share(r))}`] : []).concat(extra ? [extra.tip(r)] : []);
+        const tip = [label(r), `今年：${fmt.money(r[value])}`].concat(hasPrev && !r.other && r[prevKey] ? [`去年同期：${fmt.money(r[prevKey])}`] : []).concat(share(r) != null ? [`佔比：${pct(share(r))}`] : []).concat(extra ? [extra.tip(r)] : []);
         return `<div class="rb-row${r.other ? ' other' : ''}${onClick && !r.other ? ' click' : ''}" role="listitem" data-i="${i}" ${tipAttr(tip)}>
           <span class="rb-n">${r.other ? '' : i + 1}</span><span class="rb-name">${esc(label(r))}</span>
           <span class="rb-track">${inner ? `<i class="rb-bar soft" style="width:${w(r[value])}%"></i><i class="rb-bar" style="width:${w(r[inner])}%"></i>` : `<i class="rb-bar" style="width:${w(r[value])}%"></i>`}${hasPrev && !r.other && r[prevKey] > 0 ? `<i class="rb-prev" style="left:${w(r[prevKey])}%"></i>` : ''}</span>
@@ -126,6 +126,17 @@
     // 每月淨營收：今年與去年
     cards.push(card('rpMonthly', '每月淨營收', hasPrev ? `${pLabel}合計 ${fmt.big(cur.net)}，${chg(cur.net, prev.net) >= 0 ? '比去年同期多' : '比去年同期少'} ${pct(Math.abs(chg(cur.net, prev.net)))}` : `${pLabel}合計 ${fmt.big(cur.net)}`,
       '<div class="chart" id="rpMonthChart"></div>', ''));
+
+    // 歷年同期：每一年的 1～endM 月（全年時就是全年），看長期趨勢，不只和去年比
+    const yrs = E.yearList.filter((yy) => yy <= year).slice(-6);
+    const ysel = { dims: { month: new Set(Array.from({ length: endM }, (_, i) => i)) } };
+    const yp = new Map(E.pivot({ rows: ['year'], cols: null, measures: M, filter: ysel }).rows.map((r) => [parseInt(r.labels[0], 10), r.vals[0]]));
+    const yRows = yrs.map((yy) => { const v = yp.get(yy) || [0, 0, 0, 0, 0]; const pv = yp.get(yy - 1); return { label: yy + '年' + (full ? '' : ` 1～${endM}月`), y: yy, net: v[2], netProfit: v[4], margin: rate(v[3], v[0]), prevNet: 0, g: pv ? chg(v[2], pv[2]) : null }; });
+    const yFirst = yRows.find((r) => r.net), yLast = yRows[yRows.length - 1];
+    const cagr = yFirst && yLast && yFirst !== yLast && yFirst.net > 0 && yLast.net > 0 ? Math.pow(yLast.net / yFirst.net, 1 / (yLast.y - yFirst.y)) - 1 : null;
+    cards.push(card('rpYears', `歷年比較（每年 ${full ? '全年' : `1～${endM} 月`}）`, yRows.length > 1 ? `${yRows.length} 年來${cagr == null ? '' : `平均每年${cagr >= 0 ? '成長' : '衰退'} <b>${pct(Math.abs(cagr))}</b>`}；最高是 ${esc(yRows.slice().sort((a, b) => b.net - a.net)[0].label)}` : '只有一年的資料',
+      rankBars(yRows, { share: () => null, extra: { html: (r) => `${r.g == null ? '' : arrow(r.g)}<span class="rb-margin">毛利率 ${pct(r.margin)}</span>`, tip: (r) => `淨毛利：${fmt.money(r.netProfit)}（毛利率 ${pct(r.margin)}）` } }),
+      table(['年', '', '淨營收', '比前一年', '淨毛利', '毛利率'], yRows.map((r) => [esc(r.label), '', fmt.money(r.net), r.g == null ? '—' : arrow(r.g), fmt.money(r.netProfit), pct(r.margin)]))));
 
     // TOP10 客戶
     const cu = withPrev('ck');

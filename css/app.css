@@ -79,6 +79,7 @@ a { color: var(--primary); }
 .brand-text strong { font-family: var(--font-head); font-size: 1.05rem; }
 .brand-text span { font-size: .75rem; opacity: .75; }
 .tabs { display: flex; gap: 2px; }
+.tabs .t-short { display: none; }
 .tabs a { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; border-radius: var(--radius); padding: 9px 12px; white-space: nowrap; }
 .tabs a svg { width: 18px; height: 18px; fill: currentColor; flex: none; opacity: .85; }
 main { padding: 28px 32px 64px; max-width: 1480px; }
@@ -114,6 +115,7 @@ main { padding: 28px 32px 64px; max-width: 1480px; }
 [data-theme="market"] .panel { border-color: transparent; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+.grid2 > *, .grid3 > * { min-width: 0; }
 .grid2 > .panel { margin-bottom: 0; }
 .grid2 + .panel, .grid2 { margin-bottom: var(--gap); }
 .grid2.tight { gap: 28px; margin: 0; }
@@ -235,7 +237,14 @@ table.dt { width: 100%; border-collapse: separate; border-spacing: 0; font-size:
 .chart .dot.s1 { fill: var(--s1); } .chart .dot.s2 { fill: var(--s2); }
 .chart .xh { stroke: var(--line-strong); stroke-dasharray: 3 3; }
 .chart .lbl { font-size: 12px; fill: var(--ink-2); font-family: var(--font); }
-.legend { display: flex; gap: 16px; font-size: .84rem; color: var(--ink-2); margin-top: 6px; }
+.chart .bar-s1 { fill: var(--s1); } .chart .bar-s2 { fill: var(--s2); } .chart .bar-s3 { fill: var(--s3); }
+/* 多條線（每年一條、每位業務一條）：用分類色 --c1～--c6 */
+.chart .line.c1, .chart .line.c2, .chart .line.c3, .chart .line.c4, .chart .line.c5, .chart .line.c6 { background: none; }
+.chart .line.c1 { stroke: var(--c1); } .chart .line.c2 { stroke: var(--c2); } .chart .line.c3 { stroke: var(--c3); } .chart .line.c4 { stroke: var(--c4); } .chart .line.c5 { stroke: var(--c5); } .chart .line.c6 { stroke: var(--c6); }
+.chart .dot.c1 { fill: var(--c1); } .chart .dot.c2 { fill: var(--c2); } .chart .dot.c3 { fill: var(--c3); } .chart .dot.c4 { fill: var(--c4); } .chart .dot.c5 { fill: var(--c5); } .chart .dot.c6 { fill: var(--c6); }
+.chart .bar-c1 { fill: var(--c1); } .chart .bar-c2 { fill: var(--c2); }
+.chart.tall { height: 340px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: .84rem; color: var(--ink-2); margin-top: 6px; }
 .legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
 .tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--surface); padding: 8px 10px; border-radius: 6px; font-size: .82rem; line-height: 1.5; white-space: nowrap; transform: translate(-50%, -110%); z-index: 5; }
 [data-theme="night"] .tip { background: #F0F4FA; color: #0E1726; }
@@ -470,8 +479,32 @@ body.presenting .rp-nav span { min-width: 4.5em; text-align: center; font-family
 .dlg .check input { accent-color: var(--primary); width: 16px; height: 16px; }
 .dlg .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
+/* ============ 今日、比較、業務 ============ */
+.panel.notice { border-left: 4px solid var(--warn, var(--s2)); }
+.panel.notice p { margin-bottom: 0; }
+.td-kpis { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.td-kpis .kpi .d, .rs-head .kpi .d { display: block; }
+.cmp-controls { display: flex; flex-direction: column; gap: 10px; }
+.cfg-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.cfg-l { font-size: .85rem; color: var(--ink-2); font-weight: 700; min-width: 4em; }
+.cfg-row .seg { max-width: 100%; overflow-x: auto; }
+.ab-pick { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.ab-pick .ab-a, .ab-pick .ab-b { font-weight: 700; padding: 2px 8px; border-radius: 6px; background: var(--primary-soft); color: var(--primary); }
+.ab-pick .ab-b { margin-left: 12px; background: var(--surface-2); color: var(--ink-2); }
+table.cmp small .muted, td small.muted, td .muted small { font-weight: 400; }
+.dt td small.muted { margin-left: 4px; }
+.dt th.sep, .dt td.sep { border-left: 2px solid var(--line-strong); }
+.dt tr.click { cursor: pointer; }
+#rsSearch { min-width: 320px; }
+.db-more { margin: -4px 0 var(--gap); }
+
 /* ============ 響應式（平板／手機）============ */
 @media (max-width: 1180px) {
+  [data-theme="night"] .tabs, [data-theme="market"] .tabs { overflow-x: auto; min-width: 0; scrollbar-width: thin; }
+  [data-theme="night"] .nav, [data-theme="market"] .nav { gap: 12px; }
+  [data-theme="night"] .tabs .t-long, [data-theme="market"] .tabs .t-long { display: none; }
+  [data-theme="night"] .tabs .t-short, [data-theme="market"] .tabs .t-short { display: inline; }
+  [data-theme="night"] .tabs a { padding: 0 10px; }
   .grid3 { grid-template-columns: 1fr 1fr; }
   .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .pivot-layout { grid-template-columns: 1fr; }
@@ -495,6 +528,13 @@ body.presenting .rp-nav span { min-width: 4.5em; text-align: center; font-family
     flex: 1; flex-direction: column; gap: 2px; padding: 6px 0; height: auto; font-size: .7rem; border: 0; border-radius: 10px; color: var(--muted); background: transparent; }
   .tabs a span, [data-theme="indigo"] .tabs a span { display: block; }
   .tabs a svg { width: 22px; height: 22px; }
+  .tabs, [data-theme="indigo"] .tabs, [data-theme="night"] .tabs, [data-theme="market"] .tabs { overflow-x: auto; }
+  .tabs a, [data-theme="night"] .tabs a, [data-theme="market"] .tabs a, [data-theme="indigo"] .tabs a { min-width: 40px; font-size: .64rem; }
+  .tabs .t-long, [data-theme="indigo"] .tabs a span.t-long { display: none; }
+  .tabs .t-short, [data-theme="indigo"] .tabs a span.t-short { display: block; }
+  #rsSearch { min-width: 0; }
+  .ab-pick .ab-b { margin-left: 0; }
+  .chart.tall { height: 260px; }
   .tabs a.on, [data-theme="indigo"] .tabs a.on, [data-theme="night"] .tabs a.on, [data-theme="market"] .tabs a.on { color: var(--primary); background: var(--primary-soft); font-weight: 700; }
   .kpis { grid-template-columns: 1fr 1fr; gap: 10px; }
   .kpi .v { font-size: 1.3rem !important; }

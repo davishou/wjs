@@ -49,7 +49,7 @@
           const r = Math.min(4, bw / 2);
           const top = y(v);
           // 頂端圓角、底部貼齊基線
-          mk('path', { class: 'bar' + (si + 1), d: `M${x0},${top + h} V${top + r} Q${x0},${top} ${x0 + r},${top} H${x0 + bw - 1 - r} Q${x0 + bw - 1},${top} ${x0 + bw - 1},${top + r} V${top + h} Z` }, svg);
+          mk('path', { class: s.cls ? 'bar-' + s.cls : 'bar' + (si + 1), d: `M${x0},${top + h} V${top + r} Q${x0},${top} ${x0 + r},${top} H${x0 + bw - 1 - r} Q${x0 + bw - 1},${top} ${x0 + bw - 1},${top + r} V${top + h} Z` }, svg);
         });
       });
     } else {
@@ -59,8 +59,8 @@
         mk('path', { class: 'line ' + s.cls, d }, svg);
         // 直接標示在線尾
         if (W >= 500) {
-          const li = s.values.length - 1;
-          const t = mk('text', { class: 'lbl', x: x(li) + 8, y: y(s.values[li] || 0) + 4 }, svg); t.textContent = s.name;
+          let li = s.values.length - 1; while (li > 0 && s.values[li] == null) li--; // 標在最後一個有數字的點
+          if (s.values[li] != null) { const t = mk('text', { class: 'lbl', x: x(li) + 8, y: y(s.values[li]) + 4 }, svg); t.textContent = s.name; }
         }
       });
     }

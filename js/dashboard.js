@@ -9,6 +9,18 @@
   const PERIODS = [
     { v: 'month', label: '基準月' }, { v: 'ytd', label: '今年累計' }, { v: 'r12', label: '近 12 個月' }, { v: 'all', label: '全部期間' },
   ];
+  // 期間與去年同期：per = month | ytd | r12 | all；F、P = [起, 迄] 年月
+  function range(E, ref, per) {
+    const y = Math.floor(ref / 100), mo = ref % 100;
+    let F, P;
+    if (per === 'month') { F = [ref, ref]; P = [addM(ref, -12), addM(ref, -12)]; }
+    else if (per === 'ytd') { F = [y * 100 + 1, ref]; P = [(y - 1) * 100 + 1, (y - 1) * 100 + mo]; }
+    else if (per === 'r12') { F = [addM(ref, -11), ref]; P = [addM(ref, -23), addM(ref, -12)]; }
+    else { F = [E.minYm, E.maxYm]; P = null; }
+    const hasPrev = !!P && E.ymList.some((v) => v >= P[0] && v <= P[1]);
+    return { F, P, hasPrev };
+  }
+  const periodText = (r) => (r[0] === r[1] ? ymLabel(r[0]) : `${ymLabel(r[0])}～${ymLabel(r[1])}`);
   // 排名可選的維度
   const RANK_DIMS = [
     { key: 'ck', label: '客戶' }, { key: 'style', label: '商品（款號）' }, { key: 'rep', label: '業務員' },
@@ -26,7 +38,7 @@
     top10: ['銷售額前 10 大客戶加起來佔全部淨銷售的比例。', '超過 50% 代表太依賴少數大客戶，其中一家減少叫貨，業績就會明顯下滑。'],
     rank: ['依淨銷售或毛利貢獻排序。「佔比」是佔全部淨銷售的比例，「累計」是從第一名加到這一名的比例；「毛利貢獻」是這一項賺到的淨毛利，「毛利貢獻率」是佔全部淨毛利的比例。', '銷售排名高、但毛利貢獻率明顯低於銷售佔比的，代表賣很多但不太賺錢（價格太低或退貨多）。反過來，毛利貢獻率高於銷售佔比的，是值得多推的對象。'],
     share: ['各區域、商品大類、商品類別佔淨銷售（深色）和淨毛利（淺色）的比例。', '某一塊的毛利比例明顯低於銷售比例，代表那一塊比較不賺錢。比例和去年差很多時，要看是那一塊成長，還是其他塊衰退。'],
-    compare: ['毛利率和退貨率按年、季、月排開，同一欄上下比較就是「和去年同期比」。▲▼ 是和前一年同期相差幾個百分點。', '毛利率看紅色的 ▼（變差），退貨率看紅色的 ▲（變差）。同一個月份每年都偏高或偏低，是季節性；只有今年異常，才需要追原因。'],
+    follow: ['漸漸沒來的客戶：最近一次交易在 3～12 個月前、過去買得多的客戶。滯銷商品：6 個月以上沒有賣出、過去有業績的商品（簡化代碼）。', '客戶請業務主動聯絡；滯銷商品考慮促銷、退回廠商或停止進貨。'],
     bep: ['損益兩平（BEP）：每個月至少要賣到多少淨銷售，賺的毛利才夠付固定費用（房租、薪資、保險、水電等不論賣多少都要付的錢）。算法：每月固定費用 ÷ 淨毛利率。', '這裡假設除了商品成本以外沒有其他「賣越多花越多」的費用；如果有運費、佣金等，實際的損益兩平會更高。安全邊際越低，業績稍微下滑就會虧損。'],
     dso: ['應收帳款天數：客戶平均要多少天才付款。算法：應收帳款餘額 ÷ 近 3 個月淨銷售 × 91 天。', '比給客戶的收款條件（例如月結 60 天）長很多，代表有客戶拖款，資金會被卡住。超過 90 天要特別注意呆帳風險。'],
     custMove: ['新客戶：這段期間第一次跟我們買。可能流失：去年同期有買、這段期間都沒買的客戶。衰退的大客戶：去年同期前 20 大、今年少了 30% 以上。', '可能流失和衰退的大客戶，請業務主動聯絡了解原因。'],
@@ -37,15 +49,8 @@
     const { S, E, fmt, nf0, nf1, esc, $, $$, table, Charts, refYm, repName } = ctx;
     const ref = refYm();
     const per = S.dash.period;
-    const y = Math.floor(ref / 100), mo = ref % 100;
-    let F, P;
-    if (per === 'month') { F = [ref, ref]; P = [addM(ref, -12), addM(ref, -12)]; }
-    else if (per === 'ytd') { F = [y * 100 + 1, ref]; P = [(y - 1) * 100 + 1, (y - 1) * 100 + mo]; }
-    else if (per === 'r12') { F = [addM(ref, -11), ref]; P = [addM(ref, -23), addM(ref, -12)]; }
-    else { F = [E.minYm, E.maxYm]; P = null; }
-    const hasPrev = P && E.ymList.some((v) => v >= P[0] && v <= P[1]);
+    const { F, P, hasPrev } = range(E, ref, per);
     const fil = (r) => ({ ymFrom: r[0], ymTo: r[1] });
-    const periodText = (r) => (r[0] === r[1] ? ymLabel(r[0]) : `${ymLabel(r[0])}～${ymLabel(r[1])}`);
 
     // ---------- 計算 ----------
     const tot = (r) => { const g = E.pivot({ rows: [], cols: null, measures: M, filter: fil(r) }).grand; const o = {}; M.forEach((k, i) => { o[k] = g[i] || 0; }); return o; };
@@ -141,17 +146,16 @@
     html.push(`<div class="panel"><div class="panel-head"><h2>佔比：區域、商品大類、商品類別</h2><span class="legend-inline"><i class="b1"></i>淨銷售 <i class="b2"></i>淨毛利</span></div>${help('share')}
       <div class="grid3" id="dbShare"></div></div>`);
 
-    // 毛利率、退貨率比較
-    const cv = S.dash.cmp;
-    html.push(`<div class="panel"><div class="panel-head"><h2>毛利率、退貨率：每年・每季・每月比較</h2>
-      <div class="seg" id="dbCmp"><button data-v="year" class="${cv === 'year' ? 'on' : ''}">每年</button><button data-v="quarter" class="${cv === 'quarter' ? 'on' : ''}">每季</button><button data-v="month" class="${cv === 'month' ? 'on' : ''}">每月</button></div></div>
-      ${help('compare')}<div id="dbCmpBody"></div>
-      <div class="grid2 tight db-charts"><div><h3>毛利率（每月，近 3 年）</h3><div class="chart" id="dbMgChart"></div></div><div><h3>退貨率（每月，近 3 年）</h3><div class="chart" id="dbRrChart"></div></div></div></div>`);
+    // 毛利率、退貨率的每年・每季・每月比較搬到「比較」頁
+    html.push(`<p class="hint db-more">想看每年、每季、每月的完整比較（淨銷售、毛利率、退貨率、客戶數…），到 <a href="#compare">比較</a> 頁；每位業務的情形在 <a href="#reps">業務</a> 頁。</p>`);
 
     // BEP、應收帳款
     html.push('<div class="grid2"><div class="panel" id="dbBep"></div><div class="panel" id="dbDso"></div></div>');
     // 客戶動態、商品結構
     html.push(`<div class="panel"><div class="panel-head"><h2>客戶動態</h2></div>${help('custMove')}<div class="grid3" id="dbCust"></div></div>`);
+    html.push(`<div class="panel"><div class="panel-head"><h2>需要跟進</h2></div>${help('follow')}<div class="grid2 tight">
+      <div><div class="panel-head"><h3>漸漸沒來的客戶</h3><a href="#customers" class="link" data-goto="cust-idle">看全部</a></div><div id="dbIdleCust" class="db-scroll"></div></div>
+      <div><div class="panel-head"><h3>滯銷商品</h3><a href="#products" class="link" data-goto="prod-idle">看全部</a></div><div id="dbIdleProd" class="db-scroll"></div></div></div></div>`);
     html.push(`<div class="panel"><div class="panel-head"><h2>商品結構（款號）</h2></div>${help('abc')}<div id="dbAbc"></div></div>`);
     html.push('<div class="panel" id="dbMissing"></div>');
     $('#dbBody').innerHTML = html.join('');
@@ -203,54 +207,6 @@
     };
     $('#dbShare').innerHTML = shareBlock('region', '區域') + shareBlock('big', '商品大類') + shareBlock('cat', '商品類別（前 8）');
     $('#dbShare').onclick = (e) => { const r = e.target.closest('.srow[data-dim]'); if (r) ctx.drill(r.dataset.dim, +r.dataset.code, r.dataset.label); };
-
-    // ---------- 比較表 ----------
-    const drawCmp = () => {
-      const mode = S.dash.cmp;
-      const years = E.yearList.slice(-5);
-      const colsOf = mode === 'year' ? [''] : mode === 'quarter' ? ['Q1', 'Q2', 'Q3', 'Q4'] : Array.from({ length: 12 }, (_, i) => (i + 1) + '月');
-      const dim2 = mode === 'quarter' ? 'quarter' : 'month';
-      const p = E.pivot({ rows: mode === 'year' ? ['year'] : (mode === 'quarter' ? ['quarter'] : ['year', 'month']), cols: null, measures: ['sales', 'returns', 'profit', 'net'], filter: { ymFrom: years[0] * 100 + 1 } });
-      const cell = new Map(); // `${year}|${col}` -> vals
-      const qd = E.dim('quarter'), yd = E.dim('year');
-      p.rows.forEach((r) => {
-        let yy, cc;
-        if (mode === 'year') { yy = parseInt(r.labels[0], 10); cc = 0; }
-        else if (mode === 'quarter') { const q = qd.raw[r.codes[0]]; yy = Math.floor(q / 10); cc = q % 10 - 1; }
-        else { yy = parseInt(yd.labels[r.codes[0]], 10); cc = r.codes[1]; }
-        cell.set(yy + '|' + cc, r.vals[0]);
-      });
-      void dim2;
-      const mk = (title, f, goodUp) => {
-        const head = `<tr><th>${title}</th>${colsOf.map((c) => `<th class="n">${c || '全年'}</th>`).join('')}</tr>`;
-        const body = years.map((yy) => `<tr><td class="lbl">${yy} 年</td>${colsOf.map((_, ci) => {
-          const v = cell.get(yy + '|' + ci), pv = cell.get((yy - 1) + '|' + ci);
-          const x = v ? f(v) : null, px = pv ? f(pv) : null;
-          if (x == null) return '<td class="n muted">—</td>';
-          const d = px == null ? null : x - px;
-          return `<td class="n"><div>${fmt.pct(x)}</div>${d == null ? '' : `<small>${arrow(d, goodUp, 'pp').replace(' 個百分點', '')}</small>`}</td>`;
-        }).join('')}</tr>`).join('');
-        return `<div class="table-wrap db-scroll"><table class="dt cmp">${head}${body}</table></div>`;
-      };
-      $('#dbCmpBody').innerHTML = `<div class="grid2 tight"><div><h3>毛利率</h3>${mk('年', (v) => rate(v[2], v[0]), true)}</div><div><h3>退貨率</h3>${mk('年', (v) => rate(v[1], v[0]), false)}</div></div>` +
-        (mode === 'year' && partial ? `<p class="hint">${Math.floor(ref / 100)} 年還沒過完，全年數字只到 ${ymLabel(E.maxYm)}。</p>` : '');
-    };
-    drawCmp();
-    $('#dbCmp').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; S.dash.cmp = b.dataset.v; ctx.saveDash(); $$('#dbCmp button').forEach((x) => x.classList.toggle('on', x === b)); drawCmp(); };
-    // 每月折線：近 3 年，每年一條
-    const drawLines = () => {
-      const yrs = E.yearList.slice(-3);
-      const p = E.pivot({ rows: ['year', 'month'], cols: null, measures: ['sales', 'returns', 'profit'], filter: { ymFrom: yrs[0] * 100 + 1 } });
-      const yd = E.dim('year'); const map = new Map();
-      p.rows.forEach((r) => map.set(parseInt(yd.labels[r.codes[0]], 10) + '|' + r.codes[1], r.vals[0]));
-      const labels = Array.from({ length: 12 }, (_, i) => (i + 1) + '月');
-      const cls = ['s3', 's2', 's1'];
-      const ser = (f) => yrs.map((yy, i) => ({ name: yy + '年', cls: cls[cls.length - yrs.length + i], values: labels.map((_, m) => { const v = map.get(yy + '|' + m); return v && v[0] ? f(v) : null; }) }));
-      Charts.render($('#dbMgChart'), { type: 'line', labels, series: ser((v) => v[2] / v[0]), fmt: fmt.pct, axisFmt: (v) => Math.round(v * 100) + '%' });
-      Charts.render($('#dbRrChart'), { type: 'line', labels, series: ser((v) => v[1] / v[0]), fmt: fmt.pct, axisFmt: (v) => nf1.format(v * 100) + '%' });
-    };
-    drawLines();
-    ctx.redraw = drawLines;
 
     // ---------- 損益兩平 ----------
     const meta = S.meta || {};
@@ -317,6 +273,24 @@
     table(minis[1], [{ key: 'name', label: '客戶', cls: 'lbl', get: (r) => r.code + ' ' + r.name }, { key: 'net', label: '去年同期淨銷售', n: 1, fmt: 'money' }, { key: 'last', label: '最近交易', get: (r) => (fullCust.get(r.ck) || r).last, fmt: 'ym' }], lost, { limit: 8, onRow: open, empty: hasPrev ? '沒有' : '全部期間無法比較' });
     table(minis[2], [{ key: 'name', label: '客戶', cls: 'lbl', get: (r) => r.code + ' ' + r.name }, { key: 'net', label: '去年同期', n: 1, fmt: 'money' }, { key: 'now', label: '這段期間', n: 1, fmt: 'money' }, { key: 'chg', label: '變化', n: 1, render: (r) => arrow(r.chg) }], down, { limit: 8, onRow: open, empty: hasPrev ? '沒有' : '全部期間無法比較' });
 
+    // ---------- 需要跟進 ----------
+    const idleC = allCust.filter((c) => c.idle >= 3 && c.idle <= 12).sort((a, b) => b.sales - a.sales).slice(0, 8);
+    table($('#dbIdleCust'), [
+      { key: 'name', label: '客戶', get: (r) => r.code + ' ' + r.name, cls: 'lbl' },
+      { key: 'rep', label: '業務', render: (r) => esc(repName(r.rep)) },
+      { key: 'last', label: '最近交易', fmt: 'ym' },
+      { key: 'idle', label: '靜止(月)', n: 1, fmt: 'int' },
+      { key: 'sales', label: '歷史銷貨', n: 1, fmt: 'money' },
+    ], idleC, { onRow: open, empty: '目前沒有靜止 3～12 個月的客戶' });
+    const idleP = E.products({}, ref, 'sku2').list.filter((p) => p.idle >= 6).sort((a, b) => b.sales - a.sales).slice(0, 8);
+    table($('#dbIdleProd'), [
+      { key: 'code', label: '商品(簡化代碼)', cls: 'lbl' },
+      { key: 'cat', label: '類別' },
+      { key: 'idle', label: '滯銷(月)', n: 1, fmt: 'int' },
+      { key: 'sales', label: '歷史銷貨', n: 1, fmt: 'money' },
+    ], idleP, { onRow: (r) => ctx.openProduct(r, 'sku2'), empty: '沒有' });
+    $$('#dbBody [data-goto]').forEach((a) => { a.onclick = (e) => { e.preventDefault(); ctx.gotoIdle(a.dataset.goto); }; });
+
     // ---------- 商品結構 ----------
     const st = rankRows('style').sort((a, b) => b.net - a.net);
     let acc = 0, nA = 0; const totPos = st.reduce((s, r) => s + Math.max(0, r.net), 0);
@@ -368,5 +342,5 @@
     return { cur, prev, alerts, top10Share, newCust: newCust.length, nA };
   }
 
-  root.Dashboard = { render, PERIODS, addM };
+  root.Dashboard = { render, PERIODS, addM, range, periodText };
 })(window);

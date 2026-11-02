@@ -1,6 +1,6 @@
 /* 銷售分析 — 介面邏輯 */
 (function () {
-  const { DIMS, MEASURES, ymDiff, ymLabel } = window.EngineMeta;
+  const { DIMS, MEASURES, ymDiff, ymLabel, dayLabel, dayNum } = window.EngineMeta;
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -44,6 +44,9 @@
     report: Object.assign({ year: null }, store.get('report', {})), slide: 0,
     ymMode: store.get('ymMode', 'date'), // 月份依據：'date' 實際出貨／退貨日期（預設）、'ord' 單號
     dash: Object.assign({ period: 'ytd', rankDim: 'ck', rankSort: 'net', cmp: 'quarter' }, store.get('dash', {})), // vault.key 只放記憶體，不會存下來
+    today: { date: null }, // 今日頁選的日期（不存，每次開啟看最新一天）
+    cmp: Object.assign({ metric: 'net', gran: 'month', vs: 'yoy', filters: {}, ab: { by: 'rep' } }, store.get('cmp', {})),
+    rep: Object.assign({ sel: null, period: 'ytd', q: '' }, store.get('rep', {})),
     view: 'overview',
     ref: store.get('ref', null),
     pivot: store.get('pivot', { src: 'all', rows: ['region'], col: 'year', measures: ['sales', 'returns', 'net', 'margin'], filters: {}, from: 0, to: 0, mode: 'agg' }),
@@ -63,11 +66,13 @@
     $$('#themePick button').forEach((b) => b.classList.toggle('on', b.dataset.theme === t));
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.content = { indigo: '#26437A', night: '#0E1726', market: '#13805F' }[t];
-    if (S.E) setTimeout(() => { if (S.view === 'overview') drawOverviewChart(); if (S.view === 'dashboard') renderDashboard(); if (S.view === 'report') renderReport(); }, 30);
+    if (S.E) setTimeout(() => { if (['overview', 'dashboard', 'compare', 'reps', 'report'].includes(S.view)) renderView(); }, 30);
   }
 
   // ---------- 導覽 ----------
+  const VIEWS = ['overview', 'dashboard', 'compare', 'reps', 'customers', 'products', 'report', 'pivot', 'data'];
   function go(view) {
+    if (!VIEWS.includes(view)) view = 'overview';
     if (!S.E && view !== 'data') view = 'data';
     S.view = view;
     $$('.view').forEach((v) => { v.hidden = v.id !== 'view-' + view; });
@@ -78,7 +83,7 @@
   }
   function renderView() {
     if (!S.E) { renderData(); return; }
-    ({ overview: renderOverview, dashboard: renderDashboard, report: renderReport, pivot: renderPivot, customers: renderCustomers, products: renderProducts, data: renderData })[S.view]();
+    (({ overview: renderToday, dashboard: renderDashboard, compare: renderCompare, reps: renderReps, report: renderReport, pivot: renderPivot, customers: renderCustomers, products: renderProducts, data: renderData })[S.view] || renderToday)();
   }
 
   // ---------- 表格元件 ----------
@@ -207,82 +212,68 @@
   }
 
   // =====================================================
-  // 總覽
+  // 基準月選單（儀表板、業務、資料與設定共用）
   // =====================================================
   function fillRefSelect(sel) {
     const E = S.E; const ref = refYm();
     sel.innerHTML = E.ymList.slice().reverse().map((y) => `<option value="${y}" ${y === ref ? 'selected' : ''}>${ymLabel(y)}</option>`).join('');
     sel.onchange = () => { S.ref = +sel.value; store.set('ref', S.ref); renderView(); };
   }
-  function renderOverview() {
-    const E = S.E; const ref = refYm();
-    $('#ovPeriod').textContent = `資料期間 ${ymLabel(E.minYm)} – ${ymLabel(E.maxYm)}，共 ${nf0.format(E.ds.nSales)} 筆進貨、${nf0.format(E.ds.nReturns)} 筆退貨`;
-    fillRefSelect($('#ovRef'));
-    const y = Math.floor(ref / 100), mo = ref % 100;
-    const sumRange = (from, to) => { const p = E.pivot({ rows: [], cols: null, measures: ['sales', 'returns', 'profit', 'custs'], filter: { ymFrom: from, ymTo: to } }); return p.grand; };
-    const cur = sumRange(ref, ref), prevY = sumRange((y - 1) * 100 + mo, (y - 1) * 100 + mo);
-    const ytd = sumRange(y * 100 + 1, ref), ytdPrev = sumRange((y - 1) * 100 + 1, (y - 1) * 100 + mo);
-    const chg = (a, b) => (b ? (a - b) / b : null);
-    const delta = (a, b, label) => { const c = chg(a, b); if (c == null) return `<span class="d">${label}：無資料</span>`; return `<span class="d">${label} <span class="${c >= 0 ? 'up' : 'down'}">${c >= 0 ? '▲' : '▼'} ${fmt.pct(Math.abs(c))}</span></span>`; };
-    const C = E.customers({}, ref).list;
-    // 基準月若是最新月份且筆數明顯少於前一個月，提醒資料可能還沒滿月
-    const cntOf = (ym) => E.pivot({ rows: [], cols: null, measures: ['rows'], filter: { src: 'sales', ymFrom: ym, ymTo: ym } }).grand[0];
-    const pm = mo === 1 ? (y - 1) * 100 + 12 : ref - 1;
-    const partial = ref === E.maxYm && cntOf(ref) < cntOf(pm) * 0.6;
-    const pNote = partial ? '（本月資料可能未滿月）' : '';
-    const active = C.filter((c) => c.idle <= 2).length;
-    const k = [
-      { k: `${ymLabel(ref)} 銷貨${pNote}`, v: fmt.big(cur[0]), d: delta(cur[0], prevY[0], '比去年同月') },
-      { k: `${y} 年累計銷貨`, v: fmt.big(ytd[0]), d: delta(ytd[0], ytdPrev[0], '比去年同期') },
-      { k: `${y} 年毛利率`, v: fmt.pct(ytd[0] ? ytd[2] / ytd[0] : null), d: `<span class="d">毛利 ${fmt.big(ytd[2])}</span>` },
-      { k: `${y} 年退貨率`, v: fmt.pct(ytd[0] ? ytd[1] / ytd[0] : null), d: `<span class="d">退貨 ${fmt.big(ytd[1])}</span>` },
-      { k: '近 3 個月有交易的客戶', v: nf0.format(active), d: `<span class="d">共 ${nf0.format(C.length)} 位客戶</span>` },
-    ];
-    $('#ovKpis').innerHTML = k.map((x) => `<div class="kpi"><div class="k">${x.k}</div><div class="v">${x.v}</div>${x.d}</div>`).join('');
-    drawOverviewChart();
-    // 漸漸沒來的客戶
-    const idle = C.filter((c) => c.idle >= 3 && c.idle <= 12).sort((a, b) => b.sales - a.sales).slice(0, 8);
-    table($('#ovIdleCust'), [
-      { key: 'name', label: '客戶', get: (r) => r.code + ' ' + r.name, cls: 'lbl' },
-      { key: 'last', label: '最近交易', fmt: 'ym' },
-      { key: 'idle', label: '靜止月數', n: 1, render: (r) => monthsCell(r.idle, 'idle', 12) },
-      { key: 'sales', label: '歷史銷貨', n: 1, fmt: 'money' },
-    ], idle, { onRow: (r) => openCustomer(r), empty: '目前沒有靜止 3～12 個月的客戶' });
-    const P = E.products({}, ref, 'sku2').list.filter((p) => p.idle >= 6).sort((a, b) => b.sales - a.sales).slice(0, 8);
-    table($('#ovIdleProd'), [
-      { key: 'code', label: '商品(簡化代碼)', cls: 'lbl' },
-      { key: 'cat', label: '類別' },
-      { key: 'idle', label: '滯銷月數', n: 1, render: (r) => monthsCell(r.idle, 'idle', 24) },
-      { key: 'sales', label: '歷史銷貨', n: 1, fmt: 'money' },
-    ], P, { onRow: (r) => openProduct(r, 'sku2') });
-    // 區域
-    const pr = E.pivot({ rows: ['region'], cols: null, measures: ['sales', 'returns', 'net', 'margin', 'retRate', 'custs'], filter: { ymFrom: y * 100 + 1, ymTo: ref } });
-    const prev = E.pivot({ rows: ['region'], cols: null, measures: ['net'], filter: { ymFrom: (y - 1) * 100 + 1, ymTo: (y - 1) * 100 + mo } });
-    const prevMap = new Map(prev.rows.map((r) => [r.labels[0], r.vals[0][0]]));
-    const rr = pr.rows.map((r) => ({ region: r.labels[0], v: r.vals[0], prev: prevMap.get(r.labels[0]) })).sort((a, b) => b.v[2] - a.v[2]);
-    table($('#ovRegion'), [
-      { key: 'region', label: '區域' },
-      { key: 's', label: '銷貨', n: 1, get: (r) => r.v[0], fmt: 'money' },
-      { key: 'r', label: '退貨', n: 1, get: (r) => r.v[1], fmt: 'money' },
-      { key: 'net', label: '淨銷售', n: 1, get: (r) => r.v[2], fmt: 'money' },
-      { key: 'yoy', label: '比去年同期', n: 1, render: (r) => { const c = chg(r.v[2], r.prev); return c == null ? '—' : `<span class="${c >= 0 ? 'up' : 'down'}">${c >= 0 ? '▲' : '▼'} ${fmt.pct(Math.abs(c))}</span>`; } },
-      { key: 'm', label: '毛利率', n: 1, get: (r) => r.v[3], fmt: 'pct' },
-      { key: 'rr', label: '退貨率', n: 1, get: (r) => r.v[4], fmt: 'pct' },
-      { key: 'c', label: '客戶數', n: 1, get: (r) => r.v[5], fmt: 'int' },
-    ], rr, {
-      onRow: (r) => { S.pivot = { ...S.pivot, mode: 'agg', src: 'all', rows: ['cat'], col: 'year', measures: ['sales', 'returns', 'net', 'margin'], filters: { region: [S.E.dim('region').labels.indexOf(r.region)] } }; store.set('pivot', S.pivot); go('pivot'); },
+  // 頁面共用的工具
+  const baseCtx = () => ({
+    S, E: S.E, fmt, nf0, nf1, esc, $, $$, table, Charts, refYm, repName, toast, toDims, renderFilterChips,
+    openCustomer, openProduct, drill: dashDrill, goRep, rerender: renderView,
+  });
+  function goRep(rep) { S.rep.sel = rep; S.rep.q = ''; store.set('rep', S.rep); go('reps'); }
+
+  // =====================================================
+  // 今日（js/today.js）
+  // =====================================================
+  function renderToday() {
+    window.__today = Today.render(baseCtx()); // 測試用
+  }
+  // =====================================================
+  // 比較（js/compare.js）
+  // =====================================================
+  function renderCompare() {
+    window.__cmp = Compare.render({ ...baseCtx(), save: () => store.set('cmp', S.cmp) }); // 測試用
+  }
+  // =====================================================
+  // 業務（js/reps.js）
+  // =====================================================
+  function renderReps() {
+    fillRefSelect($('#rsRef'));
+    window.__reps = Reps.render({ ...baseCtx(), save: () => store.set('rep', S.rep) }); // 測試用
+  }
+  function bindReps() {
+    $('#rsPeriod').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.rep.period = b.dataset.v; store.set('rep', S.rep); renderReps(); });
+    const inp = $('#rsSearch');
+    // 從選單挑到或打完整名稱 → 直接看那位業務；其他 → 篩選下面的列表
+    const find = (q) => {
+      const list = S.E.pivot({ rows: ['rep'], cols: null, measures: ['rows'], filter: {} }).rows.map((r) => r.labels[0]);
+      const t = q.trim().toLowerCase(); if (!t) return { exact: null, hits: list };
+      const exact = list.find((r) => repName(r).toLowerCase() === t || String(r).toLowerCase() === t);
+      return { exact, hits: list.filter((r) => repName(r).toLowerCase().includes(t)) };
+    };
+    let tm;
+    inp.addEventListener('input', () => {
+      clearTimeout(tm);
+      tm = setTimeout(() => {
+        const { exact } = find(inp.value);
+        if (exact != null) { S.rep.sel = exact; S.rep.q = ''; } else { S.rep.sel = null; S.rep.q = inp.value; }
+        store.set('rep', S.rep); const pos = inp.selectionStart; renderReps(); if (document.activeElement !== inp) { inp.focus(); try { inp.setSelectionRange(pos, pos); } catch (e) { /* */ } }
+      }, 250);
+    });
+    inp.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      const { exact, hits } = find(inp.value);
+      const r = exact != null ? exact : hits.length === 1 ? hits[0] : null;
+      if (r != null) { clearTimeout(tm); S.rep.sel = r; S.rep.q = ''; store.set('rep', S.rep); renderReps(); } else if (!hits.length) toast('找不到這位業務');
     });
   }
-  function drawOverviewChart() {
-    const E = S.E; if (!E) return;
-    const range = $('#ovRange .on').dataset.v;
-    let t = E.trend({});
-    if (range !== 'all') t = t.slice(-24);
-    Charts.render($('#ovChart'), {
-      labels: t.map((r) => r.label), title: '每月銷貨與退貨',
-      series: [{ name: '銷貨', values: t.map((r) => r.sales), cls: 's1' }, { name: '退貨', values: t.map((r) => r.returns), cls: 's2' }],
-      fmt: fmt.money, axisFmt: fmt.axis,
-    });
+  function gotoIdle(which) {
+    if (which === 'cust-idle') { S.cust.idle = '3-5'; S.cust.sort = { key: 'sales', dir: -1 }; go('customers'); }
+    else { S.prod.idle = '6-11'; S.prod.level = 'sku2'; go('products'); }
   }
 
   // =====================================================
@@ -295,7 +286,7 @@
       S, E: S.E, fmt, nf0, nf1, esc, $, $$, table, Charts, refYm, repName, toast, after: [],
       saveDash: () => store.set('dash', S.dash),
       saveMeta: async (patch) => { await saveMeta(patch); renderDashboard(); },
-      openCustomer, drill: dashDrill,
+      openCustomer, openProduct, gotoIdle, drill: dashDrill,
     };
     window.__dash = Dashboard.render(ctx); // 測試用：儀表板算出的數字
     ctx.after.forEach((f) => f());
@@ -405,10 +396,10 @@
     // 列
     $('#pvRows').innerHTML = p.rows.map((k, i) => `<span class="chip" data-i="${i}"><span>${esc(dimLabel(k))}</span>${i > 0 ? '<button class="mv" data-mv="up" title="往前移">↑</button>' : ''}<button class="x" aria-label="移除">✕</button></span>`).join('') || '<span class="hint">未分組時顯示總計</span>';
     $('#pvAddRow').innerHTML = '<option value="">＋ 加入分組</option>' + PIVOT_DIMS.filter((k) => !p.rows.includes(k) && k !== p.col).map((k) => `<option value="${k}">${esc(dimLabel(k))}</option>`).join('');
-    $('#pvCol').innerHTML = '<option value="">不展開</option>' + PIVOT_DIMS.filter((k) => !p.rows.includes(k) && !['ord', 'sku', 'ck', 'cust', 'cname'].includes(k)).map((k) => `<option value="${k}" ${p.col === k ? 'selected' : ''}>${esc(dimLabel(k))}</option>`).join('');
+    $('#pvCol').innerHTML = '<option value="">不展開</option>' + PIVOT_DIMS.filter((k) => !p.rows.includes(k) && !['ord', 'sku', 'ck', 'cust', 'cname', 'day'].includes(k)).map((k) => `<option value="${k}" ${p.col === k ? 'selected' : ''}>${esc(dimLabel(k))}</option>`).join('');
     $('#pvMeasures').innerHTML = MEASURES.map((m) => `<label><input type="checkbox" value="${m.key}" ${p.measures.includes(m.key) ? 'checked' : ''}>${esc(m.label)}</label>`).join('');
     const fAdd = $('#pvAddFilter'); fAdd.dataset.ph = '＋ 加入篩選';
-    renderFilterChips($('#pvFilters'), fAdd, p.filters, PIVOT_DIMS.filter((k) => k !== 'ym'), () => { savePivot(); renderPivot(); },
+    renderFilterChips($('#pvFilters'), fAdd, p.filters, PIVOT_DIMS.filter((k) => k !== 'ym' && k !== 'day'), () => { savePivot(); renderPivot(); },
       (k) => { const f = pivotFilter(); const d = { ...f.dims }; delete d[k]; return { ...f, dims: d }; });
   }
 
@@ -521,8 +512,9 @@
       if (di >= 0) { const pp = S.E.products({ dims: { [lv]: new Set([r.codes[di]]) } }, refYm(), lv).list[0]; if (pp) return openProduct(pp, lv); }
     }
     // 其他：把這一列設為篩選，看明細
-    res.rowDims.forEach((k, d) => { if (k !== 'ym' && k !== 'year' && k !== 'month') S.pivot.filters[k] = [r.codes[d]]; });
+    res.rowDims.forEach((k, d) => { if (k !== 'ym' && k !== 'year' && k !== 'month' && k !== 'day') S.pivot.filters[k] = [r.codes[d]]; });
     if (res.rowDims.includes('ym')) { const y = S.E.ymList[r.codes[res.rowDims.indexOf('ym')]]; S.pivot.from = y; S.pivot.to = y; }
+    delete S.pivot.filters.day;
     S.pivot.mode = 'detail'; savePivot(); renderPivot();
     toast('已切換到明細，並套用這一列當篩選');
   }
@@ -607,14 +599,17 @@
     { key: 'first', label: '第一筆交易', fmt: 'ym' }, { key: 'last', label: '最近交易', fmt: 'ym' },
     { key: 'tenure', label: '交易至今(月)', n: 1, fmt: 'int' },
     { key: 'idle', label: '靜止(月)', n: 1, render: (r) => monthsCell(r.idle, 'idle', 24) },
-    { key: 'freq', label: '購買頻率(天)', n: 1, render: (r) => nf1.format(r.freq) },
+    { key: 'freq', label: '購買頻率(天)', n: 1, render: (r) => (r.freq == null ? '<span class="muted">只買過 1 天</span>' : nf1.format(r.freq)) },
+    { key: 'buyDays', label: '購買天數', n: 1, render: (r) => (r.freqBy === 'date' ? nf0.format(r.buyDays) : '—') },
     { key: 'orders', label: '訂單數', n: 1, fmt: 'int' },
     { key: 'sales', label: '銷貨金額', n: 1, fmt: 'money' }, { key: 'returns', label: '退貨金額', n: 1, fmt: 'money' },
     { key: 'margin', label: '毛利率', n: 1, fmt: 'pct' },
   ];
   function renderCustomers() {
     const { list, res } = custData();
-    $('#cuSub').textContent = `以 ${ymLabel(res.ref)} 為基準月計算（可在總覽或設定中更改）。購買頻率 = 第一筆到最近一筆的月數 ÷ 訂單數 × 30。`;
+    $('#cuSub').textContent = `以 ${ymLabel(res.ref)} 為基準月計算（可在儀表板或資料與設定中更改）。` + (S.E.maxDate
+      ? '購買頻率 = 平均每隔幾天買一次：用實際出貨日期，第一次到最近一次相隔的天數 ÷（購買天數 − 1），同一天的好幾張單只算一次。'
+      : '購買頻率 = 第一筆到最近一筆的月數 ÷ 訂單數 × 30（這份資料沒有實際出貨日期；匯入系統原始資料後會改用實際日期，比較準）。');
     $$('#cuIdle button').forEach((b) => b.classList.toggle('on', b.dataset.v === S.cust.idle));
     renderFilterChips($('#cuFilters'), $('#cuAddFilter'), S.cust.filters, CUST_FILTER_DIMS, renderCustomers, (k) => { const d = toDims(S.cust.filters); delete d[k]; return { src: 'sales', dims: d }; });
     table($('#cuTable'), CUST_COLS, list, {
@@ -628,7 +623,7 @@
     $('#cuExport').addEventListener('click', () => {
       const { list } = custData();
       downloadCsv('客戶交易', CUST_COLS.map((c) => c.label), list.map((r) => CUST_COLS.map((c) => {
-        const v = r[c.key]; if (c.fmt === 'ym') return ymLabel(v); if (c.key === 'freq') return Math.round(v * 100) / 100; if (c.key === 'margin') return v == null ? '' : Math.round(v * 10000) / 100 + '%'; if (c.key === 'rep') return repName(v); return v;
+        const v = r[c.key]; if (c.fmt === 'ym') return ymLabel(v); if (c.key === 'freq') return v == null ? '' : Math.round(v * 100) / 100; if (c.key === 'buyDays') return r.freqBy === 'date' ? v : ''; if (c.key === 'margin') return v == null ? '' : Math.round(v * 10000) / 100 + '%'; if (c.key === 'rep') return repName(v); return v;
       })));
     });
   }
@@ -714,9 +709,9 @@
   function openCustomer(c) {
     const dims = { ck: new Set([c.ck]) };
     const html = kpiHtml([
-      { k: '最近交易', v: ymLabel(c.last), d: `靜止 ${c.idle} 個月` },
-      { k: '第一筆交易', v: ymLabel(c.first), d: `交易至今 ${c.tenure} 個月` },
-      { k: '購買頻率', v: nf1.format(c.freq) + ' 天', d: `${c.orders} 張訂單、${c.activeMonths} 個月有交易` },
+      { k: '最近交易', v: c.lastDate ? dayLabel(c.lastDate) : ymLabel(c.last), d: c.lastDate && S.E.maxDate ? `距最新資料 ${nf0.format(dayNum(S.E.refDate(refYm())) - dayNum(c.lastDate))} 天・靜止 ${c.idle} 個月` : `靜止 ${c.idle} 個月` },
+      { k: '第一筆交易', v: c.firstDate ? dayLabel(c.firstDate) : ymLabel(c.first), d: `交易至今 ${c.tenure} 個月` },
+      { k: '購買頻率', v: c.freq == null ? '只買過 1 天' : '每 ' + nf1.format(c.freq) + ' 天', d: c.freqBy === 'date' ? `${c.buyDays} 天有買、${c.orders} 張訂單（依實際日期）` : `${c.orders} 張訂單、${c.activeMonths} 個月有交易（依單號）` },
       { k: '銷貨金額', v: fmt.big(c.sales), d: `毛利率 ${fmt.pct(c.margin)}` },
       { k: '退貨金額', v: fmt.big(c.returns), d: `退貨率 ${fmt.pct(c.sales ? c.returns / c.sales : null)}` },
       { k: '淨銷售', v: fmt.big(c.net), d: `${c.region}・${repName(c.rep)}` },
@@ -1015,7 +1010,7 @@
     // 檢查樞紐設定中的期間仍有效
     if (S.pivot.from && !S.E.ymIndex.has(S.pivot.from)) S.pivot.from = 0;
     if (S.pivot.to && !S.E.ymIndex.has(S.pivot.to)) S.pivot.to = 0;
-    S.pivot.filters = {}; S.cust.filters = {}; S.prod.filters = {};
+    S.pivot.filters = {}; S.cust.filters = {}; S.prod.filters = {}; S.cmp.filters = {}; S.today.date = null;
     $('#brandSub').textContent = `資料到 ${ymLabel(S.E.maxYm)}`;
     renderData();
   }
@@ -1266,18 +1261,20 @@
   // ---------- 啟動 ----------
   async function boot() {
     setTheme(document.documentElement.dataset.theme || 'indigo');
-    bindPivot(); bindCustomers(); bindProducts(); bindData(); bindReport();
+    bindPivot(); bindCustomers(); bindProducts(); bindData(); bindReport(); bindReps();
+    $('#tdDay').addEventListener('change', (e) => { S.today.date = +e.target.value; renderToday(); });
     $('#demoStart').addEventListener('click', () => { startDemo().catch((e) => toast('示範資料載入失敗：' + e.message)); });
     $('#demoExit').addEventListener('click', exitDemo);
-    $('#ovRange').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; $$('#ovRange button').forEach((x) => x.classList.toggle('on', x === b)); drawOverviewChart(); });
-    $$('[data-goto]').forEach((a) => a.addEventListener('click', (e) => {
-      e.preventDefault();
-      if (a.dataset.goto === 'cust-idle') { S.cust.idle = '3-5'; S.cust.sort = { key: 'sales', dir: -1 }; go('customers'); }
-      else { S.prod.idle = '6-11'; S.prod.level = 'sku2'; go('products'); }
-    }));
     $$('.tabs a').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); go(a.dataset.view); }));
     window.addEventListener('hashchange', () => go(location.hash.slice(1) || 'overview'));
-    let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (S.view === 'overview' && S.E) drawOverviewChart(); if (S.view === 'dashboard' && S.E) renderDashboard(); if (S.view === 'report' && S.E && S.reportRedraw) S.reportRedraw(); }, 200); });
+    // 視窗大小改變：圖跟著重畫
+    const redrawOf = { overview: () => window.__today, compare: () => window.__cmp, reps: () => window.__reps };
+    let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => {
+      if (!S.E) return;
+      if (redrawOf[S.view]) { const r = redrawOf[S.view](); if (r && r.redraw) r.redraw(); }
+      if (S.view === 'dashboard') renderDashboard();
+      if (S.view === 'report' && S.reportRedraw) S.reportRedraw();
+    }, 200); });
     const start = (location.hash.slice(1) || 'overview');
     try {
       if (await Dataset.Vault.exists()) await lockScreen('unlock');

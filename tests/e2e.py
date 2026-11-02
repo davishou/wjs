@@ -181,7 +181,7 @@ async def main():
     # 有資料時，每個畫面、三種風格都不能比手機螢幕寬（不然整頁會被縮小、選單跑到畫面外）
     for th in ['indigo', 'night', 'market']:
         await page.evaluate(f"document.documentElement.dataset.theme='{th}'")
-        for vw in ['overview', 'pivot', 'customers', 'products', 'data']:
+        for vw in ['overview', 'dashboard', 'compare', 'reps', 'pivot', 'customers', 'products', 'data']:
             await page.evaluate(f"location.hash='{vw}'"); await page.wait_for_timeout(400)
             w = await page.evaluate("document.documentElement.scrollWidth")
             ok(w <= 392, f'手機寬度：{th} 風格的 {vw} 畫面沒有超出螢幕（{w}px）')
@@ -251,7 +251,7 @@ def expected_114():
     for r in rows:
         if r['src'] == 0 and str(r['sku']).startswith('AR9006'):
             k = str(r['sku'])[6:]; size[k] = size.get(k, 0) + (r['qty'] if r['unitn'] == 1 else r['qty'] * 12 if r['unitn'] == 2 else 0)
-    return dict(cur=cur, top10=top10, big={k: v / cur['net'] for k, v in big.items()}, q1margin=q1['profit'] / q1['sales'], s3=s3, size=size)
+    return dict(cur=cur, top10=top10, big={k: v / cur['net'] for k, v in big.items()}, q1margin=q1['profit'] / q1['sales'], s3=s3, size=size, rows=rows)
 
 
 async def dashboard(b):
@@ -278,10 +278,12 @@ async def dashboard(b):
     al = await pg.text_content('#dbAlerts')
     ok('毛利率下降 5 個百分點' in al and '丁行' not in al and '1 位去年同期有買的客戶' in al and '1 個商品類別代碼沒有分類' in al, '重點提醒：毛利率下降、可能流失、未分類代碼')
     ok('7004 丁行' in await pg.text_content('#dbCust'), '可能流失名單有丁行（114 年沒再買）')
-    q1 = await pg.evaluate("[...document.querySelectorAll('#dbCmpBody table')[0].rows].find(r => r.cells[0].textContent.startsWith('114')).cells[1].querySelector('div').textContent")
-    ok(q1 == f"{exp['q1margin'] * 100:.0f}%", f"114 年 Q1 毛利率 {q1}（Python {exp['q1margin'] * 100:.2f}%）")
-    for v in ('year', 'month'):
-        await pg.click(f'#dbCmp button[data-v={v}]'); ok(await pg.locator('#dbCmpBody table').count() == 2, f'比較表切換「{v}」')
+    ok(await pg.locator('#dbIdleCust').count() == 1 and await pg.locator('#dbCmpBody').count() == 0, '儀表板：「需要跟進」搬進來，毛利率／退貨率比較搬到「比較」頁')
+    await compare_page(pg, exp)
+    await reps_page(pg, d)
+    await pg.click('a[data-view=overview]'); await pg.wait_for_selector('#tdBody .notice')
+    ok('沒有實際出貨日期' in await pg.text_content('#tdBody') and (await pg.evaluate('window.__today'))['mode'] == 'month', '今日：總表沒有實際日期時，說明原因並改用月份')
+    await pg.click('a[data-view=dashboard]'); await pg.wait_for_selector('#dbAlerts .alerts')
     # 排名：切換維度、依毛利貢獻
     for k in ('style', 'rep', 'region', 'big', 'cat', 'ck'):
         await pg.click(f'#dbRankDim button[data-v={k}]')
@@ -335,6 +337,52 @@ async def dashboard(b):
     ok(not errs, '手機儀表板沒有 JS 錯誤 ' + str(errs))
     await m.close()
 
+async def compare_page(pg, exp):
+    """比較頁：每月、每季、每年的數字和 Python 一致；切換「上一期」；自選兩段期間。"""
+    rows = exp['rows']
+    def tot(a, b):
+        sel = [r for r in rows if a <= r['ym'] <= b]
+        S = sum(r['amt'] for r in sel if r['src'] == 0); R = sum(r['amt'] for r in sel if r['src'] == 1); P = sum(r['profit'] for r in sel if r['src'] == 0)
+        return dict(net=S - R, margin=P / S if S else None)
+    await pg.click('a[data-view=compare]'); await pg.wait_for_selector('#cmpMain table')
+    await pg.click('#cmpGran button[data-v=month]'); await pg.click('#cmpMetric button[data-v=net]'); await pg.wait_for_timeout(200)
+    c = await pg.evaluate('window.__cmp')
+    bad = [k for k, v in c['cell'].items() if abs(v - tot(int(k.split('|')[0]) * 100 + int(k.split('|')[1]), int(k.split('|')[0]) * 100 + int(k.split('|')[1]))['net']) > 0.01]
+    ok(not bad and len(c['cell']) == len({r['ym'] for r in rows}), f"比較：每月淨銷售 {len(c['cell'])} 個月都和 Python 一樣 {bad}")
+    await pg.click('#cmpGran button[data-v=quarter]'); await pg.click('#cmpMetric button[data-v=margin]'); await pg.wait_for_timeout(200)
+    c = await pg.evaluate('window.__cmp')
+    ok(abs(c['cell']['114|1'] - exp['q1margin']) < 1e-9, f"比較：114 年 Q1 毛利率 {c['cell']['114|1']:.4f}（Python {exp['q1margin']:.4f}）")
+    q1 = await pg.evaluate("[...document.querySelectorAll('#cmpMain table tr')].find(r => r.cells[0].textContent.startsWith('114')).cells[1].querySelector('div').textContent")
+    ok(q1 == f"{exp['q1margin'] * 100:.0f}%", f'比較表上 114 年 Q1 毛利率 {q1}')
+    await pg.click('#cmpVs button[data-v=prev]'); await pg.wait_for_timeout(200)
+    ok('上一季' in await pg.text_content('#cmpMain .hint'), '比較：可以改成和上一期（上一季）比')
+    await pg.click('#cmpVs button[data-v=yoy]'); await pg.click('#cmpGran button[data-v=year]'); await pg.click('#cmpMetric button[data-v=net]'); await pg.wait_for_timeout(200)
+    c = await pg.evaluate('window.__cmp')
+    ok(all(abs(c['full'][str(y)] - tot(y * 100 + 1, y * 100 + 12)['net']) < 0.01 for y in (113, 114)), f"比較：每年淨銷售 {c['full']}")
+    # 自選兩段期間：114/01～114/06 vs 113/01～113/06，依區域
+    for sid, v in (('#abAF', '11401'), ('#abAT', '11406'), ('#abBF', '11301'), ('#abBT', '11306')): await pg.select_option(sid, v)
+    await pg.click('#abBy button[data-v=region]'); await pg.wait_for_timeout(300)
+    ab = await pg.evaluate('window.__cmpAB')
+    ok(abs(ab['total'][0] - tot(11401, 11406)['net']) < 0.01 and abs(ab['total'][1] - tot(11301, 11306)['net']) < 0.01 and ab['rows'] >= 2,
+       f"自選兩段期間：A {ab['total'][0]:.0f}（Python {tot(11401, 11406)['net']:.0f}）、B {ab['total'][1]:.0f}（{tot(11301, 11306)['net']:.0f}），依區域 {ab['rows']} 列")
+    await pg.screenshot(path=SH + '/23_compare.png', full_page=True)
+
+
+async def reps_page(pg, d):
+    """業務頁：每位業務加起來等於全公司；搜尋一位業務看詳細情形。"""
+    await pg.click('a[data-view=reps]'); await pg.click('#rsPeriod button[data-v=ytd]'); await pg.wait_for_selector('#rsTable tbody tr')
+    r = await pg.evaluate('window.__reps')
+    ok(r['mode'] == 'all' and abs(sum(x['net'] for x in r['rows']) - d['cur']['net']) < 0.01, f"業務：每位業務的淨銷售加起來 {sum(x['net'] for x in r['rows']):.0f} = 全公司 {d['cur']['net']:.0f}（{len(r['rows'])} 位）")
+    ok(await pg.locator('#rsMonthChart svg').count() == 1 and await pg.locator('#rsYears table').count() == 1, '業務：每月曲線、每年表')
+    one = r['rows'][0]
+    await pg.fill('#rsSearch', one['rep']); await pg.press('#rsSearch', 'Enter'); await pg.wait_for_selector('#rsBack')
+    o = await pg.evaluate('window.__reps')
+    ok(o['mode'] == 'one' and o['rep'] == one['rep'] and abs(o['cur']['net'] - one['net']) < 0.01 and await pg.locator('#rsOneYears svg').count() == 1,
+       f"業務：搜尋「{one['rep']}」→ 詳細情形，淨銷售 {o['cur']['net']:.0f}，客戶 {o['custs']} 位、每年的每月曲線")
+    await pg.screenshot(path=SH + '/24_rep.png', full_page=True)
+    await pg.click('#rsBack'); await pg.wait_for_selector('#rsTable')
+
+
 def expected_raw():
     """直接從產生假資料的函式算出：依實際日期、依單號，每月的淨銷售。"""
     sys.path.insert(0, HERE)
@@ -346,7 +394,19 @@ def expected_raw():
             d = int(r['DELIVDATE']) // 100; o = int(r['DELIVNO'][:5])
             by_date[d] = by_date.get(d, 0) + sign * r['SALEGET']; by_ord[o] = by_ord.get(o, 0) + sign * r['SALEGET']
     moved = sum(1 for r in sal + bk if int(r['DELIVDATE']) // 100 != int(r['DELIVNO'][:5]))
-    return dict(nSales=len(sal), nReturns=len(bk), by_date=by_date, by_ord=by_ord, moved=moved)
+    # 購買頻率：每位客戶有出貨的日期
+    import datetime
+    dn = lambda d: datetime.date(int(d) // 10000 + 1911, int(d) // 100 % 100, int(d) % 100).toordinal()
+    days = {}
+    for r in sal: days.setdefault(r['SNAME'], set()).add(int(r['DELIVDATE']))
+    freq = {n: ((dn(max(v)) - dn(min(v))) / (len(v) - 1) if len(v) > 1 else None, len(v)) for n, v in days.items()}
+    last = max(int(r['DELIVDATE']) for r in sal); ym = last // 100; dd = last % 100
+    net_in = lambda a, b: sum(r['SALEGET'] for r in sal if a <= int(r['DELIVDATE']) <= b) - sum(r['SALEGET'] for r in bk if a <= int(r['DELIVDATE']) <= b)
+    prev = ym - 1 if ym % 100 > 1 else ym - 89
+    return dict(nSales=len(sal), nReturns=len(bk), by_date=by_date, by_ord=by_ord, moved=moved, freq=freq, lastDay=last,
+                mtd=net_in(ym * 100 + 1, last), dayNet=net_in(last, last), pmtd=net_in(prev * 100 + 1, prev * 100 + dd),
+                dayOrders=len({r['DELIVNO'] for r in sal if int(r['DELIVDATE']) == last} | {r['DELIVNO'] for r in bk if int(r['DELIVDATE']) == last}),
+                firstOct=min(int(r['DELIVDATE']) for r in sal if int(r['DELIVDATE']) // 100 == 11410))
 
 
 NET_BY_YM = "(() => { const E = window.__app.E; const p = E.pivot({ rows: ['ym'], cols: null, measures: ['net'], filter: {} }); return Object.fromEntries(p.rows.map(r => [E.ymList[r.codes[0]], r.vals[0][0]])); })()"
@@ -371,6 +431,22 @@ async def raw_import(b):
     ok(exp['by_date'] != exp['by_ord'], '假資料裡依日期和依單號的月份確實不同')
     await pg.click('a[data-view=customers]'); cu = await pg.text_content('#cuTable')
     ok('甲商行' in cu and '乙公司' in cu and '�' not in cu, 'DBF 的中文客戶名（Big5）正確，沒有亂碼')
+    # 購買頻率改用實際日期：相隔天數 ÷（購買天數 − 1），同一天多張單算一次
+    got = await pg.evaluate("Object.fromEntries(window.__app.E.customers({}, 0).list.map(c => [c.name, [c.freq, c.buyDays, c.freqBy]]))")
+    ok(all(got[n][2] == 'date' and got[n][1] == v[1] and (v[0] is None and got[n][0] is None or abs(got[n][0] - v[0]) < 1e-9) for n, v in exp['freq'].items()) and len(got) == len(exp['freq']),
+       f"購買頻率依實際日期：{ {k: (round(v[0], 2) if v[0] else v[0], v[1]) for k, v in got.items()} }（Python { {k: (round(v[0], 2) if v[0] else v[0], v[1]) for k, v in exp['freq'].items()} }）")
+    ok('相隔的天數' in await pg.text_content('#cuSub') and '購買天數' in await pg.text_content('#cuTable thead'), '客戶頁說明新的購買頻率算法，並多了「購買天數」')
+    # 今日：最新有出貨的一天、本月累計
+    await pg.click('a[data-view=overview]'); await pg.wait_for_selector('#tdCumChart svg')
+    td = await pg.evaluate('window.__today')
+    ok(td['mode'] == 'day' and td['date'] == exp['lastDay'] and abs(td['T']['mtd']['net'] - exp['mtd']) < 0.01 and abs(td['T']['day']['net'] - exp['dayNet']) < 0.01 and abs(td['T']['pmtd']['net'] - exp['pmtd']) < 0.01,
+       f"今日：最新一天 {td['date']}（Python {exp['lastDay']}）、當天 {td['T']['day']['net']:.0f}（{exp['dayNet']:.0f}）、本月累計 {td['T']['mtd']['net']:.0f}（{exp['mtd']:.0f}）、上月同期 {td['T']['pmtd']['net']:.0f}（{exp['pmtd']:.0f}）")
+    ok(await pg.locator('#tdReps tbody tr').count() >= 1 and await pg.locator('#tdOrders tbody tr').count() == exp['dayOrders'], f"今日：各業務表、當天的單（{exp['dayOrders']} 張）")
+    await pg.select_option('#tdDay', str(exp['firstOct'])); await pg.wait_for_timeout(300)
+    ok((await pg.evaluate('window.__today'))['date'] == exp['firstOct'], '今日：可以切換日期')
+    await pg.screenshot(path=SH + '/32_today.png', full_page=True)
+    await pg.click('#tdReps tbody tr'); await pg.wait_for_selector('#rsBack')
+    ok((await pg.evaluate('window.__reps'))['mode'] == 'one', '今日：點業務 → 業務頁的詳細情形')
     # 切換成依單號
     await pg.click('a[data-view=data]'); await pg.click('#ymMode button[data-v=ord]'); await pg.wait_for_timeout(500)
     got = await pg.evaluate(NET_BY_YM)
@@ -416,7 +492,10 @@ async def report_page(b):
     ok(abs(r['top10Share'] - exp['top10']) < 0.001, f"TOP10 客戶合計佔比 {r['top10Share']:.4f}（Python {exp['top10']:.4f}）")
     big = {x['n']: x['cs'] for x in r['big']}
     ok(all(abs(big.get(k, 0) - v) < 0.001 for k, v in exp['big'].items()), f'男女童比例 {big}（Python {exp["big"]}）')
-    ok(await pg.locator('#rpBody .rp-card').count() == 8 and await pg.locator('#rpCust .rb-row').count() >= 5 and await pg.locator('#rpRegion .sg').count() == 2, '8 張圖：封面、每月、TOP10 客戶、TOP15 商品、區域、品項、男女童、毛利貢獻；區域有今年和去年兩條')
+    ok(await pg.locator('#rpBody .rp-card').count() == 9 and await pg.locator('#rpCust .rb-row').count() >= 5 and await pg.locator('#rpRegion .sg').count() == 2, '9 張圖：封面、每月、歷年、TOP10 客戶、TOP15 商品、區域、品項、男女童、毛利貢獻；區域有今年和去年兩條')
+    yrs = await pg.evaluate("[...document.querySelectorAll('#rpYears .rb-row .rb-name')].map(e => e.textContent)")
+    want = [f'{y}年' for y in sorted({r['ym'] // 100 for r in exp['rows']}) if y <= 114][-6:]
+    ok(yrs == want, f'歷年比較列出每一年：{yrs}（Python {want}）')
     ok('114年' in await pg.text_content('#rpCover') and '113年' in await pg.text_content('#rpSub'), '標題和去年同期的說明')
     # 切換年度
     await pg.select_option('#rpYear', '113'); await pg.wait_for_timeout(300)
@@ -427,10 +506,10 @@ async def report_page(b):
     ok(True, '點 TOP10 客戶可以看明細')
     # 簡報模式
     await pg.click('#rpPresent'); await pg.wait_for_timeout(300)
-    ok(await pg.evaluate("document.body.classList.contains('presenting')") and await pg.text_content('#rpCount') == '1 / 8' and await pg.is_hidden('.nav'), '簡報模式：一頁一張圖，從第 1 頁開始，選單隱藏')
+    ok(await pg.evaluate("document.body.classList.contains('presenting')") and await pg.text_content('#rpCount') == '1 / 9' and await pg.is_hidden('.nav'), '簡報模式：一頁一張圖，從第 1 頁開始，選單隱藏')
     for _ in range(3): await pg.keyboard.press('ArrowRight')
-    ok(await pg.text_content('#rpCount') == '4 / 8' and await pg.is_visible('#rpProd'), '方向鍵換頁到第 4 頁（TOP15 商品）')
-    await pg.keyboard.press('ArrowLeft'); ok(await pg.text_content('#rpCount') == '3 / 8', '往回一頁')
+    ok(await pg.text_content('#rpCount') == '4 / 9' and await pg.is_visible('#rpCust'), '方向鍵換頁到第 4 頁（TOP10 客戶）')
+    await pg.keyboard.press('ArrowLeft'); ok(await pg.text_content('#rpCount') == '3 / 9', '往回一頁')
     await pg.screenshot(path=SH + '/41_report_present.png')
     await pg.keyboard.press('Escape'); await pg.wait_for_timeout(300)
     ok(not await pg.evaluate("document.body.classList.contains('presenting')") and await pg.is_visible('.nav'), 'Esc 結束簡報')
@@ -465,7 +544,7 @@ async def demo_mode(b):
     # 沒有資料時也可以看示範
     await pg.click('#demoStart'); await pg.wait_for_selector('#view-overview:not([hidden])')
     ok(await pg.is_visible('#demoBar') and '示範' in await pg.text_content('#brandSub') and await pg.evaluate(VAULT_CT) is None, '沒有資料也能看示範；畫面上有「示範資料」提示，裝置上沒有存任何東西')
-    for v in ('dashboard', 'report', 'pivot', 'customers', 'products', 'data'):
+    for v in ('dashboard', 'compare', 'reps', 'report', 'pivot', 'customers', 'products', 'data'):
         await pg.click(f'a[data-view={v}]'); await pg.wait_for_timeout(300)
     ok(not errs and '示範資料' in await pg.text_content('#rpBody') if await pg.click('a[data-view=report]') is None else False, '每一頁都能用示範資料打開；圖表報告封面註明是示範資料')
     await pg.click('#demoExit'); await pg.wait_for_timeout(800)
