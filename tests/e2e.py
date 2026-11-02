@@ -179,7 +179,7 @@ async def main():
     await page.fill('#lockPw','packpw88'); await page.click('#lockGo'); await page.wait_for_selector('#lock[hidden]', state='attached')
     ok(True, '手機：開啟密碼沿用資料包密碼')
     # 有資料時，每個畫面、三種風格都不能比手機螢幕寬（不然整頁會被縮小、選單跑到畫面外）
-    for th in ['indigo', 'night', 'market']:
+    for th in ['pop', 'indigo', 'night', 'market']:
         await page.evaluate(f"document.documentElement.dataset.theme='{th}'")
         for vw in ['overview', 'dashboard', 'compare', 'reps', 'pivot', 'customers', 'products', 'data']:
             await page.evaluate(f"location.hash='{vw}'"); await page.wait_for_timeout(400)
@@ -204,7 +204,7 @@ async def main():
         await page.click('a[data-view=data]'); await page.set_input_files('#fileXlsx', FX+'/big_agile.xlsx')
         await dlg_fill(page, {'xls':'測試pw123'}); t = await wait_done(page); ok('180,000' in t, '大檔（約 9MB、18 萬筆）加密 Excel：'+t)
     for th in ['night','market']:
-        await page.evaluate(f"localStorage.setItem('dv.theme','{th}')"); await page.reload(); await page.wait_for_selector('#lock:not([hidden])'); await page.screenshot(path=SH+f'/9_lock_{th}.png')
+        await page.evaluate(f"localStorage.setItem('dv.look','{th}')"); await page.reload(); await page.wait_for_selector('#lock:not([hidden])'); await page.screenshot(path=SH+f'/9_lock_{th}.png')
     await c3.close()
     await picker(b)
     await dashboard(b)
@@ -273,8 +273,7 @@ async def dashboard(b):
     ok(all(close(d['cur'][k], e[k]) for k in ('sales', 'returns', 'net', 'profit', 'netProfit', 'orders')),
        f"114 年累計：淨銷售 {d['cur']['net']:.0f}（Python {e['net']:.0f}）、淨毛利 {d['cur']['netProfit']:.0f}（{e['netProfit']:.0f}）、單數 {d['cur']['orders']}（{e['orders']}）")
     ok(close(d['top10Share'], exp['top10']), f"前 10 大客戶佔比 {d['top10Share']:.4f}（Python {exp['top10']:.4f}）")
-    share = await pg.evaluate("Object.fromEntries([...document.querySelectorAll('#dbShare .share')[1].querySelectorAll('.srow')].map(r => [r.querySelector('.sl span').textContent, r.querySelector('.sl b').textContent]))")
-    ok(all(share.get(k) == f"{v * 100:.1f}%".replace('.0%', '%') for k, v in exp['big'].items()), f'商品大類佔比 {share}（Python {dict((k, round(v * 100, 1)) for k, v in exp["big"].items())}）')
+    ok(await pg.locator('#dbBody .kpis.db-kpis, #dbRank, #dbShare').count() == 0, '提醒頁只放要處理的事：沒有重複的總數、排名、佔比')
     al = await pg.text_content('#dbAlerts')
     ok('毛利率下降 5 個百分點' in al and '丁行' not in al and '1 位去年同期有買的客戶' in al and '1 個商品類別代碼沒有分類' in al, '重點提醒：毛利率下降、可能流失、未分類代碼')
     ok('7004 丁行' in await pg.text_content('#dbCust'), '可能流失名單有丁行（114 年沒再買）')
@@ -284,12 +283,6 @@ async def dashboard(b):
     await pg.click('a[data-view=overview]'); await pg.wait_for_selector('#tdBody .notice')
     ok('沒有實際出貨日期' in await pg.text_content('#tdBody') and (await pg.evaluate('window.__today'))['mode'] == 'month', '今日：總表沒有實際日期時，說明原因並改用月份')
     await pg.click('a[data-view=dashboard]'); await pg.wait_for_selector('#dbAlerts .alerts')
-    # 排名：切換維度、依毛利貢獻
-    for k in ('style', 'rep', 'region', 'big', 'cat', 'ck'):
-        await pg.click(f'#dbRankDim button[data-v={k}]')
-    await pg.click('#dbRankSort button[data-v=netProfit]')
-    pct = await pg.evaluate("[...document.querySelectorAll('#dbRank tbody tr')].map(r => parseFloat(r.cells[5].textContent))")
-    ok(abs(sum(pct) - 100) < 1, f'毛利貢獻率加起來約 100%：{pct}')
     # 損益兩平與應收帳款天數
     ok('缺少：每月固定費用' in await pg.text_content('#dbBep'), '沒填固定費用時說明缺少什麼')
     await pg.fill('#dbFixed', '100,000'); await pg.click('#dbFixedForm button'); await pg.wait_for_selector('#dbBepChart svg')
@@ -300,12 +293,14 @@ async def dashboard(b):
     dso = await pg.text_content('#dbDso .kpi .v'); want = 300000 / exp['s3'] * 91
     ok(dso == f'{want:.0f} 天', f'應收帳款天數 {dso}（Python {want:.1f}）')
     # 解釋：每一區都有「這代表什麼」
-    ok(await pg.locator('#dbBody details.explain').count() >= 13, '每個數字和區塊都有說明')
+    ok(await pg.locator('#dbBody details.explain').count() >= 4, '每個區塊都有說明')
+    ok('不需要實際出貨日期' not in await pg.text_content('#dbDue') and '需要實際出貨日期' in await pg.text_content('#dbDue'), '提醒：總表沒有日期時，說明「該來買還沒來」需要實際日期')
     await pg.screenshot(path=SH + '/20_dashboard.png', full_page=True)
     # 重新開啟：分類表、固定費用、應收帳款都還在（加密保存）
     await pg.reload(); await pg.fill('#lockPw', 'dash1'); await pg.click('#lockGo'); await pg.wait_for_selector('#lock[hidden]', state='attached')
     await pg.click('a[data-view=dashboard]'); await pg.wait_for_selector('#dbBepChart svg')
-    ok('天' in await pg.text_content('#dbDso') and '測試男衣' in await pg.text_content('#dbShare'), '重新開啟後分類表、固定費用、應收帳款都還在')
+    ok('天' in await pg.text_content('#dbDso') and '7 個代碼' in await pg.evaluate("(() => { location.hash = 'data'; return document.querySelector('#classState').textContent; })()"), '重新開啟後分類表、固定費用、應收帳款都還在')
+    await pg.click('a[data-view=dashboard]'); await pg.wait_for_selector('#dbBepChart svg')
     st = await pg.evaluate(IDB_DUMP); ok(st['keys'] == ['vault'], 'IndexedDB 只有加密的資料')
     # 重新匯入整份總表 → 設定保留
     await pg.click('a[data-view=data]'); await pg.set_input_files('#fileXlsx', FX + '/plain.xlsx'); await wait_done(pg)
@@ -331,7 +326,7 @@ async def dashboard(b):
     await pm.goto(URL + '#data'); await pm.wait_for_timeout(300)
     await pm.fill('#openPw', 'packdash'); await pm.set_input_files('#filePack', FX + '/pack_dash.dvp'); await pm.wait_for_selector('#view-overview:not([hidden])')
     await pm.click('a[data-view=dashboard]'); await pm.wait_for_selector('#dbBepChart svg')
-    ok('測試男衣' in await pm.text_content('#dbShare') and '天' in await pm.text_content('#dbDso'), '手機開資料包：分類表、固定費用、應收帳款都帶過來了')
+    ok('天' in await pm.text_content('#dbDso') and '1 個商品類別代碼沒有分類' in await pm.text_content('#dbAlerts'), '手機開資料包：分類表、固定費用、應收帳款都帶過來了')
     ok(await pm.evaluate('document.documentElement.scrollWidth') <= 390, '手機儀表板沒有把畫面撐寬')
     await pm.screenshot(path=SH + '/22_dashboard_phone.png', full_page=True)
     ok(not errs, '手機儀表板沒有 JS 錯誤 ' + str(errs))
@@ -514,7 +509,7 @@ async def report_page(b):
     await pg.keyboard.press('Escape'); await pg.wait_for_timeout(300)
     ok(not await pg.evaluate("document.body.classList.contains('presenting')") and await pg.is_visible('.nav'), 'Esc 結束簡報')
     # 列印：深色風格會先換成明亮的
-    await pg.evaluate("localStorage.setItem('dv.theme','night'); document.documentElement.dataset.theme = 'night'; window.__printTheme = null; window.print = () => { window.__printTheme = document.documentElement.dataset.theme; }")
+    await pg.evaluate("localStorage.setItem('dv.look','night'); document.documentElement.dataset.theme = 'night'; window.__printTheme = null; window.print = () => { window.__printTheme = document.documentElement.dataset.theme; }")
     await pg.click('#rpPrint'); await pg.wait_for_timeout(400)
     ok(await pg.evaluate("window.__printTheme") == 'indigo' and await pg.evaluate("document.documentElement.dataset.theme") == 'night', '列印時用明亮風格，印完換回深色')
     await pg.evaluate("document.documentElement.dataset.theme = 'indigo'")
@@ -543,6 +538,9 @@ async def demo_mode(b):
     await pg.goto(URL); await pg.wait_for_timeout(300)
     # 沒有資料時也可以看示範
     await pg.click('#demoStart'); await pg.wait_for_selector('#view-overview:not([hidden])')
+    c1 = await pg.evaluate("[document.documentElement.dataset.theme, getComputedStyle(document.body).getPropertyValue('--pg').trim()]")
+    await pg.click('a[data-view=dashboard]'); c2 = await pg.evaluate("getComputedStyle(document.body).getPropertyValue('--pg').trim()"); await pg.click('a[data-view=overview]')
+    ok(c1[0] == 'pop' and c1[1] and c2 and c1[1] != c2, f'預設是「繽紛」風格，每一頁有自己的顏色（今日 {c1[1]}、提醒 {c2}）')
     ok(await pg.is_visible('#demoBar') and '示範' in await pg.text_content('#brandSub') and await pg.evaluate(VAULT_CT) is None, '沒有資料也能看示範；畫面上有「示範資料」提示，裝置上沒有存任何東西')
     for v in ('dashboard', 'compare', 'reps', 'report', 'pivot', 'customers', 'products', 'data'):
         await pg.click(f'a[data-view={v}]'); await pg.wait_for_timeout(300)

@@ -91,12 +91,12 @@
     if (partial && (per === 'month' || per === 'ytd' || per === 'r12')) alerts.push({ lv: 'warn', t: `${ymLabel(ref)} 的資料筆數比上個月少很多，可能還沒滿月`, s: '比較時請把基準月改成上一個完整的月份。' });
     if (hasPrev) {
       const g = chgPct(cur.net, prev.net);
-      if (g != null && g <= -0.1) alerts.push({ lv: 'bad', t: `淨銷售比去年同期少 ${fmt.pct(-g)}`, s: '看下面「排名」，切換「比去年同期」排序，找出掉最多的客戶、業務或商品。' });
+      if (g != null && g <= -0.1) alerts.push({ lv: 'bad', t: `淨銷售比去年同期少 ${fmt.pct(-g)}`, s: '到「比較」頁的「自選兩段期間」，依客戶、業務或款號拆開，找出掉最多的。' });
       else if (g != null && g >= 0.1) alerts.push({ lv: 'good', t: `淨銷售比去年同期成長 ${fmt.pct(g)}`, s: '確認成長是來自少數大客戶，還是普遍成長。' });
       const dm = mg(cur) - mg(prev);
-      if (isFinite(dm) && dm <= -0.01) alerts.push({ lv: 'bad', t: `毛利率下降 ${nf1.format(-dm * 100)} 個百分點（${fmt.pct(mg(prev))} → ${fmt.pct(mg(cur))}）`, s: '檢查進貨成本、折扣，以及低毛利商品是否賣得比較多（看排名的「毛利率」欄）。' });
+      if (isFinite(dm) && dm <= -0.01) alerts.push({ lv: 'bad', t: `毛利率下降 ${nf1.format(-dm * 100)} 個百分點（${fmt.pct(mg(prev))} → ${fmt.pct(mg(cur))}）`, s: '檢查進貨成本、折扣，以及低毛利商品是否賣得比較多（到「比較」頁看毛利率，依款號拆開）。' });
       const dr = rr(cur) - rr(prev);
-      if (isFinite(dr) && dr >= 0.01) alerts.push({ lv: 'bad', t: `退貨率上升 ${nf1.format(dr * 100)} 個百分點（${fmt.pct(rr(prev))} → ${fmt.pct(rr(cur))}）`, s: '在「商品結構」看退貨率最高的款號，或到樞紐分析用「類別 × 年 退貨率」。' });
+      if (isFinite(dr) && dr >= 0.01) alerts.push({ lv: 'bad', t: `退貨率上升 ${nf1.format(dr * 100)} 個百分點（${fmt.pct(rr(prev))} → ${fmt.pct(rr(cur))}）`, s: '看下面「退貨率最高的款號」，或到「比較」頁看退貨率。' });
     }
     if (top10Share != null && top10Share > 0.5) alerts.push({ lv: 'warn', t: `前 10 大客戶佔淨銷售 ${fmt.pct(top10Share)}`, s: '太依賴少數客戶，建議分散：開發新客戶、加強中型客戶。' });
 
@@ -123,90 +123,19 @@
     html.push(`<p class="db-note">月份依：<b>${(E.ds.dates && E.ds.dates.dated && E.ds.dates.mode === 'date') ? '實際出貨／退貨日期' : '單號'}</b>　期間：<b>${periodText(F)}</b>${hasPrev ? `　對照：去年同期 ${periodText(P)}` : '　（全部期間沒有去年同期可比）'}</p>`);
     // 提醒（後面 BEP、應收、分類表會再補）
     html.push('<div class="panel" id="dbAlerts"></div>');
-    // 核心數字
-    const avgOrder = rate(cur.sales, cur.orders), prevAvgOrder = prev ? rate(prev.sales, prev.orders) : null;
-    html.push(`<div class="kpis db-kpis">${[
-      card('net', '淨銷售額', fmt.big(cur.net), `銷貨 ${fmt.big(cur.sales)}・退貨 ${fmt.big(cur.returns)}`, hasPrev ? `${vsTxt} ${arrow(chgPct(cur.net, prev.net))}` : ''),
-      card('netProfit', '淨毛利', fmt.big(cur.netProfit), `淨毛利率 ${fmt.pct(rate(cur.netProfit, cur.net))}`, hasPrev ? `比去年同期 ${arrow(chgPct(cur.netProfit, prev.netProfit))}` : ''),
-      card('margin', '毛利率', fmt.pct(mg(cur)), hasPrev ? `去年同期 ${fmt.pct(mg(prev))}` : '', hasPrev ? arrow(mg(cur) - mg(prev), true, 'pp') : ''),
-      card('retRate', '退貨率', fmt.pct(rr(cur)), hasPrev ? `去年同期 ${fmt.pct(rr(prev))}` : '', hasPrev ? arrow(rr(cur) - rr(prev), false, 'pp') : ''),
-      card('orders', '出貨單數', nf0.format(cur.orders), `平均每單 ${fmt.money(avgOrder)}${hasPrev ? '（去年 ' + fmt.money(prevAvgOrder) + '）' : ''}`, hasPrev ? arrow(chgPct(cur.orders, prev.orders)) : ''),
-      card('custs', '交易客戶數', nf0.format(cCur.length), `新客戶 ${nf0.format(newCust.length)} 位${hasPrev ? '（去年同期 ' + nf0.format(prevNewCust.length) + ' 位）' : ''}`, hasPrev ? arrow(chgPct(cCur.length, cPrev.length)) : ''),
-      card('top10', '前 10 大客戶佔比', fmt.pct(top10Share), `共 ${nf0.format(cCur.length)} 位客戶`, hasPrev ? arrow(top10Share - prevTop10Share, false, 'pp') : ''),
-    ].join('')}</div>`);
-
-    // 排名
-    const rd = S.dash.rankDim, rs = S.dash.rankSort;
-    html.push(`<div class="panel"><div class="panel-head"><h2>排名與毛利貢獻</h2>
-      <div class="row"><div class="seg" id="dbRankDim">${RANK_DIMS.map((d) => `<button data-v="${d.key}" class="${d.key === rd ? 'on' : ''}">${d.label}</button>`).join('')}</div>
-      <div class="seg" id="dbRankSort"><button data-v="net" class="${rs === 'net' ? 'on' : ''}">依淨銷售</button><button data-v="netProfit" class="${rs === 'netProfit' ? 'on' : ''}">依毛利貢獻</button>${hasPrev ? `<button data-v="diff" class="${rs === 'diff' ? 'on' : ''}">比去年少最多</button>` : ''}</div></div></div>
-      ${help('rank')}<div id="dbRank" class="db-scroll"></div></div>`);
-
-    // 佔比
-    html.push(`<div class="panel"><div class="panel-head"><h2>佔比：區域、商品大類、商品類別</h2><span class="legend-inline"><i class="b1"></i>淨銷售 <i class="b2"></i>淨毛利</span></div>${help('share')}
-      <div class="grid3" id="dbShare"></div></div>`);
-
-    // 毛利率、退貨率的每年・每季・每月比較搬到「比較」頁
-    html.push(`<p class="hint db-more">想看每年、每季、每月的完整比較（淨銷售、毛利率、退貨率、客戶數…），到 <a href="#compare">比較</a> 頁；每位業務的情形在 <a href="#reps">業務</a> 頁。</p>`);
-
-    // BEP、應收帳款
-    html.push('<div class="grid2"><div class="panel" id="dbBep"></div><div class="panel" id="dbDso"></div></div>');
+    // 這一頁只放「要處理的事」；總數、排名、佔比在「比較」「圖表報告」
     // 客戶動態、商品結構
     html.push(`<div class="panel"><div class="panel-head"><h2>客戶動態</h2></div>${help('custMove')}<div class="grid3" id="dbCust"></div></div>`);
+    html.push(`<div class="panel"><div class="panel-head"><h2>該來買、還沒來的客戶</h2></div><p class="hint">已經超過平常購買間隔 1.5 倍沒來買（用實際出貨日期算，至少買過 3 天、180 天內買過），依歷史銷貨排序，適合業務打電話。</p><div id="dbDue" class="db-scroll"></div></div>`);
     html.push(`<div class="panel"><div class="panel-head"><h2>需要跟進</h2></div>${help('follow')}<div class="grid2 tight">
       <div><div class="panel-head"><h3>漸漸沒來的客戶</h3><a href="#customers" class="link" data-goto="cust-idle">看全部</a></div><div id="dbIdleCust" class="db-scroll"></div></div>
       <div><div class="panel-head"><h3>滯銷商品</h3><a href="#products" class="link" data-goto="prod-idle">看全部</a></div><div id="dbIdleProd" class="db-scroll"></div></div></div></div>`);
-    html.push(`<div class="panel"><div class="panel-head"><h2>商品結構（款號）</h2></div>${help('abc')}<div id="dbAbc"></div></div>`);
+    html.push(`<div class="panel"><div class="panel-head"><h2>退貨率最高的款號</h2></div><p class="hint">銷售額至少佔 0.5% 的款號裡，退貨率最高的。要檢查品質或尺寸。</p><div id="dbHighRet" class="db-scroll"></div></div>`);
+    html.push('<div class="grid2"><div class="panel" id="dbBep"></div><div class="panel" id="dbDso"></div></div>');
     html.push('<div class="panel" id="dbMissing"></div>');
     $('#dbBody').innerHTML = html.join('');
     $('#dbBody').ontoggle = null;
     $$('.db-kpi .explain').forEach((d) => d.addEventListener('toggle', () => { if (d.open) $$('.db-kpi .explain[open]').forEach((o) => { if (o !== d) o.open = false; }); }));
-
-    // ---------- 排名表 ----------
-    const drawRank = () => {
-      const dim = S.dash.rankDim, sortKey = S.dash.rankSort;
-      let rows = rankRows(dim);
-      if (sortKey === 'diff') rows.sort((a, b) => a.diff - b.diff); else rows.sort((a, b) => b[sortKey] - a[sortKey]);
-      let cum = 0; const shareKey = sortKey === 'netProfit' ? 'npShare' : 'share';
-      rows.forEach((r, i) => { r.rank = i + 1; cum += r[shareKey] || 0; r.cum = cum; });
-      const label = RANK_DIMS.find((d) => d.key === dim).label;
-      const cols = [
-        { key: 'rank', label: '#', n: 1 },
-        { key: 'label', label, cls: 'lbl' },
-        { key: 'net', label: '淨銷售', n: 1, fmt: 'money' },
-        { key: 'share', label: '銷售佔比', n: 1, render: (r) => `<span class="pbar"><i style="width:${Math.max(0, Math.min(100, (r.share || 0) * 100))}%"></i>${fmt.pct(r.share)}</span>` },
-        { key: 'netProfit', label: '毛利貢獻', n: 1, fmt: 'money' },
-        { key: 'npShare', label: '毛利貢獻率', n: 1, render: (r) => `<span class="pbar p2"><i style="width:${Math.max(0, Math.min(100, (r.npShare || 0) * 100))}%"></i>${fmt.pct(r.npShare)}</span>` },
-        { key: 'cum', label: sortKey === 'netProfit' ? '累計(毛利)' : '累計(銷售)', n: 1, fmt: 'pct' },
-        { key: 'margin', label: '毛利率', n: 1, fmt: 'pct' },
-        { key: 'retRate', label: '退貨率', n: 1, fmt: 'pct' },
-      ];
-      if (hasPrev) cols.push({ key: 'yoy', label: '比去年同期', n: 1, render: (r) => (r.prevNet ? arrow(r.yoy) : '<span class="muted">新</span>') });
-      table($('#dbRank'), cols, rows, {
-        limit: 20,
-        onRow: (r) => ctx.drill(dim, r.code, r.label),
-        empty: '這段期間沒有資料',
-      });
-    };
-    drawRank();
-    $('#dbRankDim').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; S.dash.rankDim = b.dataset.v; ctx.saveDash(); $$('#dbRankDim button').forEach((x) => x.classList.toggle('on', x === b)); drawRank(); };
-    $('#dbRankSort').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; S.dash.rankSort = b.dataset.v; ctx.saveDash(); $$('#dbRankSort button').forEach((x) => x.classList.toggle('on', x === b)); drawRank(); };
-
-    // ---------- 佔比 ----------
-    const shareBlock = (dim, title, max = 8) => {
-      const rows = rankRows(dim).sort((a, b) => b.net - a.net);
-      let shown = rows.slice(0, max);
-      if (rows.length > max) {
-        const rest = rows.slice(max);
-        shown = shown.concat([{ label: `其他 ${rest.length} 項`, share: rest.reduce((s, r) => s + (r.share || 0), 0), npShare: rest.reduce((s, r) => s + (r.npShare || 0), 0), net: rest.reduce((s, r) => s + r.net, 0), other: true }]);
-      }
-      const w = (v) => Math.max(0, Math.min(100, (v || 0) * 100));
-      return `<div class="share"><h3>${title}</h3>${shown.map((r) => `<div class="srow${r.other ? ' other' : ''}" ${r.other ? '' : `data-dim="${dim}" data-code="${r.code}" data-label="${esc(r.label)}"`} title="淨銷售 ${fmt.money(r.net)}">
-        <div class="sl"><span>${esc(r.label)}</span><b>${fmt.pct(r.share)}</b></div>
-        <div class="sb"><i class="b1" style="width:${w(r.share)}%"></i></div><div class="sb thin"><i class="b2" style="width:${w(r.npShare)}%"></i><em>毛利 ${fmt.pct(r.npShare)}</em></div></div>`).join('')}</div>`;
-    };
-    $('#dbShare').innerHTML = shareBlock('region', '區域') + shareBlock('big', '商品大類') + shareBlock('cat', '商品類別（前 8）');
-    $('#dbShare').onclick = (e) => { const r = e.target.closest('.srow[data-dim]'); if (r) ctx.drill(r.dataset.dim, +r.dataset.code, r.dataset.label); };
 
     // ---------- 損益兩平 ----------
     const meta = S.meta || {};
@@ -291,22 +220,29 @@
     ], idleP, { onRow: (r) => ctx.openProduct(r, 'sku2'), empty: '沒有' });
     $$('#dbBody [data-goto]').forEach((a) => { a.onclick = (e) => { e.preventDefault(); ctx.gotoIdle(a.dataset.goto); }; });
 
-    // ---------- 商品結構 ----------
-    const st = rankRows('style').sort((a, b) => b.net - a.net);
-    let acc = 0, nA = 0; const totPos = st.reduce((s, r) => s + Math.max(0, r.net), 0);
-    for (const r of st) { if (acc >= totPos * 0.8) break; acc += Math.max(0, r.net); nA++; }
-    const prodAll = E.products({}, ref, 'style').list;
-    const firstStyle = new Map(prodAll.map((p) => [p.code, p.first]));
-    const newStyles = st.filter((r) => { const f = firstStyle.get(r.label); return f >= F[0] && f <= F[1]; });
-    const newAmt = newStyles.reduce((s, r) => s + r.net, 0);
+    // ---------- 退貨率最高的款號 ----------
+    const st = rankRows('style');
+    const totPos = st.reduce((s2, r) => s2 + Math.max(0, r.net), 0);
     const highRet = st.filter((r) => r.sales >= totPos * 0.005 && r.retRate > 0).sort((a, b) => b.retRate - a.retRate).slice(0, 8);
-    $('#dbAbc').innerHTML = `<div class="kpis three">
-      <div class="kpi"><div class="k">撐起 80% 業績的款號</div><div class="v">${nf0.format(nA)} 個</div><span class="d">共 ${nf0.format(st.length)} 個款號有銷售，佔 ${fmt.pct(rate(nA, st.length))}</span></div>
-      <div class="kpi"><div class="k">新品（這段期間第一次賣出）</div><div class="v">${nf0.format(newStyles.length)} 個</div><span class="d">淨銷售 ${fmt.big(newAmt)}，佔 ${fmt.pct(rate(newAmt, cur.net))}</span></div>
-      <div class="kpi"><div class="k">只賣一點點的款號</div><div class="v">${nf0.format(st.filter((r) => r.share != null && r.share < 0.0005).length)} 個</div><span class="d">各佔不到 0.05% 的淨銷售</span></div></div>
-      <h3>退貨率最高的款號（銷售額至少佔 0.5%）</h3><div id="dbHighRet"></div>`;
     table($('#dbHighRet'), [{ key: 'label', label: '款號', cls: 'lbl' }, { key: 'sales', label: '銷貨', n: 1, fmt: 'money' }, { key: 'returns', label: '退貨', n: 1, fmt: 'money' }, { key: 'retRate', label: '退貨率', n: 1, fmt: 'pct' }],
       highRet, { onRow: (r) => ctx.drill('style', r.code, r.label), empty: '沒有' });
+
+    // ---------- 該來買、還沒來的客戶（需要實際日期）----------
+    const D = E.maxSalesDate;
+    if (!D) $('#dbDue').innerHTML = '<p class="hint">需要實際出貨日期（系統原始資料 JMSSAL／JMSSBK，或補上日期的總表）才算得出來。</p>';
+    else {
+      const today = root.EngineMeta.dayNum(D);
+      const due = allCust.filter((c) => c.freq != null && c.buyDays >= 3 && c.lastDate && c.lastDate <= D)
+        .map((c) => ({ ...c, since: today - root.EngineMeta.dayNum(c.lastDate) })).filter((c) => c.since > c.freq * 1.5 && c.since <= 180).sort((a, b) => b.sales - a.sales);
+      table($('#dbDue'), [
+        { key: 'name', label: '客戶', cls: 'lbl', get: (r) => r.code + ' ' + r.name },
+        { key: 'rep', label: '業務', render: (r) => esc(repName(r.rep)) },
+        { key: 'freq', label: '平常每幾天', n: 1, render: (r) => nf0.format(r.freq) + ' 天' },
+        { key: 'since', label: '已經幾天沒買', n: 1, render: (r) => `<b>${nf0.format(r.since)}</b> 天` },
+        { key: 'sales', label: '歷史銷貨', n: 1, fmt: 'money' },
+      ], due, { limit: 10, onRow: open, empty: '沒有：客戶都在平常的時間內有來買' });
+      if (due.length) alerts.push({ lv: 'warn', t: `${due.length} 位客戶超過平常的購買間隔還沒來買`, s: '見「該來買、還沒來的客戶」，請業務聯絡。' });
+    }
 
     // ---------- 缺少的資料與說明 ----------
     const miss = [];
@@ -339,7 +275,7 @@
     $('#dbAlerts').innerHTML = `<div class="panel-head"><h2>重點提醒</h2></div>` + (alerts.length
       ? `<ul class="alerts">${alerts.map((a) => `<li class="${a.lv}"><span class="tag">${lvName[a.lv]}</span><div><b>${a.t}</b><p>${a.s}</p></div></li>`).join('')}</ul>`
       : '<p class="hint">這段期間沒有特別需要注意的地方。</p>');
-    return { cur, prev, alerts, top10Share, newCust: newCust.length, nA };
+    return { cur, prev, alerts, top10Share, newCust: newCust.length };
   }
 
   root.Dashboard = { render, PERIODS, addM, range, periodText };

@@ -62,10 +62,10 @@
   // ---------- 主題 ----------
   function setTheme(t) {
     document.documentElement.dataset.theme = t;
-    try { localStorage.setItem('dv.theme', t); } catch (e) { /* */ }
+    try { localStorage.setItem('dv.look', t); } catch (e) { /* */ }
     $$('#themePick button').forEach((b) => b.classList.toggle('on', b.dataset.theme === t));
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.content = { indigo: '#26437A', night: '#0E1726', market: '#13805F' }[t];
+    if (meta) meta.content = { pop: '#4F46E5', indigo: '#26437A', night: '#0E1726', market: '#13805F' }[t];
     if (S.E) setTimeout(() => { if (['overview', 'dashboard', 'compare', 'reps', 'report'].includes(S.view)) renderView(); }, 30);
   }
 
@@ -75,6 +75,7 @@
     if (!VIEWS.includes(view)) view = 'overview';
     if (!S.E && view !== 'data') view = 'data';
     S.view = view;
+    document.body.dataset.view = view; // 每一頁有自己的顏色（繽紛風格）
     $$('.view').forEach((v) => { v.hidden = v.id !== 'view-' + view; });
     $$('.tabs a').forEach((a) => a.classList.toggle('on', a.dataset.view === view));
     if (location.hash.slice(1) !== view) history.replaceState(null, '', '#' + view);
@@ -290,7 +291,7 @@
     };
     window.__dash = Dashboard.render(ctx); // 測試用：儀表板算出的數字
     ctx.after.forEach((f) => f());
-    $('#dbSub').textContent = `以 ${ymLabel(refYm())} 為基準月。點排名、佔比的項目可以看明細；每個數字下面的 ⓘ 有說明。`;
+    $('#dbSub').textContent = `只列出要處理的事。以 ${ymLabel(refYm())} 為基準月；總數和排名在「比較」，開會用的在「圖表報告」。`;
   }
   // =====================================================
   // 圖表報告（計算與版面在 js/report.js）：簡報模式、列印／存成 PDF
@@ -1260,7 +1261,7 @@
 
   // ---------- 啟動 ----------
   async function boot() {
-    setTheme(document.documentElement.dataset.theme || 'indigo');
+    setTheme(document.documentElement.dataset.theme || 'pop');
     bindPivot(); bindCustomers(); bindProducts(); bindData(); bindReport(); bindReps();
     $('#tdDay').addEventListener('change', (e) => { S.today.date = +e.target.value; renderToday(); });
     $('#demoStart').addEventListener('click', () => { startDemo().catch((e) => toast('示範資料載入失敗：' + e.message)); });

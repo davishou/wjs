@@ -32,9 +32,6 @@
         <p class="hint">總表沒有 DELIVDATE。改匯入系統原始資料 JMSSAL、JMSSBK（.DBF），或用總表更新工具補上「實際出貨日期」欄，這一頁就會顯示每天的業績、本月累計和上月同期的比較。下面先用月份顯示。</p></div>
         <div class="kpis">${[
           kpi(`${ymLabel(ref)} 淨銷售`, fmt.big(cur.net), `比去年同月 ${arrow(chg(cur.net, ly.net))}`),
-          kpi(`${y} 年累計淨銷售`, fmt.big(ytd.net), `比去年同期 ${arrow(chg(ytd.net, ytdP.net))}`),
-          kpi(`${y} 年毛利率`, fmt.pct(rate(ytd.profit, ytd.sales)), `去年同期 ${fmt.pct(rate(ytdP.profit, ytdP.sales))}`),
-          kpi(`${y} 年退貨率`, fmt.pct(rate(ytd.returns, ytd.sales)), `去年同期 ${fmt.pct(rate(ytdP.returns, ytdP.sales))}`),
           kpi(`${ymLabel(ref)} 交易客戶`, nf0.format(cur.custs), `去年同月 ${nf0.format(ly.custs)} 位`),
         ].join('')}</div>
         <div class="panel"><div class="panel-head"><h2>每月淨銷售（近 24 個月）</h2></div><div class="chart" id="tdMonthChart"></div></div>`;
@@ -75,21 +72,16 @@
 
     const html = [];
     html.push(`<div class="kpis td-kpis">${[
-      kpi(`${dayLabel(D)}（${weekday(D)}）淨銷售`, fmt.big(T.day.net), `${nf0.format(T.day.orders)} 張單・${nf0.format(T.day.custs)} 位客戶`, avgDay ? `比本月平均每個出貨日 ${arrow(chg(T.day.net, avgDay))}` : ''),
-      kpi(`本月累計（${m}/1～${m}/${dd}）`, fmt.big(T.mtd.net), hasPm ? `比上月同期 ${arrow(chg(T.mtd.net, T.pmtd.net))}` : '上個月沒有資料', hasLm ? `比去年同月同期 ${arrow(chg(T.mtd.net, T.lmtd.net))}` : '去年同月沒有資料'),
+      kpi(`${dayLabel(D)}（${weekday(D)}）`, fmt.big(T.day.net), `${nf0.format(T.day.orders)} 張單・${nf0.format(T.day.custs)} 位客戶`, avgDay ? `比本月平均每個出貨日 ${arrow(chg(T.day.net, avgDay))}` : ''),
+      kpi(`本月到今天（${m}/1～${m}/${dd}）`, fmt.big(T.mtd.net), `${nf0.format(T.mtd.orders)} 張單・${nf0.format(T.mtd.custs)} 位客戶`, hasPm ? `比上月同期 ${arrow(chg(T.mtd.net, T.pmtd.net))}` : '上個月沒有資料', hasLm ? `比去年同月同期 ${arrow(chg(T.mtd.net, T.lmtd.net))}` : '去年同月沒有資料'),
       kpi(`本月預估${dd >= dim ? '（已過完）' : ''}`, fmt.big(dd >= dim ? T.mtd.net : pace), dd >= dim ? '' : `照目前每天的速度估算到 ${m}/${dim}`, hasLm ? `去年 ${m} 月全月 ${fmt.big(T.lmFull.net)}` : '', hasPm ? `上個月全月 ${fmt.big(T.pmFull.net)}` : ''),
-      kpi(`${y} 年累計（到 ${m}/${dd}）`, fmt.big(T.ytd.net), T.lytd.sales ? `比去年同期 ${arrow(chg(T.ytd.net, T.lytd.net))}` : '去年同期沒有資料'),
-      kpi('本月毛利率', fmt.pct(rate(T.mtd.profit, T.mtd.sales)), hasPm ? `上月同期 ${fmt.pct(rate(T.pmtd.profit, T.pmtd.sales))} ${arrow(rate(T.mtd.profit, T.mtd.sales) - rate(T.pmtd.profit, T.pmtd.sales), true, true)}` : ''),
-      kpi('本月退貨率', fmt.pct(rate(T.mtd.returns, T.mtd.sales)), hasPm ? `上月同期 ${fmt.pct(rate(T.pmtd.returns, T.pmtd.sales))} ${arrow(rate(T.mtd.returns, T.mtd.sales) - rate(T.pmtd.returns, T.pmtd.sales), false, true)}` : ''),
-      kpi('本月交易客戶', nf0.format(T.mtd.custs), hasLm ? `去年同月同期 ${nf0.format(T.lmtd.custs)} 位` : '', `出貨 ${nf0.format(T.mtd.orders)} 張單`),
     ].join('')}</div>`);
     html.push(`<div class="grid2"><div class="panel"><div class="panel-head"><h2>本月累計走勢</h2></div><p class="hint">每一天加起來的淨銷售。本月的線在上個月、去年同月的上面，就是表現比較好。</p><div class="chart" id="tdCumChart"></div></div>
       <div class="panel"><div class="panel-head"><h2>最近 30 天每天的淨銷售</h2></div><p class="hint">沒有出貨的日子（例如假日）是空的。滑鼠移到長條上看數字。</p><div class="chart" id="tdDayChart"></div></div></div>`);
     html.push(`<div class="panel"><div class="panel-head"><h2>本月各業務（${m}/1～${m}/${dd}）</h2><a href="#reps" class="link" id="tdAllReps">業務頁</a></div><p class="hint">點一列看那位業務的詳細情形。</p><div id="tdReps" class="db-scroll"></div></div>`);
     html.push(`<div class="grid2"><div class="panel"><div class="panel-head"><h2>本月前 10 大客戶</h2></div><div id="tdCust" class="db-scroll"></div></div>
       <div class="panel"><div class="panel-head"><h2>最近的出貨日</h2></div><p class="hint">點一列切換到那一天。</p><div id="tdRecent" class="db-scroll"></div></div></div>`);
-    html.push(`<div class="grid2"><div class="panel"><div class="panel-head"><h2>${dayLabel(D)} 的單</h2></div><div id="tdOrders" class="db-scroll"></div></div>
-      <div class="panel"><div class="panel-head"><h2>該來買、還沒來的客戶</h2></div><p class="hint">已經超過平常購買間隔 1.5 倍沒來買（至少買過 3 天、180 天內買過），依歷史銷貨排序，適合業務今天打電話。</p><div id="tdDue" class="db-scroll"></div></div></div>`);
+    html.push(`<div class="panel"><div class="panel-head"><h2>${dayLabel(D)} 的單</h2></div><div id="tdOrders" class="db-scroll"></div></div>`);
     box.innerHTML = html.join('');
 
     // ---------- 圖 ----------
@@ -158,19 +150,7 @@
       { key: 'rep', label: '業務', render: (r) => esc(repName(r.rep)) }, { key: 'lines', label: '品項', n: 1, fmt: 'int' }, { key: 'amt', label: '金額', n: 1, fmt: 'money' },
     ], ords, { limit: 15, onRow: openCk, empty: '這一天沒有單' });
 
-    // ---------- 該來買、還沒來的客戶 ----------
-    const today = dayNum(D);
-    const due = E.customers({}, ctx.refYm()).list.filter((c) => c.freq != null && c.buyDays >= 3 && c.lastDate && c.lastDate <= D)
-      .map((c) => ({ ...c, since: today - dayNum(c.lastDate) })).filter((c) => c.since > c.freq * 1.5 && c.since <= 180).sort((a, b) => b.sales - a.sales).slice(0, 10);
-    table($('#tdDue'), [
-      { key: 'name', label: '客戶', cls: 'lbl', get: (r) => r.code + ' ' + r.name },
-      { key: 'rep', label: '業務', render: (r) => esc(repName(r.rep)) },
-      { key: 'freq', label: '平常每幾天', n: 1, render: (r) => nf0.format(r.freq) + ' 天' },
-      { key: 'since', label: '已經幾天沒買', n: 1, render: (r) => `<b>${nf0.format(r.since)}</b> 天` },
-      { key: 'sales', label: '歷史銷貨', n: 1, fmt: 'money' },
-    ], due, { onRow: (r) => ctx.openCustomer(r), empty: '沒有：客戶都在平常的時間內有來買' });
-
-    return { mode: 'day', date: D, T, reps: reps.map((r) => ({ rep: r.rep, net: r.net, pnet: r.pnet, lnet: r.lnet })), due: due.length, redraw: drawCharts };
+    return { mode: 'day', date: D, T, reps: reps.map((r) => ({ rep: r.rep, net: r.net, pnet: r.pnet, lnet: r.lnet })), redraw: drawCharts };
   }
 
   root.Today = { render };
