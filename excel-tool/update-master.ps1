@@ -142,7 +142,9 @@ function Get-DateCol($ws, $kind, [int]$lastCol, $lo, [bool]$create) {
     $loLast = $lo.Range.Column + $lo.Range.Columns.Count - 1
     if ($loLast -ne $c - 1) { return @{ Col = 0; Msg = "表格「$($lo.Name)」沒有剛好到公式欄的最後一欄，沒有加入「$($kind.DateHead)」欄，這次的實際日期沒有寫進總表。" } }
   }
-  $ws.Cells.Item(1, $c).Value2 = $kind.DateHead
+  # 表頭也用「表格（1 格）」寫入：在某些電腦上，先用 Value2 寫入單一文字之後，PowerShell 就無法再用 Value2 寫入整批資料
+  $h1 = New-Object 'object[,]' 1, 1; $h1[0, 0] = [string]$kind.DateHead
+  $ws.Cells.Item(1, $c).Value2 = $h1
   if ($lo) { [void]$lo.Resize((Rng $ws $lo.Range.Row $lo.Range.Column ($lo.Range.Row + $lo.Range.Rows.Count - 1) $c)) }
   try { $ws.Columns.Item($c).ColumnWidth = 13 } catch {}
   return @{ Col = $c; Msg = "「$($kind.Sheet)」新增 $letter 欄「$($kind.DateHead)」（原始資料最後一欄 DELIVDATE）" }
@@ -290,7 +292,7 @@ function Merge-Kind($wb, $kind, $src) {
     if ($dateFill) {
       Say "[$($kind.Label)] 補上總表裡 $dateFill 筆的實際日期…"
       $darr = New-Object 'object[,]' ($last - 1), 1   # 和其他寫入一樣用 0 起算的陣列
-      for ($i = 1; $i -le $last - 1; $i++) { $darr[($i - 1), 0] = $dv[$i, 1] }
+      for ($i = 1; $i -le $last - 1; $i++) { $darr[($i - 1), 0] = Unwrap $dv[$i, 1] }   # Unwrap：見函式說明
       (Rng $ws 2 $dc $last $dc).Value2 = $darr
     }
     $dv = $null
@@ -325,7 +327,7 @@ function Merge-Kind($wb, $kind, $src) {
     foreach ($f in $fcols) { Set-R1C1 (Rng $ws $start $f.Col $end $f.Col) $f.R1C1 }
     if ($dc) {
       $da = New-Object 'object[,]' $add.Count, 1
-      for ($r = 0; $r -lt $add.Count; $r++) { $d = $add[$r][$n]; if ($null -ne $d) { $da[$r, 0] = [string]$d; $dateNew++ } }
+      for ($r = 0; $r -lt $add.Count; $r++) { $d = $add[$r][$n]; if ($null -ne $d) { $da[$r, 0] = Unwrap ([string]$d); $dateNew++ } }
       (Rng $ws $start $dc $end $dc).NumberFormat = '@'
       (Rng $ws $start $dc $end $dc).Value2 = $da
     }
@@ -644,7 +646,7 @@ try {
   if ($ymMax) {
     $ar = $wsSales.Range('AR2'); $old = $ar.Value2; $newYm = NextYm $ymMax
     if ($null -eq $old -or ($old -is [double] -and $old -ge 10000 -and $old -lt 100000)) {
-      $ar.Value2 = [double]$newYm
+      $a1 = New-Object 'object[,]' 1, 1; $a1[0, 0] = [double]$newYm; $ar.Value2 = $a1   # 一樣用 1 格的表格寫入（見 Get-DateCol 的說明）
       $extra.Add("AR2：$(Txt $old) → $newYm（資料到 $ymMax，填下一個月）")
     } else { $extra.Add("AR2 目前是「$(Txt $old)」，看起來不是年月，沒有自動修改，請自己確認。") }
   }
@@ -718,6 +720,7 @@ try {
 } catch {
   $exit = 1
   Say ('發生錯誤：' + $_.Exception.Message)
+  Write-Host ('（給開發者：第 ' + $_.InvocationInfo.ScriptLineNumber + ' 行：' + $_.InvocationInfo.Line.Trim() + '）')
   if (-not $NoUI) { Show-Msg $owner ("發生錯誤，這次的更新沒有存檔（原本的總表沒有改動）：`n`n" + $_.Exception.Message) 'Error' | Out-Null }
 } finally {
   if ($wb) { try { $wb.Close($false) } catch {} }
