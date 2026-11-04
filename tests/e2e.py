@@ -291,9 +291,22 @@ async def dashboard(b):
     ok('毛利率下降 5 個百分點' in al and '丁行' not in al and '1 位去年同期有買的客戶' in al and '1 個商品類別代碼沒有分類' in al, '重點提醒：毛利率下降、可能流失、未分類代碼')
     ok('7004 丁行' in await pg.text_content('#dbCust'), '可能流失名單有丁行（114 年沒再買）')
     ok(await pg.locator('#dbIdleCust').count() == 1 and await pg.locator('#dbCmpBody').count() == 0, '儀表板：「需要跟進」搬進來，毛利率／退貨率比較搬到「比較」頁')
+    # 每個提醒有 2～3 點建議、能跳到背後的數據
+    n_al = await pg.locator('#dbAlerts .alerts > li').count()
+    idea_counts = await pg.evaluate("[...document.querySelectorAll('#dbAlerts .alerts > li')].map(li => li.querySelectorAll('details.ideas ol > li').length)")
+    ok(n_al >= 3 and all(2 <= k <= 3 for k in idea_counts), f'每個提醒都有 2～3 點建議做法：{idea_counts}')
+    jumps = await pg.evaluate("[...document.querySelectorAll('#dbAlerts [data-jump]')].map(b => [b.dataset.jump, !!document.getElementById(b.dataset.jump)])")
+    ok(jumps and all(x[1] for x in jumps), f'「看數據」都連得到下面的數據表：{[x[0] for x in jumps]}')
+    ok(await pg.locator('#dbMarginDrill tbody tr').count() >= 1, '毛利率下降 → 下面多一張「毛利率掉最多的款號」')
+    await pg.click('#dbAlerts [data-jump=dbMarginDrill]'); await pg.wait_for_timeout(900)
+    box = await pg.evaluate("(() => { const r = document.getElementById('dbMarginDrill').getBoundingClientRect(); return [r.top, innerHeight]; })()")
+    ok(0 <= box[0] < box[1] * 0.5, f'按「看數據」會捲到那張表（位置 {box[0]:.0f}）')
+    await pg.screenshot(path=SH + '/21_alert_ideas.png')
+    await pg.evaluate('window.scrollTo(0, 0)')
     await board_page(pg, d, exp)
     await compare_page(pg, exp)
     await reps_page(pg, d)
+    await cust_prod_pages(pg, d)
     await pg.click('a[data-view=overview]'); await pg.wait_for_selector('#tdBody .notice')
     ok('沒有實際出貨日期' in await pg.text_content('#tdBody') and (await pg.evaluate('window.__today'))['mode'] == 'month', '今日：總表沒有實際日期時，說明原因並改用月份')
     await pg.click('a[data-view=dashboard]'); await pg.wait_for_selector('#dbAlerts .alerts')
@@ -409,8 +422,53 @@ async def reps_page(pg, d):
     o = await pg.evaluate('window.__reps')
     ok(o['mode'] == 'one' and o['rep'] == one['rep'] and abs(o['cur']['net'] - one['net']) < 0.01 and await pg.locator('#rsOneYears svg').count() == 1,
        f"業務：搜尋「{one['rep']}」→ 詳細情形，淨銷售 {o['cur']['net']:.0f}，客戶 {o['custs']} 位、每年的每月曲線")
+    ok(abs(sum(o['trend']['cur']) - o['cur']['net']) < 0.01 and await pg.locator('#rsTopCust .hb-row').count() >= 1 and await pg.locator('#rsNewOld svg').count() == 1,
+       f"單一業務：這段期間的走勢加起來 = 淨銷售 {o['cur']['net']:.0f}；前 10 大客戶、新／老客戶圓餅")
     await pg.screenshot(path=SH + '/24_rep.png', full_page=True)
+    for v in ('m', 'r3', 'ly'):
+        await pg.click(f'#rsPeriod button[data-v={v}]'); await pg.wait_for_timeout(300)
+        o2 = await pg.evaluate('window.__reps')
+        ok(abs(sum(o2['trend']['cur']) - o2['cur']['net']) < 0.01 and len(o2['trend']['labels']) == {'m': 1, 'r3': 3, 'ly': 12}[v], f"單一業務切換期間 {v}：{o2['period']}，{len(o2['trend']['labels'])} 根長條，加起來 = 淨銷售 {o2['cur']['net']:.0f}")
+    await pg.click('#rsPeriod button[data-v=custom]'); await pg.wait_for_selector('#rsPeriod select[data-k=from]')
+    await pg.select_option('#rsPeriod select[data-k=from]', '11307'); await pg.wait_for_timeout(300); await pg.select_option('#rsPeriod select[data-k=to]', '11406'); await pg.wait_for_timeout(300)
+    o2 = await pg.evaluate('window.__reps')
+    ok(o2['period'] == '113/07～114/06' and len(o2['trend']['labels']) == 12 and abs(sum(o2['trend']['cur']) - o2['cur']['net']) < 0.01, f"自訂月份 {o2['period']}：圖、數字一起變")
+    await pg.screenshot(path=SH + '/25_rep_custom.png', full_page=True)
+    await pg.click('#rsPeriod button[data-v=ytd]'); await pg.wait_for_timeout(300)
     await pg.click('#rsBack'); await pg.wait_for_selector('#rsBars .hb-row')
+
+
+async def cust_prod_pages(pg, d):
+    """客戶、商品頁：圖和列表跟著期間、篩選、搜尋連動。"""
+    await pg.click('a[data-view=customers]'); await pg.wait_for_selector('#cuTrend svg')
+    ok((await pg.text_content('#cuPeriod .seg button.on')) == '今年累計', '期間在業務、客戶、商品三頁共用（業務頁選的今年累計，客戶頁也是）')
+    c = await pg.evaluate('window.__cust')
+    ok(abs(sum(c['trend']['cur']) - d['cur']['net']) < 0.01 and '期間淨銷售' in await pg.text_content('#cuTable thead'), f"客戶：這段期間的淨銷售加起來 {sum(c['trend']['cur']):.0f} = 全公司 {d['cur']['net']:.0f}，列表多了「期間淨銷售」")
+    ok(c['nNew'] + c['nOld'] >= 1 and len(c['top']) >= 1 and c['top'][0][1] >= c['top'][-1][1], f"客戶：前 15 大客戶、客戶組成（新 {c['nNew']}、老 {c['nOld']}、沒再買 {c['nLost']}）")
+    first = c['top'][0]
+    await pg.fill('#cuSearch', first[0]); await pg.wait_for_timeout(500)
+    c2 = await pg.evaluate('window.__cust')
+    ok(abs(sum(c2['trend']['cur']) - first[1]) < 0.01, f"搜尋「{first[0]}」後，圖只算這位客戶：{sum(c2['trend']['cur']):.0f}")
+    await pg.fill('#cuSearch', ''); await pg.wait_for_timeout(400)
+    await pg.screenshot(path=SH + '/26_customers.png', full_page=True)
+    await pg.click('a[data-view=products]'); await pg.wait_for_selector('#prTrend svg')
+    pr = await pg.evaluate('window.__prod')
+    ok(abs(sum(pr['trend']['cur']) - d['cur']['net']) < 0.01 and '期間淨銷售' in await pg.text_content('#prTable thead'), f"商品：這段期間的淨銷售加起來 = 全公司 {d['cur']['net']:.0f}")
+    await pg.click('#prMetric button[data-v=qty]'); await pg.wait_for_timeout(300)
+    ok('賣出數' in await pg.text_content('#prCharts h2'), '商品：可以切換成看賣出數（件）')
+    await pg.click('#prBig .dn-legend li.click'); await pg.wait_for_timeout(400)
+    ok(await pg.locator('#prFilters .chip').count() >= 1, '商品：點大類圓餅 → 加上那一塊的篩選')
+    await pg.screenshot(path=SH + '/27_products.png', full_page=True)
+    await pg.click('#prFilters .chip .x'); await pg.wait_for_timeout(300)
+    await pg.click('#prMetric button[data-v=net]'); await pg.wait_for_timeout(200)
+    # 左側選單分區塊
+    ok(await pg.locator('.tab-group').count() == 4 and await pg.is_visible('.tab-group.g1 .tg-label'), '左側選單分成 4 區（每天看、分析、報告與工具、設定）')
+
+
+def mf_rows():
+    sys.path.insert(0, HERE)
+    import make_fixtures as mf
+    return mf.raw_rows()
 
 
 def expected_raw():
@@ -479,6 +537,17 @@ async def raw_import(b):
     await pg.screenshot(path=SH + '/32_today.png', full_page=True)
     await pg.click('#tdRepBars .hb-row'); await pg.wait_for_selector('#rsBack')
     ok((await pg.evaluate('window.__reps'))['mode'] == 'one', '今日：點業務的橫條 → 業務頁的詳細情形')
+    # 有實際日期：近 30 天每天一根、近 90 天每週一根，加起來等於那段日期的淨銷售
+    await pg.click('a[data-view=customers]'); await pg.click('#cuPeriod button[data-v=d30]'); await pg.wait_for_timeout(400)
+    cw = await pg.evaluate('window.__cust')
+    lo = int(cw['period'].split('～')[0].replace('/', '')); hi = int(cw['period'].split('～')[1].replace('/', ''))
+    want = sum(r['SALEGET'] for r in mf_rows()[0] if lo <= int(r['DELIVDATE']) <= hi) - sum(r['SALEGET'] for r in mf_rows()[1] if lo <= int(r['DELIVDATE']) <= hi)
+    ok(cw['trend']['unit'] == 'day' and len(cw['trend']['labels']) == 30 and abs(sum(cw['trend']['cur']) - want) < 0.01, f"近 30 天（{cw['period']}）：每天一根，加起來 {sum(cw['trend']['cur']):.0f}（Python {want:.0f}）")
+    await pg.click('#cuPeriod button[data-v=d90]'); await pg.wait_for_timeout(400)
+    cw = await pg.evaluate('window.__cust')
+    ok(cw['trend']['unit'] == 'week' and len(cw['trend']['labels']) == 13, f"近 90 天：每週一根（{len(cw['trend']['labels'])} 週）")
+    await pg.screenshot(path=SH + '/28_customers_days.png', full_page=True)
+    await pg.click('#cuPeriod button[data-v=r12]'); await pg.wait_for_timeout(300)
     # 切換成依單號
     await pg.click('a[data-view=data]'); await pg.click('#ymMode button[data-v=ord]'); await pg.wait_for_timeout(500)
     got = await pg.evaluate(NET_BY_YM)

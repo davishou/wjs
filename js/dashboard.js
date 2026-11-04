@@ -45,6 +45,24 @@
     abc: ['把款號依淨銷售由高到低排，看要幾個款號就能做到 80% 的業績（ABC 分析）；新品是這段期間才第一次賣出的款號。', '少數款號撐起大部分業績時，這些款號要確保不缺貨；很多款號只賣一點點，可以考慮精簡。退貨率高的款號要檢查品質或尺寸。'],
   };
 
+  // 每一種提醒的建議做法（2～3 點，有些比較天馬行空，給大家討論用）與對應的數據表
+  const IDEAS = {
+    partial: { go: null, ideas: ['把上面的基準月改成上一個完整的月份再比較，數字才公平。', '想看這個月到今天的進度，到「今日」頁看本月累計和本月預估。'] },
+    netDown: { go: 'dbNetDrill', ideas: ['從下面的表找出掉最多的前 3 名客戶，請負責的業務這週內親自拜訪或打電話，問清楚是淡季、改跟別家買，還是商品不對。', '掉最多的款號檢查是不是斷貨、被別家便宜貨取代，或已經退流行；需要時換成新款補上。', '辦一檔「老客戶回購」活動，例如這個月叫貨滿一定金額送贈品或下次折扣，把掉下來的客戶拉回來。'] },
+    netUp: { go: 'dbNetDrill', ideas: ['找出成長最多的客戶和款號，問業務做對了什麼，把同樣的做法複製到同類型的客戶。', '確認熱賣款的庫存跟得上，避免成長到一半斷貨。', '趁客戶叫貨順的時候，搭配推高毛利的商品，讓毛利也一起成長。'] },
+    marginDown: { go: 'dbMarginDrill', ideas: ['下面表中「影響毛利」最多的款號，先和廠商重新議價，或調整售價。', '訂出業務可以給的折扣底線，超過要主管同意。', '把毛利高的款號列成「本月主推」，業務獎金依毛利而不是只看營業額。'] },
+    retUp: { go: 'dbHighRet', ideas: ['退貨率最高的幾個款號抽檢品質和尺寸表，看是不是同一批貨出問題。', '打給退貨最多的客戶問原因，記下來（尺寸不合、瑕疵、賣不掉），一個月後看哪個原因最多。', '出貨時附尺寸對照卡或試穿建議；客戶常因賣不掉而退的，改成小量多次出貨。'] },
+    top10: { go: 'dbTop10Drill', ideas: ['每位業務每個月訂一個開發新客戶的目標（例如 2 家），開發成功給獎金。', '第 11～30 名的中型客戶推「升級方案」：叫貨量到一個門檻給更好的價格或優先出貨。', '和前幾大客戶談年度合作（保證量換優惠），讓大客戶比較不會突然減少叫貨。'] },
+    bepBelow: { go: 'dbBep', ideas: ['把固定費用一項一項列出來，先砍不影響業績的（例如閒置的倉庫、用不到的訂閱）。', '把業績集中推到毛利率高的商品和客戶，淨毛利率提高，損益兩平就會降低。', '訂每月銷售目標 = 損益兩平 × 1.1，每週在「今日」頁看本月預估有沒有達標。'] },
+    bepThin: { go: 'dbBep', ideas: ['訂每月銷售目標 = 損益兩平 × 1.1，每週在「今日」頁看本月預估有沒有達標。', '先準備好淡季的促銷或清庫存活動，避免淡季直接掉到損益兩平以下。'] },
+    bepMonths: { go: 'dbBep', ideas: ['看低於損益兩平的月份是不是每年都一樣（淡季），提早在前一個月辦預購或促銷。', '淡季可以安排新品發表或拜訪遠一點的客戶，把空檔變成開發期。'] },
+    dso: { go: 'dbDso', ideas: ['請會計每週列出逾期 30 天以上的客戶和金額，業務拜訪時順便收款。', '新客戶或常拖款的客戶改成貨到收現、預付，或縮短票期。', '提早付款給 1～2% 折扣，鼓勵客戶早點付。'] },
+    lost: { go: 'dbCust', ideas: ['業務這週照名單一家一家打電話，問「最近怎麼沒叫貨」，把原因記下來。', '寄一份新品目錄或回購優惠給這些客戶。', '如果是被別家搶走，記下對方的價格或款式，回來一起討論要不要跟進。'] },
+    down: { go: 'dbCust', ideas: ['業務主管親自拜訪這幾家大客戶的老闆，了解是生意變差還是改跟別家買。', '針對大客戶推專屬款、獨家顏色，或保留熱賣款給他們。', '一起訂下半年的叫貨計畫，讓我們可以先備貨、給更好的價格。'] },
+    due: { go: 'dbDue', ideas: ['請業務照名單打電話，先問候再問要不要補貨。', '平常每幾天會來的客戶，可以約好固定時間主動送新品目錄給他們（例如每週一傳 LINE）。', '天馬行空：之後可以把這份名單每天自動整理好，傳給負責的業務。'] },
+    unmapped: { go: 'dbMissing', ideas: ['在商品類別代碼表補上這些代碼的名稱和大類，再到「資料與設定」重新匯入代碼表。', '如果是新開的類別，順便決定要算在哪個大類（男、女、童、配件）。'] },
+  };
+
   function render(ctx) {
     const { S, E, fmt, nf0, nf1, esc, $, $$, table, Charts, refYm, repName } = ctx;
     const ref = refYm();
@@ -67,6 +85,8 @@
     const top10 = byNet.slice(0, 10).reduce((s, c) => s + c.net, 0);
     const top10Share = rate(top10, cur.net);
     const prevByNet = cPrev.slice().sort((a, b) => b.net - a.net);
+    const fullCustMap = new Map(allCust.map((c) => [c.ck, c]));
+    const fullCustOf = (ck) => fullCustMap.get(ck);
     const prevTop10Share = hasPrev ? rate(prevByNet.slice(0, 10).reduce((s, c) => s + c.net, 0), prev.net) : null;
     // 期間內每月的資料月數（算每月平均用）
     const monthsIn = E.ymList.filter((v) => v >= F[0] && v <= F[1]);
@@ -88,17 +108,17 @@
 
     // ---------- 重點提醒 ----------
     const alerts = []; // {lv:'bad'|'warn'|'good', t, s}
-    if (partial && (per === 'month' || per === 'ytd' || per === 'r12')) alerts.push({ lv: 'warn', t: `${ymLabel(ref)} 的資料筆數比上個月少很多，可能還沒滿月`, s: '比較時請把基準月改成上一個完整的月份。' });
+    if (partial && (per === 'month' || per === 'ytd' || per === 'r12')) alerts.push({ k: 'partial', lv: 'warn', t: `${ymLabel(ref)} 的資料筆數比上個月少很多，可能還沒滿月`, s: '比較時請把基準月改成上一個完整的月份。' });
     if (hasPrev) {
       const g = chgPct(cur.net, prev.net);
-      if (g != null && g <= -0.1) alerts.push({ lv: 'bad', t: `淨銷售比去年同期少 ${fmt.pct(-g)}`, s: '到「比較」頁的「自選兩段期間」，依客戶、業務或款號拆開，找出掉最多的。' });
-      else if (g != null && g >= 0.1) alerts.push({ lv: 'good', t: `淨銷售比去年同期成長 ${fmt.pct(g)}`, s: '確認成長是來自少數大客戶，還是普遍成長。' });
+      if (g != null && g <= -0.1) alerts.push({ k: 'netDown', lv: 'bad', t: `淨銷售比去年同期少 ${fmt.pct(-g)}`, s: '到「比較」頁的「自選兩段期間」，依客戶、業務或款號拆開，找出掉最多的。' });
+      else if (g != null && g >= 0.1) alerts.push({ k: 'netUp', lv: 'good', t: `淨銷售比去年同期成長 ${fmt.pct(g)}`, s: '確認成長是來自少數大客戶，還是普遍成長。' });
       const dm = mg(cur) - mg(prev);
-      if (isFinite(dm) && dm <= -0.01) alerts.push({ lv: 'bad', t: `毛利率下降 ${nf1.format(-dm * 100)} 個百分點（${fmt.pct(mg(prev))} → ${fmt.pct(mg(cur))}）`, s: '檢查進貨成本、折扣，以及低毛利商品是否賣得比較多（到「比較」頁看毛利率，依款號拆開）。' });
+      if (isFinite(dm) && dm <= -0.01) alerts.push({ k: 'marginDown', lv: 'bad', t: `毛利率下降 ${nf1.format(-dm * 100)} 個百分點（${fmt.pct(mg(prev))} → ${fmt.pct(mg(cur))}）`, s: '檢查進貨成本、折扣，以及低毛利商品是否賣得比較多（到「比較」頁看毛利率，依款號拆開）。' });
       const dr = rr(cur) - rr(prev);
-      if (isFinite(dr) && dr >= 0.01) alerts.push({ lv: 'bad', t: `退貨率上升 ${nf1.format(dr * 100)} 個百分點（${fmt.pct(rr(prev))} → ${fmt.pct(rr(cur))}）`, s: '看下面「退貨率最高的款號」，或到「比較」頁看退貨率。' });
+      if (isFinite(dr) && dr >= 0.01) alerts.push({ k: 'retUp', lv: 'bad', t: `退貨率上升 ${nf1.format(dr * 100)} 個百分點（${fmt.pct(rr(prev))} → ${fmt.pct(rr(cur))}）`, s: '看下面「退貨率最高的款號」，或到「比較」頁看退貨率。' });
     }
-    if (top10Share != null && top10Share > 0.5) alerts.push({ lv: 'warn', t: `前 10 大客戶佔淨銷售 ${fmt.pct(top10Share)}`, s: '太依賴少數客戶，建議分散：開發新客戶、加強中型客戶。' });
+    if (top10Share != null && top10Share > 0.5) alerts.push({ k: 'top10', lv: 'warn', t: `前 10 大客戶佔淨銷售 ${fmt.pct(top10Share)}`, s: '太依賴少數客戶，建議分散：開發新客戶、加強中型客戶。' });
 
     // ---------- 排名 ----------
     function rankRows(dim) {
@@ -123,6 +143,7 @@
     html.push(`<p class="db-note">月份依：<b>${(E.ds.dates && E.ds.dates.dated && E.ds.dates.mode === 'date') ? '實際出貨／退貨日期' : '單號'}</b>　期間：<b>${periodText(F)}</b>${hasPrev ? `　對照：去年同期 ${periodText(P)}` : '　（全部期間沒有去年同期可比）'}</p>`);
     // 提醒（後面 BEP、應收、分類表會再補）
     html.push('<div class="panel" id="dbAlerts"></div>');
+    html.push('<div id="dbDrills"></div>');
     // 這一頁只放「要處理的事」；總數、排名、佔比在「比較」「圖表報告」
     // 客戶動態、商品結構
     html.push(`<div class="panel"><div class="panel-head"><h2>客戶動態</h2></div>${help('custMove')}<div class="grid3" id="dbCust"></div></div>`);
@@ -157,9 +178,9 @@
         <div class="kpi"><div class="k">安全邊際</div><div class="v ${safety < 0 ? 'neg' : ''}">${fmt.pct(safety)}</div><span class="d">期間平均每月淨銷售 ${fmt.big(avg)}</span></div></div>
         <p class="hint">近 12 個月有 <b>${below.length}</b> 個月的淨銷售低於損益兩平${below.length ? '：' + below.map(ymLabel).join('、') : ''}。</p>
         <div class="chart short" id="dbBepChart"></div>`;
-      if (safety < 0) alerts.push({ lv: 'bad', t: `平均每月淨銷售 ${fmt.big(avg)}，低於損益兩平 ${fmt.big(bep)}`, s: '毛利不夠付固定費用：要提高銷售或毛利率，或降低固定費用。' });
-      else if (safety < 0.1) alerts.push({ lv: 'warn', t: `安全邊際只有 ${fmt.pct(safety)}`, s: '業績再掉一點就會虧損。' });
-      if (below.length >= 3) alerts.push({ lv: 'warn', t: `近 12 個月有 ${below.length} 個月低於損益兩平`, s: '看這些月份是淡季還是特殊原因。' });
+      if (safety < 0) alerts.push({ k: 'bepBelow', lv: 'bad', t: `平均每月淨銷售 ${fmt.big(avg)}，低於損益兩平 ${fmt.big(bep)}`, s: '毛利不夠付固定費用：要提高銷售或毛利率，或降低固定費用。' });
+      else if (safety < 0.1) alerts.push({ k: 'bepThin', lv: 'warn', t: `安全邊際只有 ${fmt.pct(safety)}`, s: '業績再掉一點就會虧損。' });
+      if (below.length >= 3) alerts.push({ k: 'bepMonths', lv: 'warn', t: `近 12 個月有 ${below.length} 個月低於損益兩平`, s: '看這些月份是淡季還是特殊原因。' });
       ctx.after.push(() => Charts.render($('#dbBepChart'), { type: 'combo', labels: months12.map(ymLabel), series: [{ name: '淨銷售', kind: 'bar', cls: 'c1', values: months12.map((m) => (mp.get(m) || [0])[0]) }, { name: '損益兩平', kind: 'line', dash: true, cls: 'c8', values: months12.map(() => bep) }], fmt: fmt.money, axisFmt: fmt.axis }));
     }
     $('#dbBep').innerHTML = bepHtml;
@@ -175,8 +196,8 @@
       const dso = s3 > 0 ? ar.amount / s3 * 91 : null;
       dsoHtml += `<div class="kpis two"><div class="kpi"><div class="k">應收帳款天數</div><div class="v ${dso > 90 ? 'neg' : ''}">${dso == null ? '—' : nf0.format(dso) + ' 天'}</div><span class="d">${fmt.money(ar.amount)} ÷ ${fmt.money(s3)} × 91</span></div>
         <div class="kpi"><div class="k">近 3 個月淨銷售</div><div class="v">${fmt.big(s3)}</div><span class="d">${ymLabel(addM(arYm, -2))}～${ymLabel(arYm)}</span></div></div>`;
-      if (dso > 90) alerts.push({ lv: 'bad', t: `應收帳款天數 ${nf0.format(dso)} 天`, s: '收款太慢，請會計列出逾期的客戶，業務協助催收。' });
-      else if (dso > 60) alerts.push({ lv: 'warn', t: `應收帳款天數 ${nf0.format(dso)} 天`, s: '比一般月結 30～60 天長，檢查是否有客戶拖款。' });
+      if (dso > 90) alerts.push({ k: 'dso', lv: 'bad', t: `應收帳款天數 ${nf0.format(dso)} 天`, s: '收款太慢，請會計列出逾期的客戶，業務協助催收。' });
+      else if (dso > 60) alerts.push({ k: 'dso', lv: 'warn', t: `應收帳款天數 ${nf0.format(dso)} 天`, s: '比一般月結 30～60 天長，檢查是否有客戶拖款。' });
     }
     $('#dbDso').innerHTML = dsoHtml;
     const num = (s) => { const v = parseFloat(String(s).replace(/[,\s，元]/g, '')); return isFinite(v) && v >= 0 ? v : null; };
@@ -196,8 +217,8 @@
       lost = cPrev.filter((c) => !curSet.has(c.ck) && c.net > 0).sort((a, b) => b.net - a.net);
       down = prevByNet.slice(0, 20).map((c) => ({ ...c, now: (curSet.get(c.ck) || { net: 0 }).net })).filter((c) => c.now > 0 && c.now < c.net * 0.7).map((c) => ({ ...c, chg: (c.now - c.net) / c.net }));
       const lostAmt = lost.reduce((s, c) => s + c.net, 0);
-      if (lost.length && rate(lostAmt, prev.net) > 0.05) alerts.push({ lv: 'warn', t: `${lost.length} 位去年同期有買的客戶，這段期間都沒買（去年合計 ${fmt.big(lostAmt)}）`, s: '見「客戶動態」的可能流失名單，請業務聯絡。' });
-      if (down.length) alerts.push({ lv: 'warn', t: `${down.length} 位去年同期前 20 大的客戶，今年少了 30% 以上`, s: '見「客戶動態」的衰退名單。' });
+      if (lost.length && rate(lostAmt, prev.net) > 0.05) alerts.push({ k: 'lost', lv: 'warn', t: `${lost.length} 位去年同期有買的客戶，這段期間都沒買（去年合計 ${fmt.big(lostAmt)}）`, s: '見「客戶動態」的可能流失名單，請業務聯絡。' });
+      if (down.length) alerts.push({ k: 'down', lv: 'warn', t: `${down.length} 位去年同期前 20 大的客戶，今年少了 30% 以上`, s: '見「客戶動態」的衰退名單。' });
     }
     table(minis[1], [{ key: 'name', label: '客戶', cls: 'lbl', get: (r) => r.code + ' ' + r.name }, { key: 'net', label: '去年同期淨銷售', n: 1, fmt: 'money' }, { key: 'last', label: '最近交易', get: (r) => (fullCust.get(r.ck) || r).last, fmt: 'ym' }], lost, { limit: 8, onRow: open, empty: hasPrev ? '沒有' : '全部期間無法比較' });
     table(minis[2], [{ key: 'name', label: '客戶', cls: 'lbl', get: (r) => r.code + ' ' + r.name }, { key: 'net', label: '去年同期', n: 1, fmt: 'money' }, { key: 'now', label: '這段期間', n: 1, fmt: 'money' }, { key: 'chg', label: '變化', n: 1, render: (r) => arrow(r.chg) }], down, { limit: 8, onRow: open, empty: hasPrev ? '沒有' : '全部期間無法比較' });
@@ -241,7 +262,7 @@
         { key: 'since', label: '已經幾天沒買', n: 1, render: (r) => `<b>${nf0.format(r.since)}</b> 天` },
         { key: 'sales', label: '歷史銷貨', n: 1, fmt: 'money' },
       ], due, { limit: 10, onRow: open, empty: '沒有：客戶都在平常的時間內有來買' });
-      if (due.length) alerts.push({ lv: 'warn', t: `${due.length} 位客戶超過平常的購買間隔還沒來買`, s: '見「該來買、還沒來的客戶」，請業務聯絡。' });
+      if (due.length) alerts.push({ k: 'due', lv: 'warn', t: `${due.length} 位客戶超過平常的購買間隔還沒來買`, s: '見「該來買、還沒來的客戶」，請業務聯絡。' });
     }
 
     // ---------- 缺少的資料與說明 ----------
@@ -252,7 +273,7 @@
       const unm = E.pivot({ rows: ['cat'], cols: null, measures: ['net'], filter: {} }).rows.filter((r) => !ds.str.cat.mapped[r.codes[0]] && r.labels[0] !== '（空白）');
       if (unm.length) {
         miss.push(['分類表裡沒有名稱或大類的類別代碼', unm.sort((a, b) => b.vals[0][0] - a.vals[0][0]).map((r) => `${esc(r.labels[0])}（${fmt.big(r.vals[0][0])}）`).join('、') + '。這些會算在「未分類」，請在分類表補上後重新匯入。']);
-        alerts.push({ lv: 'warn', t: `有 ${unm.length} 個商品類別代碼沒有分類`, s: '見最下面「缺少的資料」。' });
+        alerts.push({ k: 'unmapped', lv: 'warn', t: `有 ${unm.length} 個商品類別代碼沒有分類`, s: '見最下面「缺少的資料」。' });
       }
     }
     if (!fixed) miss.push(['每月固定費用', '損益兩平需要。在上面「損益兩平」輸入。']);
@@ -268,13 +289,58 @@
     if (otherRegion) miss.push(['區域', `區域是用客戶代號的第一碼判斷，有 ${fmt.big(otherRegion)} 的淨銷售歸在「其他地區」（客戶代號不是 1～8 開頭）。`]);
     $('#dbMissing').innerHTML = `<div class="panel-head"><h2>缺少的資料與說明</h2></div><ul class="missing-list">${miss.map(([a, b]) => `<li><b>${a}</b>${b}</li>`).join('')}</ul>`;
 
+    // 提醒背後的數據：淨銷售掉或升最多、毛利率掉最多、前 10 大客戶（只在有這個提醒時才出現）
+    const has = (k) => alerts.some((a) => a.k === k);
+    const drills = [];
+    const netDir = has('netDown') ? 'down' : has('netUp') ? 'up' : null;
+    if (netDir) drills.push(`<div class="panel drill" id="dbNetDrill"><div class="panel-head"><h2>淨銷售${netDir === 'down' ? '掉' : '多'}最多的是誰</h2><div class="seg" id="dbNetDim">${[['ck', '客戶'], ['rep', '業務員'], ['style', '款號'], ['region', '區域'], ['big', '大類']].map(([k, l]) => `<button data-v="${k}" class="${k === (S.dash.drillDim || 'ck') ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+      <p class="hint">${periodText(F)} 和去年同期 ${hasPrev ? periodText(P) : ''} 比，依差額排序。長條是這段期間，細線是去年同期。點一列看明細。</p><div class="grid2 tight"><div id="dbNetBars"></div><div id="dbNetTable" class="db-scroll"></div></div></div>`);
+    let marginRows = [];
+    if (has('marginDown')) {
+      const sp = (r) => new Map(E.pivot({ rows: ['style'], cols: null, measures: ['sales', 'profit'], filter: fil(r) }).rows.map((x) => [x.codes[0], [x.labels[0], x.vals[0][0], x.vals[0][1]]]));
+      const a = sp(F), b = sp(P);
+      marginRows = [...a.entries()].filter(([k, v]) => v[1] > 0 && b.get(k) && b.get(k)[1] > 0).map(([k, v]) => {
+        const pv = b.get(k), m1 = v[2] / v[1], m0 = pv[2] / pv[1];
+        return { code: k, label: v[0], sales: v[1], m0, m1, dm: m1 - m0, impact: v[1] * (m1 - m0) };
+      }).sort((x, y) => x.impact - y.impact).slice(0, 12);
+      drills.push(`<div class="panel drill" id="dbMarginDrill"><div class="panel-head"><h2>毛利率掉最多的款號</h2></div><p class="hint">「影響毛利」= 這段期間的銷貨 ×（今年毛利率 − 去年毛利率），也就是毛利率變差讓毛利少賺了多少。點一列看款號。</p><div id="dbMarginTable" class="db-scroll"></div></div>`);
+    }
+    if (has('top10')) drills.push(`<div class="panel drill" id="dbTop10Drill"><div class="panel-head"><h2>前 10 大客戶佔多少</h2></div><p class="hint">累計 = 從第一名加到這一名，佔全部淨銷售的比例。點一列看客戶。</p><div class="grid2 tight"><div id="dbTop10Bars"></div><div id="dbTop10Table" class="db-scroll"></div></div></div>`);
+    $('#dbDrills').innerHTML = drills.length ? `<h2 class="section-title">提醒背後的數據 <small>從上面的「看數據」跳過來</small></h2>${drills.join('')}` : '';
+    if (netDir) {
+      const drawNet = () => {
+        const dim = S.dash.drillDim || 'ck';
+        const rows = rankRows(dim).filter((r) => r.net || r.prevNet).sort((a, b) => (netDir === 'down' ? a.diff - b.diff : b.diff - a.diff)).slice(0, 15);
+        const lbl = (r) => (dim === 'ck' ? (fullCustOf(r.code) ? fullCustOf(r.code).code + ' ' + fullCustOf(r.code).name : r.label) : r.label);
+        const openRow = (r) => (dim === 'ck' ? (fullCustOf(r.code) && ctx.openCustomer(fullCustOf(r.code))) : dim === 'rep' ? ctx.goRep && ctx.goRep(E.dim('rep').labels[r.code]) : ctx.drill(dim, r.code, r.label));
+        Charts.hbars($('#dbNetBars'), { rows: rows.slice(0, 10).map((r) => ({ label: lbl(r), value: Math.max(0, r.net), prev: r.prevNet, cls: dim === 'region' || dim === 'big' || dim === 'rep' ? ctx.colorOf(dim, dim === 'rep' ? E.dim('rep').labels[r.code] : r.label) : (netDir === 'down' ? 'c8' : 'c3'), r, note: arrow(r.yoy) })), fmt: fmt.big, limit: 10, onClick: (x) => openRow(x.r) });
+        table($('#dbNetTable'), [{ key: 'label', label: '名稱', cls: 'lbl', get: lbl }, { key: 'prevNet', label: '去年同期', n: 1, fmt: 'money' }, { key: 'net', label: '這段期間', n: 1, fmt: 'money' },
+          { key: 'diff', label: '差額', n: 1, render: (r) => `<b class="${r.diff >= 0 ? 'up' : 'down'}">${r.diff >= 0 ? '+' : '−'}${fmt.big(Math.abs(r.diff))}</b>` }, { key: 'yoy', label: '變化', n: 1, render: (r) => (r.prevNet ? arrow(r.yoy) : '<span class="muted">新</span>') }], rows, { onRow: openRow });
+        window.__dashDrill = { dim, rows: rows.map((r) => [lbl(r), r.diff]) }; // 測試用
+      };
+      $('#dbNetDim').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; S.dash.drillDim = b.dataset.v; ctx.saveDash(); $$('#dbNetDim button').forEach((x) => x.classList.toggle('on', x === b)); drawNet(); };
+      ctx.after.push(drawNet);
+    }
+    if (marginRows.length) table($('#dbMarginTable'), [{ key: 'label', label: '款號', cls: 'lbl' }, { key: 'sales', label: '銷貨', n: 1, fmt: 'money' }, { key: 'm0', label: '去年毛利率', n: 1, fmt: 'pct' }, { key: 'm1', label: '今年毛利率', n: 1, fmt: 'pct' },
+      { key: 'dm', label: '變化', n: 1, render: (r) => arrow(r.dm, true, 'pp') }, { key: 'impact', label: '影響毛利', n: 1, render: (r) => `<b class="${r.impact >= 0 ? 'up' : 'down'}">${r.impact >= 0 ? '+' : '−'}${fmt.big(Math.abs(r.impact))}</b>` }], marginRows, { onRow: (r) => ctx.drill('style', r.code, r.label) });
+    else if (has('marginDown')) $('#dbMarginTable').innerHTML = '<p class="hint">沒有兩期都有賣的款號可以比較。</p>';
+    if (has('top10')) {
+      let acc = 0;
+      const t10 = byNet.slice(0, 10).map((c) => { acc += c.net; return { ...c, share: rate(c.net, cur.net), cum: rate(acc, cur.net) }; });
+      Charts.hbars($('#dbTop10Bars'), { rows: t10.map((c) => ({ label: c.code + ' ' + c.name, value: c.net, cls: 'c1', c, note: fmt.pct(c.share) })), fmt: fmt.big, limit: 10, onClick: (x) => open(x.c) });
+      table($('#dbTop10Table'), [{ key: 'name', label: '客戶', cls: 'lbl', get: (r) => r.code + ' ' + r.name }, { key: 'net', label: '淨銷售', n: 1, fmt: 'money' }, { key: 'share', label: '佔比', n: 1, fmt: 'pct' }, { key: 'cum', label: '累計', n: 1, fmt: 'pct' }], t10, { onRow: open });
+    }
+
     // ---------- 提醒（最後才畫，因為上面會補）----------
     const lvName = { bad: '要注意', warn: '留意', good: '不錯' };
     const order = { bad: 0, warn: 1, good: 2 };
     alerts.sort((a, b) => order[a.lv] - order[b.lv]);
     $('#dbAlerts').innerHTML = `<div class="panel-head"><h2>重點提醒</h2></div>` + (alerts.length
-      ? `<ul class="alerts">${alerts.map((a) => `<li class="${a.lv}"><span class="tag">${lvName[a.lv]}</span><div><b>${a.t}</b><p>${a.s}</p></div></li>`).join('')}</ul>`
+      ? `<ul class="alerts">${alerts.map((a) => { const I = IDEAS[a.k] || { ideas: [] }; return `<li class="${a.lv}"><span class="tag">${lvName[a.lv]}</span><div class="al-body"><b>${a.t}</b><p>${a.s}</p>` +
+          (I.ideas.length ? `<details class="ideas"${a.lv === 'bad' ? ' open' : ''}><summary>建議可以怎麼做（${I.ideas.length} 點）</summary><ol>${I.ideas.map((x) => `<li>${x}</li>`).join('')}</ol></details>` : '') +
+          (I.go ? `<button type="button" class="btn small" data-jump="${I.go}">看數據 ↓</button>` : '') + '</div></li>'; }).join('')}</ul>`
       : '<p class="hint">這段期間沒有特別需要注意的地方。</p>');
+    $$('#dbAlerts [data-jump]').forEach((b) => { b.onclick = () => { const t = $('#' + b.dataset.jump); if (!t) return; t.scrollIntoView({ behavior: 'smooth', block: 'start' }); t.classList.remove('flash'); void t.offsetWidth; t.classList.add('flash'); }; });
     return { cur, prev, alerts, top10Share, newCust: newCust.length };
   }
 

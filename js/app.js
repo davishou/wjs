@@ -46,14 +46,15 @@
     dash: Object.assign({ period: 'ytd', rankDim: 'ck', rankSort: 'net', cmp: 'quarter' }, store.get('dash', {})), // vault.key 只放記憶體，不會存下來
     today: { date: null }, // 今日頁選的日期（不存，每次開啟看最新一天）
     cmp: Object.assign({ metric: 'net', gran: 'month', vs: 'yoy', filters: {}, ab: { by: 'rep' } }, store.get('cmp', {})),
-    rep: Object.assign({ sel: null, period: 'ytd', q: '' }, store.get('rep', {})),
+    rep: Object.assign({ sel: null, q: '' }, store.get('rep', {})),
+    span: Object.assign({ p: 'r12', from: 0, to: 0 }, store.get('span', {})), // 業務、客戶、商品共用的期間（js/period.js）
     board: Object.assign({ opt: 'A', period: 'ytd', metric: 'net' }, store.get('board', {})),
     view: 'overview',
     ref: store.get('ref', null),
     pivot: store.get('pivot', { src: 'all', rows: ['region'], col: 'year', measures: ['sales', 'returns', 'net', 'margin'], filters: {}, from: 0, to: 0, mode: 'agg' }),
     pvSort: null,
     cust: { idle: 'all', q: '', filters: {}, sort: { key: 'sales', dir: -1 } },
-    prod: { idle: 'all', q: '', filters: {}, level: 'sku', sort: { key: 'sales', dir: -1 } },
+    prod: { idle: 'all', q: '', filters: {}, level: 'sku', metric: 'net', sort: { key: 'sales', dir: -1 } },
   };
   const refYm = () => (S.ref && S.E && S.E.ymIndex.has(S.ref) ? S.ref : S.E ? S.E.maxYm : 0);
 
@@ -241,7 +242,7 @@
   // 頁面共用的工具
   const baseCtx = () => ({ colorOf,
     S, E: S.E, fmt, nf0, nf1, esc, $, $$, table, Charts, refYm, repName, toast, toDims, renderFilterChips,
-    openCustomer, openProduct, drill: dashDrill, goRep, rerender: renderView,
+    openCustomer, openProduct, drill: dashDrill, goRep, rerender: renderView, saveSpan: () => store.set('span', S.span),
   });
   function goRep(rep) { S.rep.sel = rep; S.rep.q = ''; store.set('rep', S.rep); go('reps'); }
 
@@ -268,7 +269,6 @@
     window.__reps = Reps.render({ ...baseCtx(), save: () => store.set('rep', S.rep) }); // 測試用
   }
   function bindReps() {
-    $('#rsPeriod').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.rep.period = b.dataset.v; store.set('rep', S.rep); renderReps(); });
     const inp = $('#rsSearch');
     // 從選單挑到或打完整名稱 → 直接看那位業務；其他 → 篩選下面的列表
     const find = (q) => {
@@ -308,7 +308,7 @@
       S, E: S.E, fmt, nf0, nf1, esc, $, $$, table, Charts, refYm, repName, toast, after: [],
       saveDash: () => store.set('dash', S.dash),
       saveMeta: async (patch) => { await saveMeta(patch); renderDashboard(); },
-      openCustomer, openProduct, gotoIdle, drill: dashDrill, colorOf,
+      openCustomer, openProduct, gotoIdle, drill: dashDrill, colorOf, goRep,
     };
     window.__dash = Dashboard.render(ctx); // 測試用：儀表板算出的數字
     ctx.after.forEach((f) => f());
@@ -607,45 +607,82 @@
     if (rule === 'all') return true;
     const [a, b] = rule.split('-'); return v >= +a && (b === '' || v <= +b);
   }
+  // 期間（共用 S.span）：每位客戶在這段期間、去年同期的淨銷售，接到列表的每一列上
   function custData() {
+    const E = S.E, ref = refYm();
+    const R = Period.range(E, ref, S.span);
     const f = { dims: toDims(S.cust.filters) };
-    const res = S.E.customers(f, refYm());
+    const res = E.customers(f, ref);
+    const by = (pf) => new Map(E.pivot({ rows: ['ck'], cols: null, measures: ['net', 'orders', 'netProfit'], filter: { ...pf, ...f } }).rows.map((r) => [r.codes[0], r.vals[0]]));
+    const cm = by(R.f), pm = R.pf ? by(R.pf) : null;
     const q = S.cust.q.toLowerCase();
-    let list = res.list.filter((c) => idleMatch(c.idle, S.cust.idle) && (!q || c.key.toLowerCase().includes(q)));
+    let list = res.list.filter((c) => idleMatch(c.idle, S.cust.idle) && (!q || c.key.toLowerCase().includes(q))).map((c) => {
+      const v = cm.get(c.ck), pv = pm ? pm.get(c.ck) : null;
+      return { ...c, pNet: v ? v[0] : 0, pOrders: v ? v[1] : 0, pPrev: pv ? pv[0] : 0, pG: pv && pv[0] ? ((v ? v[0] : 0) - pv[0]) / Math.abs(pv[0]) : null };
+    });
     list = sortRows(list, S.cust.sort);
-    return { list, res };
+    return { list, res, R };
   }
+  const growthCell = (r) => (r.pPrev ? `<span class="${r.pG >= 0 ? 'up' : 'down'}">${r.pG >= 0 ? '▲' : '▼'} ${fmt.pct(Math.abs(r.pG))}</span>` : r.pNet ? '<span class="muted">新</span>' : '<span class="muted">—</span>');
   const CUST_COLS = [
     { key: 'code', label: '客戶代號' }, { key: 'name', label: '客戶名', cls: 'lbl' }, { key: 'region', label: '區域' },
     { key: 'rep', label: '業務員', render: (r) => esc(repName(r.rep)) },
+    { key: 'pNet', label: '期間淨銷售', n: 1, fmt: 'money', cls: 'per' }, { key: 'pPrev', label: '去年同期', n: 1, fmt: 'money', cls: 'per', prev: 1 }, { key: 'pG', label: '成長', n: 1, render: growthCell, cls: 'per', prev: 1 },
     { key: 'first', label: '第一筆交易', fmt: 'ym' }, { key: 'last', label: '最近交易', fmt: 'ym' },
     { key: 'tenure', label: '交易至今(月)', n: 1, fmt: 'int' },
     { key: 'idle', label: '靜止(月)', n: 1, render: (r) => monthsCell(r.idle, 'idle', 24) },
     { key: 'freq', label: '購買頻率(天)', n: 1, render: (r) => (r.freq == null ? '<span class="muted">只買過 1 天</span>' : nf1.format(r.freq)) },
     { key: 'buyDays', label: '購買天數', n: 1, render: (r) => (r.freqBy === 'date' ? nf0.format(r.buyDays) : '—') },
     { key: 'orders', label: '訂單數', n: 1, fmt: 'int' },
-    { key: 'sales', label: '銷貨金額', n: 1, fmt: 'money' }, { key: 'returns', label: '退貨金額', n: 1, fmt: 'money' },
+    { key: 'sales', label: '銷貨金額(全部)', n: 1, fmt: 'money' }, { key: 'returns', label: '退貨金額(全部)', n: 1, fmt: 'money' },
     { key: 'margin', label: '毛利率', n: 1, fmt: 'pct' },
   ];
+  // 列表被搜尋、活躍狀態縮小時，圖也只算這些客戶（和列表連動）
+  function narrowDims(base, key, codes, narrowed) { const d = { ...base }; if (narrowed) d[key] = new Set(codes); return d; }
   function renderCustomers() {
-    const { list, res } = custData();
-    $('#cuSub').textContent = `以 ${ymLabel(res.ref)} 為基準月計算（可在儀表板或資料與設定中更改）。` + (S.E.maxDate
+    const { list, res, R } = custData();
+    $('#cuSub').textContent = `期間 ${R.label}${R.pf ? `（對照去年同期 ${R.prevLabel}）` : ''}：圖和列表的「期間淨銷售」都跟著上面的期間、篩選和搜尋變。靜止月數以 ${ymLabel(res.ref)} 為基準月。` + (S.E.maxDate
       ? '購買頻率 = 平均每隔幾天買一次：用實際出貨日期，第一次到最近一次相隔的天數 ÷（購買天數 − 1），同一天的好幾張單只算一次。'
       : '購買頻率 = 第一筆到最近一筆的月數 ÷ 訂單數 × 30（這份資料沒有實際出貨日期；匯入系統原始資料後會改用實際日期，比較準）。');
     $$('#cuIdle button').forEach((b) => b.classList.toggle('on', b.dataset.v === S.cust.idle));
     renderFilterChips($('#cuFilters'), $('#cuAddFilter'), S.cust.filters, CUST_FILTER_DIMS, renderCustomers, (k) => { const d = toDims(S.cust.filters); delete d[k]; return { src: 'sales', dims: d }; });
-    table($('#cuTable'), CUST_COLS, list, {
+    Period.mount($('#cuPeriod'), S.span, S.E, refYm(), () => { store.set('span', S.span); renderCustomers(); }, esc);
+    renderCustCharts(list, R);
+    table($('#cuTable'), CUST_COLS.filter((c) => !c.prev || R.pf), list, {
       sort: S.cust.sort, onSort: (k) => { S.cust.sort = toggleSort(S.cust.sort, k); renderCustomers(); },
       onRow: openCustomer, limit: 300, empty: '沒有符合條件的客戶',
     });
+  }
+  function renderCustCharts(list, R) {
+    const E = S.E, has = !!R.pf;
+    const narrowed = !!S.cust.q || S.cust.idle !== 'all';
+    const dims = narrowDims(toDims(S.cust.filters), 'ck', list.map((c) => c.ck), narrowed);
+    const tr = Period.trend(E, R, dims, 'net');
+    // 客戶組成（人數）：這段期間第一次買的新客戶、回頭的老客戶、去年同期有買但這段期間沒買
+    const buyers = list.filter((c) => c.pNet || c.pOrders);
+    const isNew = (c) => c.first >= R.F[0] && c.first <= R.F[1];
+    const nNew = buyers.filter(isNew).length, nOld = buyers.length - nNew, nLost = has ? list.filter((c) => !c.pOrders && c.pPrev > 0).length : 0;
+    const top = list.filter((c) => c.pNet > 0).sort((a, b) => b.pNet - a.pNet).slice(0, 15);
+    const totNet = tr.cur.reduce((t, v) => t + v, 0), totPrev = has ? tr.prev.reduce((t, v) => t + v, 0) : 0;
+    $('#cuCharts').innerHTML = `<div class="panel"><div class="panel-head"><h2>這段期間的淨銷售 <span class="linked">跟著期間・篩選</span></h2></div>
+        <p class="hint">${narrowed || Object.keys(S.cust.filters).length ? `只算列表裡的 ${nf0.format(list.length)} 位客戶。` : '全部客戶。'}${esc(tr.hint)} 合計 <b>${fmt.big(totNet)}</b>${has ? `，去年同期 ${fmt.big(totPrev)}（${totPrev ? (totNet >= totPrev ? '▲' : '▼') + ' ' + fmt.pct(Math.abs(totNet - totPrev) / Math.abs(totPrev)) : '—'}）` : ''}。</p><div class="chart" id="cuTrend"></div></div>
+      <div class="grid2"><div class="panel"><div class="panel-head"><h2>前 15 大客戶 <span class="linked">跟著期間・篩選</span></h2></div><p class="hint">長條是這段期間的淨銷售${has ? '，細線是去年同期' : ''}。點一列看客戶明細。</p><div id="cuTop"></div></div>
+        <div class="panel"><div class="panel-head"><h2>客戶組成 <span class="linked">跟著期間・篩選</span></h2></div><p class="hint">這段期間有買的客戶裡，第一次跟我們買的是新客戶${has ? '；「沒再買」是去年同期有買、這段期間沒買' : ''}。點圓餅把列表排成那一群在最上面。</p><div id="cuMix"></div></div></div>`;
+    Charts.render($('#cuTrend'), { type: has ? 'combo' : 'bar', labels: tr.labels, series: [{ name: '淨銷售', kind: 'bar', cls: 'c1', values: tr.cur }, ...(has ? [{ name: '去年同期', kind: 'line', dash: true, cls: 's3', values: tr.prev }] : [])], fmt: fmt.money, axisFmt: fmt.axis, title: '這段期間的淨銷售' });
+    Charts.hbars($('#cuTop'), { rows: top.map((c) => ({ label: c.code + ' ' + c.name, value: c.pNet, prev: has ? c.pPrev : null, cls: colorOf('region', c.region), c, note: has ? growthCell(c) : '' })), fmt: fmt.big, limit: 15, onClick: (x) => openCustomer(x.c) });
+    Charts.donut($('#cuMix'), { items: [{ label: '老客戶', value: nOld, cls: 'c1', k: 'old' }, { label: '新客戶', value: nNew, cls: 'c3', k: 'new' }, ...(has ? [{ label: '沒再買', value: nLost, cls: 'c8', k: 'lost' }] : [])].filter((x) => x.value > 0),
+      fmt: (v) => nf0.format(v) + ' 位', title: '客戶組成', sort: false, center: { value: nf0.format(buyers.length), label: '有買的客戶' },
+      onClick: (d) => { S.cust.sort = d.k === 'lost' ? { key: 'pPrev', dir: -1 } : d.k === 'new' ? { key: 'first', dir: -1 } : { key: 'pNet', dir: -1 }; renderCustomers(); $('#cuTable').scrollIntoView({ behavior: 'smooth', block: 'start' }); } });
+    window.__cust = { trend: tr, nNew, nOld, nLost, top: top.map((c) => [c.name, c.pNet, c.pPrev]), period: R.label }; // 測試用
   }
   function bindCustomers() {
     let t; $('#cuSearch').addEventListener('input', (e) => { clearTimeout(t); t = setTimeout(() => { S.cust.q = e.target.value.trim(); renderCustomers(); }, 150); });
     $('#cuIdle').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.cust.idle = b.dataset.v; renderCustomers(); });
     $('#cuExport').addEventListener('click', () => {
-      const { list } = custData();
-      downloadCsv('客戶交易', CUST_COLS.map((c) => c.label), list.map((r) => CUST_COLS.map((c) => {
-        const v = r[c.key]; if (c.fmt === 'ym') return ymLabel(v); if (c.key === 'freq') return v == null ? '' : Math.round(v * 100) / 100; if (c.key === 'buyDays') return r.freqBy === 'date' ? v : ''; if (c.key === 'margin') return v == null ? '' : Math.round(v * 10000) / 100 + '%'; if (c.key === 'rep') return repName(v); return v;
+      const { list, R } = custData();
+      const cc = CUST_COLS.filter((c) => !c.prev || R.pf);
+      downloadCsv('客戶交易', cc.map((c) => c.label), list.map((r) => cc.map((c) => {
+        const v = r[c.key]; if (c.fmt === 'ym') return ymLabel(v); if (c.key === 'pG') return v == null ? '' : Math.round(v * 10000) / 100 + '%'; if (c.key === 'freq') return v == null ? '' : Math.round(v * 100) / 100; if (c.key === 'buyDays') return r.freqBy === 'date' ? v : ''; if (c.key === 'margin') return v == null ? '' : Math.round(v * 10000) / 100 + '%'; if (c.key === 'rep') return repName(v); return v;
       })));
     });
   }
@@ -655,14 +692,22 @@
   // =====================================================
   const PROD_FILTER_DIMS = ['big', 'cat', 'size', 'color', 'region', 'rep', 'ck', 'year'];
   function prodData() {
-    const res = S.E.products({ dims: toDims(S.prod.filters) }, refYm(), S.prod.level);
+    const E = S.E, ref = refYm(), lv = S.prod.level;
+    const R = Period.range(E, ref, S.span);
+    const fdims = toDims(S.prod.filters);
+    const res = E.products({ dims: fdims }, ref, lv);
+    const by = (pf) => new Map(E.pivot({ rows: [lv], cols: null, measures: ['net', 'soldQty'], filter: { ...pf, dims: fdims } }).rows.map((r) => [r.labels[0], r.vals[0]]));
+    const cm = by(R.f), pm = R.pf ? by(R.pf) : null;
     const q = S.prod.q.toLowerCase();
-    let list = res.list.filter((p) => idleMatch(p.idle, S.prod.idle) && (!q || p.code.toLowerCase().includes(q) || (p.sku2 || '').toLowerCase().includes(q) || (p.style || '').toLowerCase().includes(q)));
+    let list = res.list.filter((p) => idleMatch(p.idle, S.prod.idle) && (!q || p.code.toLowerCase().includes(q) || (p.sku2 || '').toLowerCase().includes(q) || (p.style || '').toLowerCase().includes(q))).map((p) => {
+      const v = cm.get(p.code), pv = pm ? pm.get(p.code) : null;
+      return { ...p, pNet: v ? v[0] : 0, pQty: v ? v[1] : 0, pPrev: pv ? pv[0] : 0, pPrevQty: pv ? pv[1] : 0, pG: pv && pv[0] ? ((v ? v[0] : 0) - pv[0]) / Math.abs(pv[0]) : null };
+    });
     list = sortRows(list, S.prod.sort, S.prod.sort.key === 'retRate' ? (r) => (r.sales ? r.returns / r.sales : null) : null);
-    return { list, res };
+    return { list, res, R };
   }
   const LEVEL_NAME = { sku: '商品代號', sku2: '簡化代碼', style: '款號' };
-  function prodCols() {
+  function prodCols(hasPrev) {
     const lv = S.prod.level;
     const c = [{ key: 'code', label: LEVEL_NAME[lv], cls: 'lbl' }];
     if (lv === 'sku') c.push({ key: 'sku2', label: '簡化代碼', cls: 'dim2' });
@@ -670,35 +715,64 @@
     c.push(
       { key: 'big', label: '大類' },
       { key: 'cat', label: '類別' },
+      { key: 'pQty', label: '期間賣出數', n: 1, fmt: 'int', cls: 'per' }, { key: 'pNet', label: '期間淨銷售', n: 1, fmt: 'money', cls: 'per' },
+      ...(hasPrev ? [{ key: 'pPrev', label: '去年同期', n: 1, fmt: 'money', cls: 'per' }, { key: 'pG', label: '成長', n: 1, render: growthCell, cls: 'per' }] : []),
       { key: 'first', label: '第一筆售出', fmt: 'ym' }, { key: 'last', label: '最近售出', fmt: 'ym' },
       { key: 'tenure', label: '已賣(月)', n: 1, fmt: 'int' },
       { key: 'idle', label: '滯銷/停售(月)', n: 1, render: (r) => monthsCell(r.idle, 'idle', 24) },
-      { key: 'qty', label: '賣出數', n: 1, fmt: 'int' }, { key: 'recentQty', label: '近 12 月賣出', n: 1, fmt: 'int' },
-      { key: 'sales', label: '銷貨金額', n: 1, fmt: 'money' }, { key: 'returns', label: '退貨金額', n: 1, fmt: 'money' },
+      { key: 'qty', label: '賣出數(全部)', n: 1, fmt: 'int' }, { key: 'recentQty', label: '近 12 月賣出', n: 1, fmt: 'int' },
+      { key: 'sales', label: '銷貨金額(全部)', n: 1, fmt: 'money' }, { key: 'returns', label: '退貨金額(全部)', n: 1, fmt: 'money' },
       { key: 'retRate', label: '退貨率', n: 1, render: (r) => fmt.pct(r.sales ? r.returns / r.sales : null) },
       { key: 'custs', label: '客戶數', n: 1, fmt: 'int' },
     );
     return c;
   }
   function renderProducts() {
-    const { list, res } = prodData();
-    $('#prSub').textContent = `以 ${ymLabel(res.ref)} 為基準月。滯銷月數 = 基準月 − 最近一次售出的年月。`;
+    const { list, res, R } = prodData();
+    $('#prSub').textContent = `期間 ${R.label}${R.pf ? `（對照去年同期 ${R.prevLabel}）` : ''}：圖和列表的「期間」欄都跟著上面的期間、篩選和搜尋變。滯銷月數以 ${ymLabel(res.ref)} 為基準月 = 基準月 − 最近一次售出的年月。`;
     $$('#prIdle button').forEach((b) => b.classList.toggle('on', b.dataset.v === S.prod.idle));
     $$('#prLevel button').forEach((b) => b.classList.toggle('on', b.dataset.v === S.prod.level));
     renderFilterChips($('#prFilters'), $('#prAddFilter'), S.prod.filters, PROD_FILTER_DIMS, renderProducts, (k) => { const d = toDims(S.prod.filters); delete d[k]; return { src: 'sales', dims: d }; });
-    table($('#prTable'), prodCols(), list, {
+    Period.mount($('#prPeriod'), S.span, S.E, refYm(), () => { store.set('span', S.span); renderProducts(); }, esc);
+    renderProdCharts(list, R);
+    table($('#prTable'), prodCols(!!R.pf), list, {
       sort: S.prod.sort, onSort: (k) => { S.prod.sort = toggleSort(S.prod.sort, k); renderProducts(); },
       onRow: (r) => openProduct(r, S.prod.level), limit: 300, empty: '沒有符合條件的商品',
     });
+  }
+  function renderProdCharts(list, R) {
+    const E = S.E, has = !!R.pf, lv = S.prod.level;
+    const narrowed = !!S.prod.q || S.prod.idle !== 'all';
+    let dims = toDims(S.prod.filters);
+    if (narrowed) { const idx = new Map(E.ds.str[lv].dict.map((v, i) => [v, i])); dims = narrowDims(dims, lv, list.map((p) => idx.get(p.code)), true); }
+    const m = S.prod.metric === 'qty' ? 'soldQty' : 'net';
+    const vf = m === 'soldQty' ? (v) => nf0.format(v) + ' 件' : fmt.big;
+    const tr = Period.trend(E, R, dims, m);
+    const key = m === 'soldQty' ? 'pQty' : 'pNet', pkey = m === 'soldQty' ? 'pPrevQty' : 'pPrev';
+    const top = list.filter((p) => p[key] > 0).sort((a, b) => b[key] - a[key]).slice(0, 15);
+    const mix = (dim) => E.pivot({ rows: [dim], cols: null, measures: [m], filter: { ...R.f, dims } }).rows.map((r) => ({ label: r.labels[0] || '（空白）', value: r.vals[0][0], cls: colorOf(dim, r.labels[0]) })).filter((x) => x.value > 0);
+    const tot = tr.cur.reduce((t, v) => t + v, 0), totP = has ? tr.prev.reduce((t, v) => t + v, 0) : 0;
+    const what = m === 'soldQty' ? '賣出數' : '淨銷售';
+    $('#prCharts').innerHTML = `<div class="panel"><div class="panel-head"><h2>這段期間的${what} <span class="linked">跟著期間・篩選</span></h2><div class="seg" id="prMetric"><button data-v="net" class="${m === 'net' ? 'on' : ''}">淨銷售（元）</button><button data-v="qty" class="${m === 'soldQty' ? 'on' : ''}">賣出數（件）</button></div></div>
+        <p class="hint">${narrowed || Object.keys(S.prod.filters).length ? `只算列表裡的 ${nf0.format(list.length)} 個${LEVEL_NAME[lv]}。` : `全部${LEVEL_NAME[lv]}。`}${esc(tr.hint)} 合計 <b>${vf(tot)}</b>${has ? `，去年同期 ${vf(totP)}（${totP ? (tot >= totP ? '▲' : '▼') + ' ' + fmt.pct(Math.abs(tot - totP) / Math.abs(totP)) : '—'}）` : ''}。</p><div class="chart" id="prTrend"></div></div>
+      <div class="grid2"><div class="panel"><div class="panel-head"><h2>${what}前 15 名（${LEVEL_NAME[lv]}） <span class="linked">跟著期間・篩選</span></h2></div><p class="hint">長條是這段期間${has ? '，細線是去年同期' : ''}。點一列看商品明細（尺寸、顏色、誰在買）。</p><div id="prTop"></div></div>
+        <div class="panel"><div class="panel-head"><h2>${what}從哪裡來 <span class="linked">跟著期間・篩選</span></h2></div><div class="donuts"><div><h3>商品大類</h3><div id="prBig"></div></div><div><h3>區域</h3><div id="prRegion"></div></div></div><p class="hint">點圓餅的一塊，就加上那一塊的篩選。</p></div></div>`;
+    $('#prMetric').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; S.prod.metric = b.dataset.v; renderProducts(); };
+    Charts.render($('#prTrend'), { type: has ? 'combo' : 'bar', labels: tr.labels, series: [{ name: what, kind: 'bar', cls: 'c4', values: tr.cur }, ...(has ? [{ name: '去年同期', kind: 'line', dash: true, cls: 's3', values: tr.prev }] : [])], fmt: m === 'soldQty' ? fmt.int : fmt.money, axisFmt: fmt.axis, title: '這段期間的' + what });
+    Charts.hbars($('#prTop'), { rows: top.map((p) => ({ label: p.code, value: p[key], prev: has ? p[pkey] : null, cls: colorOf('big', p.big), p, note: has ? growthCell(p) : '' })), fmt: vf, limit: 15, onClick: (x) => openProduct(x.p, lv) });
+    const addFilter = (dim) => (d) => { const code = E.dim(dim).labels.indexOf(d.label === '（空白）' ? '' : d.label); if (code < 0) return; S.prod.filters = { ...S.prod.filters, [dim]: [code] }; renderProducts(); };
+    Charts.donut($('#prBig'), { items: mix('big'), fmt: vf, title: '商品大類', onClick: addFilter('big') });
+    Charts.donut($('#prRegion'), { items: mix('region'), fmt: vf, title: '區域', onClick: addFilter('region') });
+    window.__prod = { trend: tr, top: top.map((p) => [p.code, p[key], p[pkey]]), period: R.label }; // 測試用
   }
   function bindProducts() {
     let t; $('#prSearch').addEventListener('input', (e) => { clearTimeout(t); t = setTimeout(() => { S.prod.q = e.target.value.trim(); renderProducts(); }, 150); });
     $('#prIdle').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.prod.idle = b.dataset.v; renderProducts(); });
     $('#prLevel').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.prod.level = b.dataset.v; renderProducts(); });
     $('#prExport').addEventListener('click', () => {
-      const { list } = prodData(); const cols = prodCols();
+      const { list, R } = prodData(); const cols = prodCols(!!R.pf);
       downloadCsv('商品銷售', cols.map((c) => c.label), list.map((r) => cols.map((c) => {
-        if (c.fmt === 'ym') return ymLabel(r[c.key]); if (c.key === 'retRate') return r.sales ? Math.round(r.returns / r.sales * 10000) / 100 + '%' : ''; return r[c.key];
+        if (c.fmt === 'ym') return ymLabel(r[c.key]); if (c.key === 'pG') return r.pG == null ? '' : Math.round(r.pG * 10000) / 100 + '%'; if (c.key === 'retRate') return r.sales ? Math.round(r.returns / r.sales * 10000) / 100 + '%' : ''; return r[c.key];
       })));
     });
   }
@@ -726,6 +800,12 @@
     for (const ym of arr) { const v = map.get(ym); labels.push(ymLabel(ym)); s.push(v ? v[0] : 0); r.push(v ? v[1] : 0); q.push(v ? v[2] : 0); }
     return { labels, s, r, q };
   }
+  // 明細視窗裡跟著期間（S.span）的走勢圖
+  function drawerTrend(dims, m, name, cls) {
+    const R = Period.range(S.E, refYm(), S.span), tr = Period.trend(S.E, R, dims, m), has = !!R.pf;
+    $('#dwTrendHint').textContent = tr.hint + '（期間在業務、客戶、商品頁上面選）';
+    Charts.render($('#dwTrend'), { type: has ? 'combo' : 'bar', labels: tr.labels, series: [{ name, kind: 'bar', cls, values: tr.cur }, ...(has ? [{ name: '去年同期', kind: 'line', dash: true, cls: 's3', values: tr.prev }] : [])], fmt: m === 'soldQty' ? fmt.int : fmt.money, axisFmt: fmt.axis, title: name });
+  }
   function kpiHtml(items) { return `<div class="kpis">${items.map((x) => `<div class="kpi"><div class="k">${x.k}</div><div class="v">${x.v}</div>${x.d ? `<span class="d">${x.d}</span>` : ''}</div>`).join('')}</div>`; }
 
   function openCustomer(c) {
@@ -737,10 +817,12 @@
       { k: '銷貨金額', v: fmt.big(c.sales), d: `毛利率 ${fmt.pct(c.margin)}` },
       { k: '退貨金額', v: fmt.big(c.returns), d: `退貨率 ${fmt.pct(c.sales ? c.returns / c.sales : null)}` },
       { k: '淨銷售', v: fmt.big(c.net), d: `${c.region}・${repName(c.rep)}` },
-    ]) + `<div class="panel"><div class="panel-head"><h2>近 24 個月</h2></div><div class="chart" id="dwChart"></div></div>
+    ]) + `<div class="panel"><div class="panel-head"><h2>這段期間 <span class="linked">${esc(Period.range(S.E, refYm(), S.span).label)}</span></h2></div><p class="hint" id="dwTrendHint"></p><div class="chart" id="dwTrend"></div></div>
+      <div class="panel"><div class="panel-head"><h2>近 24 個月</h2></div><div class="chart" id="dwChart"></div></div>
       <div class="panel"><div class="panel-head"><h2>買哪些商品大類</h2></div><div id="dwBig"></div></div>
       <div class="panel"><div class="panel-head"><h2>買最多的商品</h2><button class="btn" id="dwPivot">在樞紐分析中查看</button></div><div id="dwTop"></div></div>`;
     openDrawer(c.name || c.code, `${c.code}・${c.region}`, html);
+    drawerTrend(dims, 'net', '淨銷售', 'c1');
     const ms = monthlySeries(dims);
     Charts.render($('#dwChart'), { type: 'bar', labels: ms.labels, series: [{ name: '銷貨', values: ms.s, cls: 'c1' }, { name: '退貨', values: ms.r, cls: 'c2' }], fmt: fmt.money, axisFmt: fmt.axis });
     Charts.donut($('#dwBig'), { items: S.E.pivot({ rows: ['big'], cols: null, measures: ['net'], filter: { dims } }).rows.map((r) => ({ label: r.labels[0], value: r.vals[0][0], cls: colorOf('big', r.labels[0]) })), fmt: fmt.big, title: '商品大類' });
@@ -792,10 +874,12 @@
       { k: '銷貨金額', v: fmt.big(pr.sales), d: `毛利率 ${fmt.pct(pr.margin)}` },
       { k: '退貨金額', v: fmt.big(pr.returns), d: `退貨數 ${nf0.format(pr.retQty)}` },
       { k: '購買客戶', v: nf0.format(pr.custs), d: `類別 ${pr.cat}` },
-    ]) + `<div class="panel"><div class="panel-head"><h2>近 24 個月賣出數</h2></div><div class="chart" id="dwChart"></div></div>
+    ]) + `<div class="panel"><div class="panel-head"><h2>這段期間的賣出數 <span class="linked">${esc(Period.range(S.E, refYm(), S.span).label)}</span></h2></div><p class="hint" id="dwTrendHint"></p><div class="chart" id="dwTrend"></div></div>
+      <div class="panel"><div class="panel-head"><h2>近 24 個月賣出數</h2></div><div class="chart" id="dwChart"></div></div>
       <div class="panel" id="dwSize"></div>
       <div class="panel"><div class="panel-head"><h2>誰在買</h2><button class="btn" id="dwPivot">在樞紐分析中查看</button></div><div id="dwTop"></div></div>`;
     openDrawer(pr.code, LEVEL_NAME[level] + `・${pr.big && !pr.big.startsWith('（') ? pr.big + '・' : ''}類別 ${pr.cat}`, html);
+    drawerTrend(dims, 'soldQty', '賣出數', 'c4');
     renderSizeColor($('#dwSize'), dims);
     const ms = monthlySeries(dims);
     Charts.render($('#dwChart'), { type: 'bar', labels: ms.labels, series: [{ name: '賣出數', values: ms.q, cls: 's1' }], fmt: fmt.int, axisFmt: fmt.axis });
