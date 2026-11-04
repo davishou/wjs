@@ -73,6 +73,39 @@ function DateText($x) {
   if ($s -eq '') { return $null }
   return $s
 }
+# ---------- 業務交接表（總表資料夾裡的「業務交接.csv」，只存在使用者電腦上）----------
+# 每行：原業務員,新業務員,交接日期,客戶代號（可空白＝那位業務的所有客戶）。# 開頭的行是說明。
+# 交接日（含）之後實際出貨／退貨的單用新業務員；之前的保留總表原本的。
+$HANDOVER_NAME = '業務交接.csv'
+$HANDOVER = @()
+function RocDate([string]$s) {   # 1151115、115/11/15、2026/11/15、2026-11-15、20261115 → 1151115；看不懂回傳 0
+  $s = $s.Trim()
+  if ($s -match '^(\d{2,4})[/\-.年](\d{1,2})[/\-.月](\d{1,2})') { $y = [int]$matches[1]; if ($y -gt 1911) { $y -= 1911 }; return $y * 10000 + [int]$matches[2] * 100 + [int]$matches[3] }
+  if ($s -match '^\d{8}$') { $v = [int]$s; if ($v -gt 19000000) { return $v - 19110000 } }
+  if ($s -match '^\d{6,7}$') { return [int]$s }
+  return 0
+}
+function Load-Handover([string]$dir) {
+  $list = New-Object 'System.Collections.Generic.List[object]'
+  $path = Join-Path $dir $HANDOVER_NAME
+  if (-not (Test-Path -LiteralPath $path)) { return @{ List = $list; Path = $path; Exists = $false; Bad = @() } }
+  $bytes = [IO.File]::ReadAllBytes($path)
+  try { $text = (New-Object Text.UTF8Encoding($false, $true)).GetString($bytes) } catch { $text = [Text.Encoding]::GetEncoding(950).GetString($bytes) }   # Excel 存的 CSV 可能是 Big5
+  $text = $text.TrimStart([char]0xFEFF)
+  $bad = @(); $ln = 0
+  foreach ($line in ($text -split "`r?`n")) {
+    $ln++
+    $t = $line.Trim(); if ($t -eq '' -or $t.StartsWith('#')) { continue }
+    $c = @($t -split '[,\t，]' | ForEach-Object { $_.Trim().Trim('"') })
+    if ($c.Count -lt 3) { $bad += $ln; continue }
+    $d = RocDate $c[2]
+    if (-not $d) { if ($ln -gt 1) { $bad += $ln }; continue }   # 第一行通常是表頭
+    $list.Add([pscustomobject]@{ Old = (Norm $c[0]); New = (Norm $c[1]); Date = $d; Cust = $(if ($c.Count -ge 4) { $c[3].Trim() } else { '' }) })
+  }
+  return @{ List = $list; Path = $path; Exists = $true; Bad = $bad }
+}
+function Fmt-Roc([int]$d) { '{0}/{1:00}/{2:00}' -f [math]::Floor($d / 10000), ([math]::Floor($d / 100) % 100), ($d % 100) }
+
 # 傳給 Excel 的值要是原本的數字／文字，不能包著 PowerShell 的外殼（否則 Excel 會出錯）
 function Unwrap($v) { if ($null -eq $v) { $null } else { $v.psobject.BaseObject } }
 function Get-R1C1($cell) { try { $cell.Formula2R1C1 } catch { $cell.FormulaR1C1 } }
@@ -272,6 +305,8 @@ function Merge-Kind($wb, $kind, $src) {
   $dup = 0; $dupRows = 0; $keptRep = 0; $addOrders = 0
   $repChg = New-Object 'System.Collections.Generic.SortedDictionary[string,int]'   # 「原本 → 系統」的業務員：幾張單
   $repEx = New-Object 'System.Collections.Generic.Dictionary[string,string]'       # 每種改法舉一個單號
+  $repSpan = @{}                                                                     # 每種改法：實際日期最早、最晚
+  $repHand = New-Object 'System.Collections.Generic.SortedDictionary[string,int]'   # 依業務交接表改成新業務員的：幾張單
   foreach ($k in $keys) {
     $rows = $groups[$k]
     if (-not $exRows.ContainsKey($k)) { foreach ($r in $rows) { $add.Add($r) }; $addOrders++; continue }
@@ -285,18 +320,33 @@ function Merge-Kind($wb, $kind, $src) {
       if ($oi -ge 0) { $o = Norm $x[$oi]; if (-not $orig.ContainsKey($o)) { $orig[$o] = $x[$rep] } }
     }
     $merged = New-Object 'System.Collections.Generic.List[object]'
-    $chgThis = $null
+    $chgThis = $null; $handThis = $null
     for ($i = 0; $i -lt $rows.Count; $i++) {
       $x = $rows[$i].Clone()
       $o = if ($oi -ge 0) { Norm $x[$oi] } else { '' }
       $keep = if ($orig.ContainsKey($o)) { $orig[$o] } elseif ($ex.Count -eq $rows.Count -and (Norm $ex[$i][$rep]) -ne '') { $ex[$i][$rep] } else { $first }
       if ($null -ne $keep) {
-        if ($null -eq $chgThis -and (Norm $keep) -cne (Norm $x[$rep])) { $chgThis = "$(Norm $keep) → $(Norm $x[$rep])" }
+        $kNorm = Norm $keep; $sNorm = Norm $x[$rep]
+        if ($kNorm -cne $sNorm -and $sNorm -ne '') {
+          # 業務交接：交接日（含）之後的單用新業務員。沒有實際日期時看單號月份：交接月份之後的月份才算
+          $dd = 0; [void][int]::TryParse([string]$x[$n], [ref]$dd)
+          $cust = Norm $x[$kind.Cust - 1]
+          $hit = $null
+          foreach ($h in $HANDOVER) {
+            if ($h.Old -cne $kNorm -or $h.New -cne $sNorm) { continue }
+            if ($h.Cust -ne '' -and $h.Cust -cne $cust) { continue }
+            if (($dd -and $dd -ge $h.Date) -or (-not $dd -and (Ym $k) -gt [math]::Floor($h.Date / 100))) { $hit = $h; break }
+          }
+          if ($hit) { if ($null -eq $handThis) { $handThis = "$kNorm → $sNorm（交接日 $(Fmt-Roc $hit.Date)）" }; $merged.Add($x); continue }
+          if ($null -eq $chgThis) { $chgThis = "$kNorm → $sNorm" }
+          if ($dd) { $span = $repSpan[$chgThis]; if ($null -eq $span) { $repSpan[$chgThis] = @($dd, $dd) } else { if ($dd -lt $span[0]) { $span[0] = $dd }; if ($dd -gt $span[1]) { $span[1] = $dd } } }
+        }
         $x[$rep] = $keep
       }
       $merged.Add($x)
     }
     if ($chgThis) { if ($repChg.ContainsKey($chgThis)) { $repChg[$chgThis]++ } else { $repChg[$chgThis] = 1; $repEx[$chgThis] = $k } }
+    if ($handThis) { if ($repHand.ContainsKey($handThis)) { $repHand[$handThis]++ } else { $repHand[$handThis] = 1 } }
     $es = Sorted-Sigs $ex $n
     if ((Sorted-Sigs $merged $n) -ceq $es) {
       if ((Sorted-Sigs $rows $n) -ceq $es) { $dup++; $dupRows += $rows.Count } else { $keptRep++ }
@@ -466,7 +516,7 @@ function Merge-Kind($wb, $kind, $src) {
     Kind = $kind; Ws = $ws; Before = $last - 1; After = $newLast - 1; NewLast = $newLast; Sorted = $sorted; Trim = $trim
     MissNote = $missNote; Removed = $removed; RemovedOrders = $(if ($removed) { $missOrd.Count } else { 0 })
     DateCol = $dc; DateLetter = $dateLetter; DateFill = $dateFill; DateNew = $dateNew; DateBlank = $dateBlank; DateNote = $dateNote; DateWhy = $dateWhy
-    RepChg = $repChg; RepEx = $repEx
+    RepChg = $repChg; RepEx = $repEx; RepSpan = $repSpan; RepHand = $repHand
     AddOrders = $addOrders; AddRows = $addRows; Dup = $dup; DupRows = $dupRows; KeptRep = $keptRep; Replace = $replace
     Changed = $changed; FCols = $fcols; MaxYm = (Ym $newMax)
   }
@@ -716,6 +766,9 @@ try {
   if ($Sales) { $src.sales = Read-Source $xl (Resolve-Path -LiteralPath $Sales).Path $KINDS.sales }
   if ($Returns) { $src.returns = Read-Source $xl (Resolve-Path -LiteralPath $Returns).Path $KINDS.returns }
 
+  $ho = Load-Handover (Split-Path $Master)
+  $HANDOVER = $ho.List
+  if ($ho.Exists) { Say "業務交接表：$($HANDOVER.Count) 筆（$($ho.Path)）$(if ($ho.Bad.Count) { "；第 $([string]::Join('、', $ho.Bad)) 行看不懂，已略過" })" }
   Say '開啟總表（檔案很大時要等 1～2 分鐘）…'
   try {
     $wb = if ($MasterPassword) { $xl.Workbooks.Open($Master, 0, $true, [Type]::Missing, $MasterPassword) } else { $xl.Workbooks.Open($Master, 0, $true) }
@@ -775,7 +828,16 @@ try {
     if ($res.RepChg.Count) {
       $nChg = 0; foreach ($v in $res.RepChg.Values) { $nChg += $v }
       $L.Add("  系統裡業務員被改過、總表保留原本業務員的：$nChg 張單（原本 → 系統現在）")
-      foreach ($e in $res.RepChg.GetEnumerator()) { $L.Add("    業務員 $($e.Key)：$($e.Value) 張單，例如單號 $($res.RepEx[$e.Key])") }
+      foreach ($e in $res.RepChg.GetEnumerator()) {
+        $sp = $res.RepSpan[$e.Key]
+        $L.Add("    業務員 $($e.Key)：$($e.Value) 張單$(if ($sp) { "（實際日期 $(Fmt-Roc $sp[0])～$(Fmt-Roc $sp[1])）" })，例如單號 $($res.RepEx[$e.Key])")
+      }
+      $L.Add("    （如果是業務離職或換手，請在總表資料夾的「$HANDOVER_NAME」填上交接日期，交接日（含）之後的單會改成新業務員，再跑一次）")
+    }
+    if ($res.RepHand.Count) {
+      $nH = 0; foreach ($v in $res.RepHand.Values) { $nH += $v }
+      $L.Add("  依業務交接表改成新業務員的：$nH 張單（交接日之前的單仍保留原本的業務員）")
+      foreach ($e in $res.RepHand.GetEnumerator()) { $L.Add("    業務員 $($e.Key)：$($e.Value) 張單") }
     }
     $L.Add("  內容不一樣、改用新資料（業務員保留原本的）：$($res.Replace.Count) 張單")
     foreach ($rp in $res.Replace) {
@@ -796,6 +858,16 @@ try {
         $L.Add('    （找不到的單：把含有那些月份的 JMSSAL／JMSSBK 放進資料夾再跑一次就會補上；重複的單會跳過，只補日期。網站遇到沒有日期的單，會改用單號判斷月份）')
       }
     }
+  }
+  # 業務交接表：有被系統改過的業務員、又還沒有交接表時，建立一份空白範本（只有表頭和說明，沒有任何資料）
+  $anyChg = $false; foreach ($res in $results) { if ($res.RepChg.Count) { $anyChg = $true } }
+  if ($ho.Exists) {
+    $L.Add(''); $L.Add("【業務交接表】$($ho.Path)：$($HANDOVER.Count) 筆")
+    foreach ($h in $HANDOVER) { $L.Add("  $($h.Old) → $($h.New)，交接日 $(Fmt-Roc $h.Date)$(if ($h.Cust) { "，只限客戶 $($h.Cust)" } else { '，全部客戶' })") }
+    if ($ho.Bad.Count) { $L.Add("  第 $([string]::Join('、', $ho.Bad)) 行看不懂，已略過（格式：原業務員,新業務員,交接日期,客戶代號）") }
+  } elseif ($anyChg) {
+    $tpl = "原業務員,新業務員,交接日期,客戶代號`r`n# 一行一次交接。交接日（含）之後實際出貨／退貨的單會改成新業務員；之前的保留總表原本的業務員。`r`n# 交接日期可以寫 1151115、115/11/15 或 2026/11/15。客戶代號空白＝那位業務的所有客戶；只交接部分客戶時，一個客戶一行。`r`n# 例如：22,25,1151115,`r`n"
+    try { [IO.File]::WriteAllText($ho.Path, $tpl, (New-Object Text.UTF8Encoding($true))); $extra.Add("已在總表資料夾建立空白的「$HANDOVER_NAME」：如果系統改業務員是因為離職或換手，填上交接日期後再跑一次") } catch {}
   }
   if ($extra.Count) { $L.Add(''); $L.Add('【其他】'); foreach ($x in $extra) { $L.Add('  ' + $x) } }
   Write-Host ''; foreach ($x in $L) { Write-Host $x }; Write-Host ''

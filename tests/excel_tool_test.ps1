@@ -315,6 +315,22 @@ try {
 $rep3 = Get-ChildItem $FX -Filter '更新報告_*.txt' | Sort-Object LastWriteTime | Select-Object -Last 1
 ok ([IO.File]::ReadAllText($rep3.FullName).Contains('已從新總表刪除')) '報告寫出刪除了哪些單'
 
+# 業務交接：第一次跑時（系統改過業務員 12 → 13）會建立空白範本；填上交接日 114/08/01 後，114/08 的單改成新業務員 13
+ok ($rt.Contains('業務交接.csv') -and (Test-Path (Join-Path $FX '業務交接.csv'))) '系統改過業務員時，建立空白的業務交接表，報告提醒填交接日期'
+[IO.File]::WriteAllText((Join-Path $FX '業務交接.csv'), "原業務員,新業務員,交接日期,客戶代號`r`n12,13,1140801,`r`n", [Text.Encoding]::GetEncoding(950))   # 用 Big5 存（Excel 存 CSV 的預設）
+$OUT4 = Join-Path $FX 'out_handover.xlsx'
+ok ((RunTool $MASTER $OUT4 @('-NoRefresh')) -eq 0) '有業務交接表時再跑一次'
+$xl = New-Object -ComObject Excel.Application; $xl.DisplayAlerts = $false
+try {
+  $wb = $xl.Workbooks.Open($OUT4, 0, $true); $ws = $wb.Worksheets.Item('原始進貨表'); $last = Last-Row $ws 1; $v = $ws.Range("A1:V$last").Value2
+  $h4 = @(); for ($i = 2; $i -le $last; $i++) { if ($v[$i, 1] -eq '1140800004') { $h4 += $v[$i, 22] } }
+  ok ($h4.Count -gt 0 -and @($h4 | Where-Object { $_ -ne 13 }).Count -eq 0) '交接日（114/08/01）之後的單：業務員改成新業務員 13'
+  $wb.Close($false)
+} finally { $xl.Quit(); [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($xl); $xl = $null; [GC]::Collect(); [GC]::WaitForPendingFinalizers() }
+$rep4 = Get-ChildItem $FX -Filter '更新報告_*.txt' | Sort-Object LastWriteTime | Select-Object -Last 1
+ok ([IO.File]::ReadAllText($rep4.FullName).Contains('依業務交接表改成新業務員')) '報告寫出依交接表改了幾張單'
+Remove-Item -LiteralPath (Join-Path $FX '業務交接.csv')
+
 # 自動找檔案：檔名日期最新的總表優先（不要挑到 cd 副本、Excel 暫存檔、其他 Excel）、最新的 JMSSAL／JMSSBK
 $FD = Join-Path $FX 'find'; New-Item -ItemType Directory -Force $FD | Out-Null
 $files = [ordered]@{ '00_總表_2026-08-31.xlsx' = '2026-09-03'; '00_總表_2026-08-31cd.xlsx' = '2026-10-21'; '00_總表_2026-10-22.xlsx' = '2026-10-22 09:00'; '~$00_總表_2026-11-01.xlsx' = '2026-11-01'
