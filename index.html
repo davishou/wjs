@@ -233,13 +233,21 @@
           <p class="hint">可以選總表，也可以一次選系統匯出的 JMSSAL 和 JMSSBK（.DBF 直接選就好，不用先轉 Excel，中文才不會變亂碼）。原始資料有實際出貨日期，月份會更準。總表只讀「原始進貨表」「原始退貨表」，其他工作表一律忽略。檔案只在這台裝置上處理，不會上傳。有開啟密碼的 Excel 也可以直接匯入，會請你輸入密碼，在瀏覽器內解密。</p>
         </div>
         <div class="add-month" id="addMonth" hidden>
-          <h3>每月加入新資料</h3>
-          <p class="hint">不用每次匯入整份總表：把新月份的進貨、退貨另存成一個 Excel（一樣要有「原始進貨表」「原始退貨表」和表頭，只放新資料就好），按「加入新月份」。檔案裡有的月份會<strong>取代</strong>目前同月份的資料，所以同一個檔案加兩次也不會重複；其他月份不變。加入前會先讓你確認。</p>
-          <input type="file" id="fileAdd" accept=".xlsx,.xlsm" hidden>
-          <div class="row"><button class="btn" id="pickAdd">加入新月份</button></div>
+          <h3>加入新資料</h3>
+          <p class="hint"><strong>系統原始資料（建議）</strong>：從系統匯出新的 JMSSAL、JMSSBK（一個月、幾天都可以），按「加入新資料」一起選，或直接拖到上面的框框。依<strong>單號</strong>比對：新的單直接加入；網站裡已經有的單改用系統的新資料，但<strong>業務員保留原本的</strong>（系統事後改了業務員也一樣）。這段期間內網站有、系統沒有的單，會先列出來問你要不要刪。加入前會先讓你確認，完成後問你要不要把原檔做成加密備份。</p>
+          <p class="hint">也可以選總表格式的 Excel（有「原始進貨表」「原始退貨表」，只放新月份）：檔案裡有的月份會整月取代。</p>
+          <input type="file" id="fileAdd" accept=".xlsx,.xlsm,.dbf,.DBF" multiple hidden>
+          <div class="row"><button class="btn" id="pickAdd">加入新資料</button></div>
         </div>
         <div class="progress" id="importProgress" hidden><div class="bar"><i></i></div><p></p></div>
         <dl class="facts" id="dataFacts"></dl>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>原始檔備份</h2></div>
+        <p class="hint">匯入 JMSSAL、JMSSBK 之後，可以把它們<strong>原封不動</strong>（每一欄都在，包括 RECEIVE、PAY）加密成一個備份檔（.dvr），用當時的開啟密碼上鎖，存好就可以把原檔刪掉。要用時在這裡選備份檔、輸入密碼：可以直接匯入網站（不會產生沒加密的檔案），或存回原本的 DBF 檔。</p>
+        <input type="file" id="fileBak" accept=".dvr" hidden>
+        <div class="row"><button class="btn" id="pickBak">還原備份</button></div>
       </div>
 
       <div class="panel">

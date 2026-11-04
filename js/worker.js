@@ -8,11 +8,13 @@ function report(s) {
 }
 
 // 讀取一個或多個檔案（Excel 或 DBF）。有開啟密碼的 Excel：在記憶體內解密，不寫入任何檔案；用完立刻清空
-async function readExcel(fileOrFiles, password) {
+// 檔案也可以是 { name, bytes: Uint8Array }（從原始檔備份還原，只在記憶體裡）
+async function readExcel(fileOrFiles, password, opts) {
   const files = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles];
   const sources = [], plains = [];
   try {
     for (const file of files) {
+      if (file.bytes instanceof Uint8Array) { sources.push({ src: file.bytes, name: file.name, dbf: self.Dbf.isDbf(file.bytes.subarray(0, 8), file.name) }); continue; }
       const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
       if (self.OfficeCrypto.isCfb(head)) {
         const plain = await self.OfficeCrypto.decryptXlsx(new Uint8Array(await file.arrayBuffer()), password, report);
@@ -20,7 +22,7 @@ async function readExcel(fileOrFiles, password) {
       } else sources.push({ src: file, name: file.name, dbf: self.Dbf.isDbf(head, file.name) });
     }
     const dec = plains.length ? (s) => report({ ...s, pct: 0.2 + 0.8 * (s.pct || 0) }) : report;
-    return await self.Ingest.ingestFiles(sources, dec);
+    return await self.Ingest.ingestFiles(sources, dec, opts);
   } finally { plains.forEach((p) => p.fill(0)); }
 }
 
@@ -65,6 +67,11 @@ self.onmessage = async (e) => {
       const { raw, stats } = self.Dataset.merge(self.Dataset.deserialize(e.data.base), add, file.name);
       const buf = self.Dataset.serialize(raw);
       self.postMessage({ type: 'done', buf, stats }, [buf]);
+    } else if (type === 'readAdd') {
+      // 加入系統原始資料：只讀檔，合併在畫面這邊做（要先讓使用者確認）
+      const add = await readExcel(e.data.files, password, { allowNoSales: true });
+      const buf = self.Dataset.serialize(add);
+      self.postMessage({ type: 'done', buf, info: { dated: add.dated, nSales: add.nSales, nReturns: add.nReturns, warning: add.warning || '' } }, [buf]);
     } else if (type === 'pack') {
       const raw = self.Dataset.deserialize(e.data.buf);
       const pack = await self.Dataset.makePack(raw, password);

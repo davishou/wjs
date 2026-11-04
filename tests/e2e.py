@@ -209,6 +209,7 @@ async def main():
     await picker(b)
     await dashboard(b)
     await raw_import(b)
+    await raw_add(b)
     await report_page(b)
     await demo_mode(b)
     await b.close()
@@ -443,6 +444,8 @@ async def raw_import(b):
     await pg.set_input_files('#fileXlsx', [FX + '/JMSSAL.DBF', FX + '/JMSSBK.DBF'])
     await dlg_fill(pg, {'app': 'raw12', 'app2': 'raw12'}); t = await wait_done(pg)
     ok(f"{exp['nSales']} 筆進貨" in t and f"{exp['nReturns']} 筆退貨" in t and f"其中 {exp['moved']} 筆" in t, '一次選 JMSSAL.DBF＋JMSSBK.DBF（已刪除的列不算）：' + t)
+    await pg.wait_for_selector('#dlg[open]'); ok('加密備份' in await pg.text_content('#dlgForm'), '匯入 DBF 完成後問要不要做加密備份')
+    await pg.click('#dlgCancel'); await pg.wait_for_timeout(200)
     got = await pg.evaluate(NET_BY_YM)
     ok(same_months(got, exp['by_date']), f"預設依實際日期：每月淨銷售 {got}（Python {exp['by_date']}）")
     ok(exp['by_date'] != exp['by_ord'], '假資料裡依日期和依單號的月份確實不同')
@@ -482,16 +485,92 @@ async def raw_import(b):
     # 總表更新工具加上「實際出貨日期」「實際退貨日期」欄之後的總表：網站也依實際日期
     await pg.evaluate("document.querySelector('#importProgress p').textContent = ''"); await pg.set_input_files('#fileXlsx', [FX + '/master_dated.xlsx']); t = await wait_done(pg)
     ok(f"其中 {exp['moved']} 筆" in t and same_months(await pg.evaluate(NET_BY_YM), exp['by_date']), '有「實際出貨日期」欄的總表也依實際日期：' + t)
-    # 只選出貨
-    await pg.evaluate("document.querySelector('#importProgress p').textContent = ''"); await pg.set_input_files('#fileXlsx', [FX + '/JMSSAL.DBF']); t = await wait_done(pg)
-    ok(f"{exp['nSales']} 筆進貨" in t and '0 筆退貨' in t, '只選 JMSSAL 也可以：' + t)
-    # 只選退貨 → 說明缺出貨
-    await pg.evaluate("document.querySelector('#importProgress p').textContent = ''"); await pg.set_input_files('#fileXlsx', [FX + '/JMSSBK.DBF']); t = await wait_done(pg)
-    ok('找不到出貨' in t, '只選 JMSSBK → 說明缺出貨資料：' + t)
     await pg.click('a[data-view=dashboard]'); await pg.wait_for_selector('#dbAlerts')
     await pg.screenshot(path=SH + '/31_raw_dashboard.png', full_page=True)
     ok(not errs, '原始資料匯入沒有 JS 錯誤 ' + str(errs))
     await c.close()
+
+
+async def raw_add(b):
+    """加入新的 JMSSAL／JMSSBK：依單號加入／更新、業務員保留原本的、作廢的單問要不要刪；原始檔加密備份與還原。"""
+    sys.path.insert(0, HERE)
+    import make_fixtures as mf
+    sal, bk = mf.raw_rows(); add, bk_add, info = mf.raw_add_rows()
+    c = await b.new_context(viewport={'width': 1366, 'height': 900}, accept_downloads=True)
+    pg = await c.new_page(); errs = []
+    pg.on('pageerror', lambda e: errs.append(str(e)))
+    await pg.goto(URL + '#data'); await pg.wait_for_timeout(300)
+    # 第一次只選退貨 → 說明要一起選
+    await pg.set_input_files('#fileXlsx', [FX + '/JMSSBK.DBF']); t = await wait_done(pg)
+    ok('找不到出貨' in t, '第一次只選 JMSSBK → 說明要和 JMSSAL 一起選：' + t)
+    await pg.evaluate("document.querySelector('#importProgress p').textContent = ''")
+    await pg.set_input_files('#fileXlsx', [FX + '/JMSSAL.DBF', FX + '/JMSSBK.DBF'])
+    await dlg_fill(pg, {'app': 'add12', 'app2': 'add12'}); t = await wait_done(pg)
+    ok(f"{len(sal)} 筆進貨" in t, '第一次匯入：' + t)
+    # 加密備份
+    await pg.wait_for_selector('#dlg[open]')
+    async with pg.expect_download() as dl: await pg.click('#dlgOk')
+    d = await dl.value; bak = FX + '/' + d.suggested_filename; await d.save_as(bak)
+    raw = open(bak, 'rb').read(); orig = open(FX + '/JMSSAL.DBF', 'rb').read()
+    ok(d.suggested_filename.startswith('原始資料備份_') and d.suggested_filename.endswith('.dvr') and raw[:4] == b'DVRB', f'存成加密備份：{d.suggested_filename}（{len(raw)} bytes）')
+    ok('甲商行'.encode('big5') not in raw and b'DELIVNO' not in raw and orig[32:64] not in raw, '備份檔裡看不到客戶名、欄位名稱（已加密）')
+    await pg.wait_for_function("/可以把/.test(document.querySelector('#importProgress p').textContent)")
+    # 加入新資料
+    await pg.set_input_files('#fileAdd', [FX + '/add/JMSSAL.DBF', FX + '/add/JMSSBK.DBF'])
+    await pg.wait_for_selector('#dlg[open]', timeout=60000); t = await pg.text_content('#dlgForm')
+    await pg.screenshot(path=SH + '/33_raw_add_dialog.png')
+    ok(f"新的單：{info['new_orders'] + 1} 張" in t and f"已經有的單：{info['upd']} 張" in t and '其中 1 張內容有變動' in t, '確認視窗：新的單、已經有的單、內容有變動：' + t)
+    ok('業務員保留原本的' in t and f"{info['rep_changed']}（原本 22 → 系統現在 23）" in t, '確認視窗：系統改了業務員的單，保留原本的')
+    ok(f"1 張單網站裡有、這次的檔案裡沒有" in t and info['gone'] in t and not await pg.is_checked('#dlg_check'), '確認視窗：列出作廢的單，預設不刪除')
+    await pg.click('#dlgOk'); await pg.wait_for_function("/完成：新增/.test(document.querySelector('#importProgress p').textContent)", timeout=60000)
+    await pg.wait_for_selector('#dlg[open]'); await pg.click('#dlgCancel')
+    st = await pg.evaluate("""(() => { const E = window.__app.E, ds = E.ds; const o = {}; const ord = ds.str.ord, rep = ds.str.rep;
+      for (let r = 0; r < ds.n; r++) { const k = ord.dict[ord.codes[r]]; (o[k] = o[k] || new Set()).add(rep.dict[rep.codes[r]]); }
+      return { nS: ds.nSales, nR: ds.nReturns, reps: Object.fromEntries(Object.entries(o).map(([k, v]) => [k, [...v]])) }; })()""")
+    ok(st['nS'] == len(sal) + info['new_sales'] and st['nR'] == len(bk) + 1, f"加入後 {st['nS']} 筆進貨、{st['nR']} 筆退貨（應為 {len(sal) + info['new_sales']}、{len(bk) + 1}）")
+    ok(st['reps'][info['rep_changed']] == ['22'] and info['gone'] in st['reps'], '業務員保留原本的 22；沒勾選時作廢的單保留')
+    want = sum(r['SALEGET'] for r in sal if r['DELIVNO'] != info['qty_changed']) + sum(r['SALEGET'] for r in add if r['DELIVNO'] == info['qty_changed'] or r['DELIVNO'].startswith('11412')) - sum(r['SALEGET'] for r in bk + bk_add)
+    got = sum((await pg.evaluate(NET_BY_YM)).values())
+    ok(abs(got - want) < 0.01, f'加入後淨銷售 {got:.1f}（Python {want:.1f}），改過數量的單用新資料')
+    # 同一個檔案再加一次：不會重複；勾選刪除作廢的單
+    await pg.set_input_files('#fileAdd', [FX + '/add/JMSSAL.DBF', FX + '/add/JMSSBK.DBF'])
+    await pg.wait_for_selector('#dlg[open]', timeout=60000); t = await pg.text_content('#dlgForm')
+    ok('新的單：0 張' in t, '同一個檔案再加一次：沒有新的單')
+    await pg.click('#dlg_check'); await pg.click('#dlgOk')
+    await pg.wait_for_function("/完成：新增/.test(document.querySelector('#importProgress p').textContent)", timeout=60000)
+    t = await pg.text_content('#importProgress p'); await pg.wait_for_selector('#dlg[open]'); await pg.click('#dlgCancel')
+    n_gone = sum(1 for r in sal if r['DELIVNO'] == info['gone'])
+    ok('刪除 1 張' in t and await pg.evaluate('window.__app.E.ds.nSales') == len(sal) + info['new_sales'] - n_gone, '勾選後刪除作廢的單，筆數沒有重複：' + t)
+    # 重新開啟後資料還在（有加密存檔）
+    await pg.reload(); await pg.fill('#lockPw', 'add12'); await pg.click('#lockGo'); await pg.wait_for_selector('#lock[hidden]', state='attached')
+    ok(await pg.evaluate('window.__app.E.ds.nSales') == len(sal) + info['new_sales'] - n_gone, '重新開啟後是加入後的資料')
+    await pg.screenshot(path=SH + '/34_raw_backup_panel.png', full_page=True)
+    ok(not errs, '加入新資料沒有 JS 錯誤 ' + str(errs))
+    await c.close()
+    # 在另一台裝置（沒有資料）還原備份：密碼錯 → 再試；匯入網站
+    for alt in (False, True):
+        c = await b.new_context(viewport={'width': 390, 'height': 844}, is_mobile=True, accept_downloads=True)
+        pg = await c.new_page(); errs = []; pg.on('pageerror', lambda e: errs.append(str(e)))
+        await pg.goto(URL + '#data'); await pg.wait_for_timeout(300)
+        await pg.set_input_files('#fileBak', bak)
+        await pg.wait_for_selector('#dlg[open]'); await pg.fill('#dlg_pw', 'wrong'); await pg.click('#dlgOk')
+        await pg.wait_for_function("/不正確/.test(document.querySelector('#dlgErr').textContent)", timeout=30000)
+        ok(True, '還原：密碼錯誤時請再試一次')
+        await pg.fill('#dlg_pw', 'add12')
+        if not alt:
+            await pg.screenshot(path=SH + '/35_restore_dialog_mobile.png')
+            await pg.click('#dlgOk'); t = await wait_done(pg)
+            ok(f"{len(sal)} 筆進貨" in t and f"{len(bk)} 筆退貨" in t and await pg.evaluate("document.querySelector('#dlg').open") is False, '還原 → 匯入網站（新裝置，不再問要不要備份）：' + t)
+            await pg.reload(); await pg.fill('#lockPw', 'add12'); await pg.click('#lockGo'); await pg.wait_for_selector('#lock[hidden]', state='attached')
+            ok(await pg.evaluate('window.__app.E.ds.nSales') == len(sal), '新裝置的開啟密碼沿用備份的密碼')
+        else:
+            got = {}
+            async def grab(dl): got[dl.suggested_filename] = open(await dl.path(), 'rb').read()
+            pg.on('download', lambda dl: asyncio.ensure_future(grab(dl)))
+            await pg.click('#dlgAlt'); await pg.wait_for_timeout(2500)
+            ok(got.get('JMSSAL.DBF') == open(FX + '/JMSSAL.DBF', 'rb').read() and got.get('JMSSBK.DBF') == open(FX + '/JMSSBK.DBF', 'rb').read(), f'還原 → 存回 DBF 檔，和原檔一模一樣：{list(got)}')
+        ok(not errs, '還原備份沒有 JS 錯誤 ' + str(errs))
+        await c.close()
 
 
 async def report_page(b):

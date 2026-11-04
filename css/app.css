@@ -641,3 +641,8 @@ button.bd-kpi { cursor: pointer; } button.bd-kpi:hover { border-color: var(--lin
   .checks { grid-template-columns: 1fr 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+/* 加入新資料的確認視窗 */
+#dlg .desc ul { margin: .4em 0 .6em; padding-left: 1.2em; }
+#dlg .desc li { margin: .25em 0; }
+#dlg .desc .warn { color: var(--warn); }
+#dlg .actions { flex-wrap: wrap; }

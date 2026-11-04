@@ -192,7 +192,8 @@
   // sources：[{ src: File/Blob/Uint8Array, name, dbf: true|false }]
   //   Excel：找「原始進貨表／原始出貨表」「原始退貨表」工作表；找不到就依表頭判斷（例如 WPS 把 JMSSAL.DBF 另存的 Excel）
   //   DBF：JMSSAL（出貨）、JMSSBK（退貨），依欄位判斷
-  async function ingestFiles(sources, onStatus) {
+  // opts.allowNoSales：加入新資料時可以只有退貨（例如那幾天只匯出 JMSSBK）
+  async function ingestFiles(sources, onStatus, opts = {}) {
     const t0 = Date.now();
     onStatus({ stage: '開啟檔案', pct: 0 });
     const tables = []; // { scan, sst, label, spec, src, size }
@@ -227,7 +228,7 @@
       if (rSheet) add(rSheet, 1);
       if (!sSheet && !rSheet) notes.push(f.name + '（工作表：' + sheets.map((s) => s.name).join('、') + '）');
     }
-    if (!tables.some((t) => t.src === 0)) {
+    if (opts.allowNoSales && tables.length && !notes.length) { /* 只有退貨也可以 */ } else if (!tables.some((t) => t.src === 0)) {
       throw new Error('找不到出貨（進貨）資料。請選總表（有「原始進貨表」或「原始出貨表」），或系統匯出的 JMSSAL' + (sources.length > 1 ? '，可以和 JMSSBK 一起選' : '') + '。' + (notes.length ? '看不懂的檔案：' + notes.join('；') : ''));
     }
     tables.sort((a, b) => a.src - b.src); // 先出貨後退貨

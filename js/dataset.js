@@ -166,6 +166,150 @@
     };
   }
 
+  // ---- 加入系統原始資料（JMSSAL／JMSSBK，任何期間：一個月、幾天都可以）----
+  // 規則和「總表更新工具」一樣：
+  //  1. 依整張單號比對（進貨、退貨分開）。新檔案有的單 → 整張換成新資料；沒有的單 → 新增。
+  //  2. 業務員保留原本的：系統事後改了業務員，也保留當初實際負責的人。同一張單依列的順序對齊（第 k 列對第 k 列），
+  //     對不到或原本是空白時，用這張單原本的第一個業務員；這張單原本完全沒有業務員才用系統的。
+  //  3. 期間內網站有、新檔案沒有的單（多半是作廢或刪除）先列出來，由使用者決定要不要刪。
+  //     期間：新檔案的實際日期最早～最晚（進貨、退貨分開）；新檔案沒有實際日期時改用單號月份。
+  const ordKey = (raw, r) => raw.src[r] + '|' + raw.str.ord.dict[raw.str.ord.codes[r]];
+  const ordOf = (raw, r) => raw.str.ord.dict[raw.str.ord.codes[r]];
+  const repOf = (raw, r) => raw.str.rep.dict[raw.str.rep.codes[r]] || '';
+  function lineSig(raw, r) { // 比較內容用：不含業務員與日期（舊資料可能沒有日期）
+    const s = (k) => raw.str[k].dict[raw.str[k].codes[r]];
+    return [s('sku'), s('color'), s('unit'), s('cust'), raw.num.qty[r], raw.num.amt[r], raw.num.price[r], raw.num.cost[r]].join('\u0001');
+  }
+  function planOrders(base, add) {
+    if (!add.n) throw new Error('新檔案裡沒有任何出貨或退貨資料');
+    const bRows = new Map(); // key → [列號…]
+    for (let r = 0; r < base.n; r++) { const k = ordKey(base, r); let a = bRows.get(k); if (!a) bRows.set(k, (a = [])); a.push(r); }
+    const aRows = new Map();
+    for (let r = 0; r < add.n; r++) { const k = ordKey(add, r); let a = aRows.get(k); if (!a) aRows.set(k, (a = [])); a.push(r); }
+    // 新檔案的期間
+    const rng = [0, 1].map(() => ({ dMin: Infinity, dMax: 0, mMin: Infinity, mMax: 0 }));
+    for (let r = 0; r < add.n; r++) {
+      const g = rng[add.src[r]], d = add.num.date[r], m = ymOfOrd(ordOf(add, r));
+      if (d) { if (d < g.dMin) g.dMin = d; if (d > g.dMax) g.dMax = d; }
+      if (m) { if (m < g.mMin) g.mMin = m; if (m > g.mMax) g.mMax = m; }
+    }
+    // 業務員：決定新資料每一列要用的業務員
+    const repFix = new Map(); // add 列號 → 要改成的業務員
+    const repChanges = []; // { src, ord, from, to }
+    let nNew = [0, 0], nUpd = [0, 0], nChanged = 0, nDateFill = 0;
+    for (const [k, ar] of aRows) {
+      const s = +k.charAt(0), br = bRows.get(k);
+      if (!br) { nNew[s]++; continue; }
+      nUpd[s]++;
+      const first = br.map((r) => repOf(base, r)).find((x) => x) || '';
+      let changed = br.length !== ar.length;
+      if (!changed) { const a = br.map((r) => lineSig(base, r)).sort(), b = ar.map((r) => lineSig(add, r)).sort(); changed = a.some((x, i) => x !== b[i]); }
+      if (changed) nChanged++;
+      if (br.some((r) => !base.num.date[r]) && ar.some((r) => add.num.date[r])) nDateFill++;
+      if (!first) continue;
+      const diff = new Set();
+      ar.forEach((r, i) => {
+        const keep = (i < br.length && repOf(base, br[i])) || first, sys = repOf(add, r);
+        if (sys !== keep) { repFix.set(r, keep); diff.add(keep + '\u0001' + sys); }
+      });
+      for (const d of diff) { const [from, to] = d.split('\u0001'); repChanges.push({ src: s, ord: k.slice(2), from, to }); }
+    }
+    // 期間內網站有、新檔案沒有的單
+    const missing = []; // { src, ord, rows }
+    for (const [k, br] of bRows) {
+      if (aRows.has(k)) continue;
+      const s = +k.charAt(0), g = rng[s];
+      const hasDates = g.dMax > 0;
+      const inRange = br.some((r) => {
+        if (hasDates) { const d = base.num.date[r]; return d && d >= g.dMin && d <= g.dMax; }
+        const m = ymOfOrd(ordOf(base, r)); return m && m >= g.mMin && m <= g.mMax;
+      });
+      if (inRange) missing.push({ src: s, ord: k.slice(2), rows: br.length });
+    }
+    missing.sort((a, b) => a.src - b.src || (a.ord < b.ord ? -1 : 1));
+    const range = rng.map((g) => (g.dMax ? { by: 'date', from: g.dMin, to: g.dMax } : g.mMax ? { by: 'ord', from: g.mMin, to: g.mMax } : null));
+    return { bRows, aRows, repFix, repChanges, missing, range, nNew, nUpd, nChanged, nDateFill, addSales: add.nSales, addReturns: add.nReturns };
+  }
+  function mergeOrders(base, add, plan, { removeMissing = false, name = '' } = {}) {
+    const drop = new Set();
+    for (const k of plan.aRows.keys()) if (plan.bRows.has(k)) drop.add(k);
+    if (removeMissing) for (const m of plan.missing) drop.add(m.src + '|' + m.ord);
+    const keep = new Uint8Array(base.n);
+    const removed = [0, 0];
+    for (let r = 0; r < base.n; r++) { if (drop.has(ordKey(base, r))) removed[base.src[r]]++; else keep[r] = 1; }
+    const n = base.n - removed[0] - removed[1] + add.n;
+    const from = new Uint8Array(n), row = new Int32Array(n);
+    let j = 0;
+    for (const s of [0, 1]) {
+      for (let r = 0; r < base.n; r++) if (keep[r] && base.src[r] === s) row[j++] = r;
+      for (let r = 0; r < add.n; r++) if (add.src[r] === s) { from[j] = 1; row[j++] = r; }
+    }
+    const parts = [base, add], now = new Date().toISOString();
+    const added = [add.nSales, add.nReturns];
+    const out = {
+      n, nSales: base.nSales - removed[0] + added[0], nReturns: base.nReturns - removed[1] + added[1],
+      createdAt: now, sourceName: base.sourceName, meta: base.meta || null,
+      added: (base.added || []).concat([{ name, at: now, sales: added[0], returns: added[1] }]).slice(-60),
+      str: {}, num: {}, src: new Uint8Array(n),
+    };
+    for (const k of STR) {
+      const d = makeDict();
+      const maps = parts.map((p) => p.str[k].dict.map((v) => d.code(v)));
+      const codes = new Int32Array(n), pc = [base.str[k].codes, add.str[k].codes];
+      for (let i = 0; i < n; i++) codes[i] = maps[from[i]][pc[from[i]][row[i]]];
+      if (k === 'rep') for (let i = 0; i < n; i++) if (from[i] && plan.repFix.has(row[i])) codes[i] = d.code(plan.repFix.get(row[i]));
+      out.str[k] = { dict: d.list, codes };
+    }
+    for (const k of NUM) {
+      const a = new Float64Array(n), pn = [base.num[k], add.num[k]];
+      for (let i = 0; i < n; i++) a[i] = pn[from[i]][row[i]];
+      out.num[k] = a;
+    }
+    for (let i = 0; i < n; i++) out.src[i] = parts[from[i]].src[row[i]];
+    return { raw: out, removedMissing: removeMissing ? plan.missing.length : 0 };
+  }
+
+  // ---- 原始檔加密備份（.dvr）----
+  // 把使用者選的 JMSSAL.DBF、JMSSBK.DBF「原封不動」包成一個檔，用開啟密碼的金鑰加密（AES-256-GCM）。
+  // 格式：'DVRB' + 版本(1) + 次數(4) + salt(16) + iv(12) + AES-GCM(gzip(標頭長度(4) + JSON 標頭 + 每個檔案的位元組))
+  // 還原時輸入當時的開啟密碼，用檔案裡的 salt 和次數重新產生金鑰；密碼不存在檔案裡。
+  const BAK_AAD = enc.encode('DVRAWBK1');
+  async function makeRawBackup(vault, files, info) {
+    const list = [], bufs = [];
+    for (const f of files) {
+      const u8 = f.bytes instanceof Uint8Array ? f.bytes : new Uint8Array(await f.arrayBuffer());
+      list.push({ name: f.name, size: u8.length, lastModified: f.lastModified || 0 }); bufs.push(u8);
+    }
+    const head = enc.encode(JSON.stringify({ v: 1, createdAt: new Date().toISOString(), files: list, ...(info || {}) }));
+    const total = 4 + head.length + bufs.reduce((s, b) => s + b.length, 0);
+    const plain = new Uint8Array(total);
+    new DataView(plain.buffer).setUint32(0, head.length, true); plain.set(head, 4);
+    let p = 4 + head.length; for (const b of bufs) { plain.set(b, p); p += b.length; }
+    const z = await gzip(plain); plain.fill(0);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: BAK_AAD }, vault.key, z));
+    const out = new Uint8Array(37 + ct.length);
+    out.set(enc.encode('DVRB'), 0); out[4] = 1; new DataView(out.buffer).setUint32(5, vault.iter, true);
+    out.set(vault.salt, 9); out.set(iv, 25); out.set(ct, 37);
+    return out;
+  }
+  const isRawBackup = (u8) => u8.length > 37 && dec.decode(u8.subarray(0, 4)) === 'DVRB';
+  // 回傳 { info, files: [{ name, size, lastModified, bytes: Uint8Array }] }；密碼錯誤時 code = BAD_PASSWORD
+  async function openRawBackup(u8, password) {
+    if (!isRawBackup(u8)) throw new Error('這不是本軟體的原始檔備份（.dvr）');
+    if (u8[4] !== 1) throw new Error('這個備份是新版軟體做的，請重新整理網頁後再試');
+    const iter = new DataView(u8.buffer, u8.byteOffset).getUint32(5, true);
+    const key = await vaultKey(password, u8.slice(9, 25), iter);
+    let z;
+    try { z = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: u8.slice(25, 37), additionalData: BAK_AAD }, key, u8.subarray(37)); } catch (e) { const er = new Error('密碼不正確'); er.code = 'BAD_PASSWORD'; throw er; }
+    const plain = new Uint8Array(await gunzip(z));
+    const hl = new DataView(plain.buffer).getUint32(0, true);
+    const info = JSON.parse(dec.decode(plain.subarray(4, 4 + hl)));
+    let p = 4 + hl;
+    const files = info.files.map((f) => { const bytes = plain.subarray(p, p + f.size); p += f.size; return { ...f, bytes }; });
+    return { info, files };
+  }
+
   // ---- 衍生欄位（等同 Excel W~AE 欄的公式）----
   function regionOf(code) {
     const c = code.charAt(0);
@@ -336,5 +480,5 @@
     async clear() { await idbDel('vault'); await idbDel('data'); },
   };
 
-  root.Dataset = { Vault, serialize, deserialize, hydrate, merge, withMeta, normCat, splitSku, sizeRank, makePack, openPack, packNeedsPassword, gzip, gunzip, idbSet, idbGet, idbDel, regionOf, simplify };
+  root.Dataset = { Vault, serialize, deserialize, hydrate, merge, planOrders, mergeOrders, makeRawBackup, openRawBackup, isRawBackup, withMeta, normCat, splitSku, sizeRank, makePack, openPack, packNeedsPassword, gzip, gunzip, idbSet, idbGet, idbDel, regionOf, simplify };
 })(typeof self !== 'undefined' ? self : globalThis);

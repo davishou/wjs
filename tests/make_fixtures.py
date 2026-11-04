@@ -294,6 +294,37 @@ def make_raw(fx):
 
 
 
+def raw_add_rows():
+    """「加入新資料」用的第二次匯出（114/11/01～114/12/20）：
+    - 11411 的單全部再出現一次，但少了一張（系統裡作廢了）
+    - 其中一張系統事後把業務員改成 23（網站要保留原本的 22）、另一張數量改了
+    - 新增 5 張 11412 的單；退貨新增 1 張
+    回傳 (出貨列, 退貨列, 說明)"""
+    sal, bk = raw_rows()
+    old = [r for r in sal if r['DELIVNO'].startswith('11411') and int(r['DELIVDATE']) >= 1141101]
+    orders = sorted({r['DELIVNO'] for r in old})
+    gone, rep_changed, qty_changed = orders[0], orders[1], orders[2]
+    add = [dict(r) for r in old if r['DELIVNO'] != gone]
+    for r in add:
+        if r['DELIVNO'] == rep_changed: r['EMPNO'] = '23'
+    q = next(r for r in add if r['DELIVNO'] == qty_changed); q['OUTQTY'] = q['OUTQTY'] + 1; q['SALEGET'] = round(q['SALEGET'] + 100, 1)
+    random.seed(11)
+    for k in range(5):
+        cid, name = random.choice(RAW_CUSTS)
+        for line in (1, 2):
+            add.append(dict(old[0], DELIVNO=f'11412{900 + k:05d}', DELIVORD=f'{line:02d}', ID=cid, SNAME=name, OUTQTY=1.0, SALEGET=500.0, DELIVDATE=str(1141201 + k * 4)))
+    bk_add = [dict(bk[0], DELIVNO='1141290001', DELIVDATE='1141215', SALEGET=200.0)]
+    info = dict(gone=gone, rep_changed=rep_changed, qty_changed=qty_changed, new_sales=10, new_orders=5, upd=len(orders) - 1)
+    return add, bk_add, info
+
+
+def make_raw_add(fx):
+    add, bk_add, info = raw_add_rows()
+    write_dbf(os.path.join(fx, 'add', 'JMSSAL.DBF'), SAL_FIELDS, add)
+    write_dbf(os.path.join(fx, 'add', 'JMSSBK.DBF'), BK_FIELDS, bk_add)
+    print(f"加入新資料用的 JMSSAL／JMSSBK: {len(add)} 筆出貨、{len(bk_add)} 筆退貨（作廢 {info['gone']}、改業務員 {info['rep_changed']}）")
+
+
 def make_dated_master(path):
     """總表更新工具加上實際日期欄之後的總表：中文表頭，原始進貨表最後有「實際出貨日期」、原始退貨表有「實際退貨日期」。內容和 raw_rows() 一樣。"""
     sal, bk = raw_rows()
@@ -315,6 +346,8 @@ if __name__ == '__main__':
     make_month_xlsx(p('month.xlsx'))
     make_class_xlsx(p('class.xlsx'))
     make_raw(FX)
+    os.makedirs(os.path.join(FX, 'add'), exist_ok=True)
+    make_raw_add(FX)
     make_dated_master(p('master_dated.xlsx'))
     encrypt_agile(p('class.xlsx'), p('class_agile.xlsx'), AGILE_PW)
     encrypt_agile(p('month.xlsx'), p('month_agile.xlsx'), AGILE_PW)

@@ -833,17 +833,19 @@
   // ---------- 密碼對話框 ----------
   // fields: [{ name, label, placeholder, autocomplete }]；check: { name, label, checked, hides: [欄位名] }
   // validate(values) 回傳錯誤訊息（可為 async）；關閉時清空輸入框，密碼不留在畫面上。
-  function ask({ title, desc, fields, check, submit = '確定', error = '', validate }) {
+  // check 沒有 after 時放在最後；alt：第二個按鈕的文字（按了回傳的值會有 alt: true）；cancel：取消鈕的文字
+  function ask({ title, desc, fields, check, submit = '確定', error = '', validate, alt, cancel = '取消' }) {
     return new Promise((resolve) => {
       const dlg = $('#dlg'), form = $('#dlgForm');
       form.innerHTML = `<h2>${esc(title)}</h2>${desc ? `<div class="desc">${desc}</div>` : ''}` +
         fields.map((f) => `<div data-f="${f.name}"><label class="field-label" for="dlg_${f.name}">${esc(f.label)}</label>` +
           `<input type="password" id="dlg_${f.name}" name="${f.name}" placeholder="${esc(f.placeholder || '')}" autocomplete="${f.autocomplete || 'off'}"></div>` +
           (check && check.after === f.name ? `<label class="check"><input type="checkbox" id="dlg_check" ${check.checked ? 'checked' : ''}>${esc(check.label)}</label>` : '')).join('') +
+        (check && !check.after ? `<label class="check"><input type="checkbox" id="dlg_check" ${check.checked ? 'checked' : ''}>${esc(check.label)}</label>` : '') +
         `<p class="form-err" id="dlgErr" role="alert">${esc(error)}</p>` +
-        `<div class="actions"><button type="button" class="btn" value="cancel" id="dlgCancel">取消</button><button class="btn primary" id="dlgOk">${esc(submit)}</button></div>`;
+        `<div class="actions"><button type="button" class="btn" value="cancel" id="dlgCancel">${esc(cancel)}</button>${alt ? `<button type="button" class="btn" id="dlgAlt">${esc(alt)}</button>` : ''}<button class="btn primary" id="dlgOk">${esc(submit)}</button></div>`;
       const cb = $('#dlg_check', form);
-      const sync = () => { if (cb) check.hides.forEach((n) => { $(`[data-f="${n}"]`, form).hidden = cb.checked; }); };
+      const sync = () => { if (cb) (check.hides || []).forEach((n) => { $(`[data-f="${n}"]`, form).hidden = cb.checked; }); };
       if (cb) cb.addEventListener('change', sync);
       sync();
       let done = false;
@@ -856,18 +858,20 @@
       };
       $('#dlgCancel', form).onclick = () => finish(null);
       dlg.oncancel = (e) => { e.preventDefault(); finish(null); };
-      form.onsubmit = async (e) => {
-        e.preventDefault();
+      const run = async (isAlt) => {
         const v = {};
         fields.forEach((f) => { v[f.name] = $(`#dlg_${f.name}`, form).value; });
         if (cb) v[check.name] = cb.checked;
-        const ok = $('#dlgOk', form), old = ok.textContent;
+        if (isAlt) v.alt = true;
+        const ok = $(isAlt ? '#dlgAlt' : '#dlgOk', form), old = ok.textContent;
         ok.disabled = true; ok.textContent = '處理中…';
         const msg = validate ? await validate(v) : '';
         ok.disabled = false; ok.textContent = old;
         if (msg) { $('#dlgErr', form).textContent = msg; return; }
         finish(v);
       };
+      form.onsubmit = (e) => { e.preventDefault(); run(false); };
+      if (alt) $('#dlgAlt', form).onclick = () => run(true);
       dlg.showModal();
       const first = fields.find((f) => !$(`[data-f="${f.name}"]`, form).hidden);
       if (first) $(`#dlg_${first.name}`, form).focus();
@@ -922,8 +926,11 @@
     const file = files[0];
     const old = files.find((f) => /\.xls$/i.test(f.name));
     if (!force && old) { toast(`「${old.name}」是舊版 .xls 格式，無法讀取，請在 Excel「另存新檔」為 .xlsx 再匯入`, 5000); return; }
-    const bad = files.find((f) => !/\.(xls[xm]|dbf)$/i.test(f.name));
+    const bad = files.find((f) => !/\.(xls[xm]|dbf|dvr)$/i.test(f.name));
     if (!force && bad) { toast(`「${bad.name}」不是 Excel（.xlsx）或 DBF 檔`, 4000); return; }
+    if (files.some((f) => /\.dvr$/i.test(f.name))) { restoreRawBackup(files.find((f) => /\.dvr$/i.test(f.name))); return; }
+    // 系統原始資料（.DBF）：第一次整份匯入，之後依單號加入／更新，最後問要不要加密備份
+    if (files.every((f) => /\.dbf$/i.test(f.name))) { addRawFiles(files); return; }
     if (force) toast('這是 Excel 檔，直接匯入', 3000);
     go('data');
     const names = files.map((f) => f.name).join('、');
@@ -1015,6 +1022,141 @@
       showProgress(1, `完成：加入 ${st.months.map(ymLabel).join('、')}，目前共 ${nf0.format(S.E.ds.nSales)} 筆進貨、${nf0.format(S.E.ds.nReturns)} 筆退貨`);
       toast('新資料已加入，已加密保存在這台裝置');
       return;
+    }
+  }
+
+  // ---------- 加入系統原始資料（JMSSAL／JMSSBK .DBF，任何期間）----------
+  // 第一次（這台裝置還沒有資料）＝整份匯入；之後＝依單號加入／更新，業務員保留原本的（和總表更新工具相同）。
+  // 完成後問要不要把原檔做成加密備份。files：File，或 { name, bytes }（從備份還原，只在記憶體）
+  const ROC_RANGE = (a, b) => (a === b ? dayLabel(a) : `${dayLabel(a)}～${dayLabel(b)}`);
+  function addRangeText(plan) {
+    const t = (g) => (!g ? '' : g.by === 'date' ? ROC_RANGE(g.from, g.to) : `單號月份 ${g.from === g.to ? ymLabel(g.from) : ymLabel(g.from) + '～' + ymLabel(g.to)}`);
+    return [plan.range[0] && `進貨 ${t(plan.range[0])}`, plan.range[1] && `退貨 ${t(plan.range[1])}`].filter(Boolean).join('；');
+  }
+  function dateSpan(raw) { // 新檔案的實際日期最早～最晚（做備份檔名用）
+    let a = Infinity, b = 0; const d = raw.num.date;
+    for (let r = 0; r < raw.n; r++) { const v = d[r]; if (v) { if (v < a) a = v; if (v > b) b = v; } }
+    return b ? { from: a, to: b } : null;
+  }
+  async function addRawFiles(files, { backup = true } = {}) {
+    if (demoBlock()) return;
+    files = files.filter(Boolean);
+    if (!files.length) return;
+    go('data');
+    const names = files.map((f) => f.name).join('、');
+    showProgress(0, '準備讀取 ' + names);
+    let d;
+    try {
+      d = await runWorker({ type: 'readAdd', files: files.map((f) => (f.bytes instanceof Uint8Array ? { name: f.name, bytes: f.bytes } : f)) }, [], (s) => showProgress(s.pct || 0, `${s.stage}… ${s.rows ? nf0.format(s.rows) + ' 筆' : ''}`));
+    } catch (err) { worker && worker.terminate(); worker = null; showProgress(0, '讀取失敗：' + err.message); return; }
+    const add = Dataset.deserialize(d.buf);
+    const span = dateSpan(add);
+    const warn = d.info && d.info.warning ? '。注意：' + d.info.warning : '';
+    if (!S.raw) {
+      // 第一次：整份匯入
+      if (!add.nSales) { showProgress(0, '匯入失敗：找不到出貨資料（JMSSAL）。第一次匯入請把 JMSSAL 和 JMSSBK 一起選'); return; }
+      if (!S.vault) {
+        const r = await askImportPasswords(names, false, true, '');
+        if (!r) { showProgress(0, '已取消匯入'); return; }
+        S.vault = await Dataset.Vault.create(r.appPw);
+      }
+      showProgress(1, '加密並儲存到這台裝置…');
+      await loadBuffer(d.buf, { save: true });
+      const di = S.E.ds.dates;
+      showProgress(1, `完成：${nf0.format(S.E.ds.nSales)} 筆進貨、${nf0.format(S.E.ds.nReturns)} 筆退貨` +
+        (di.dated ? `。${nf0.format(di.dated)} 筆有實際日期，其中 ${nf0.format(di.moved)} 筆的單號月份和實際月份不同` : '') + warn);
+      toast('資料已匯入，已加密保存在這台裝置');
+    } else {
+      showProgress(1, '讀取完成，請在視窗確認要加入的內容…');
+      const base = Dataset.deserialize(S.raw);
+      const plan = Dataset.planOrders(base, add);
+      const nNew = plan.nNew[0] + plan.nNew[1], nUpd = plan.nUpd[0] + plan.nUpd[1];
+      const ex = (arr, f) => arr.slice(0, 20).map(f).join('、') + (arr.length > 20 ? '…' : '');
+      const repOrders = new Set(plan.repChanges.map((c) => c.src + c.ord)).size;
+      const miss = plan.missing;
+      const desc = `<p>「${esc(names)}」：${nf0.format(plan.addSales)} 筆進貨、${nf0.format(plan.addReturns)} 筆退貨（${esc(addRangeText(plan))}）。</p><ul>` +
+        `<li>新的單：<strong>${nf0.format(nNew)}</strong> 張（進貨 ${nf0.format(plan.nNew[0])}、退貨 ${nf0.format(plan.nNew[1])}），直接加入。</li>` +
+        (nUpd ? `<li>網站裡已經有的單：${nf0.format(nUpd)} 張，改用系統的新資料${plan.nChanged ? `（其中 ${nf0.format(plan.nChanged)} 張內容有變動）` : '（內容都一樣）'}${plan.nDateFill ? `，${nf0.format(plan.nDateFill)} 張補上實際日期` : ''}。</li>` : '') +
+        (repOrders ? `<li>系統事後改了業務員的單：${nf0.format(repOrders)} 張，<strong>業務員保留原本的</strong>。例如：${esc(ex(plan.repChanges, (c) => `${c.ord}（原本 ${c.from} → 系統現在 ${c.to}）`))}</li>` : '') +
+        '</ul>' +
+        (miss.length ? `<p class="warn">這段期間內有 <strong>${nf0.format(miss.length)}</strong> 張單網站裡有、這次的檔案裡沒有，多半是系統裡已經作廢或刪除：${esc(ex(miss, (m) => (m.src ? '退貨 ' : '') + m.ord))}</p>` +
+          '<p class="hint">如果這次匯出的不是這段期間的全部資料，請不要勾選刪除。</p>' : '');
+      const v = await ask({ title: '確認加入新資料', desc, fields: [], submit: '加入',
+        check: miss.length ? { name: 'del', label: `從網站刪除這 ${miss.length} 張系統裡已經沒有的單`, checked: false } : null });
+      if (!v) { showProgress(0, '已取消加入，資料沒有改變'); return; }
+      showProgress(1, '合併並加密儲存到這台裝置…');
+      const { raw, removedMissing } = Dataset.mergeOrders(base, add, plan, { removeMissing: !!v.del, name: names });
+      await loadBuffer(Dataset.serialize(raw), { save: true });
+      showProgress(1, `完成：新增 ${nf0.format(nNew)} 張、更新 ${nf0.format(nUpd)} 張` + (removedMissing ? `、刪除 ${nf0.format(removedMissing)} 張` : '') +
+        `，目前共 ${nf0.format(S.E.ds.nSales)} 筆進貨、${nf0.format(S.E.ds.nReturns)} 筆退貨` + warn);
+      toast('新資料已加入，已加密保存在這台裝置');
+    }
+    if (backup) await offerRawBackup(files, span);
+  }
+
+  // 匯入完成後：問要不要把原檔原封不動加密成一個備份檔（.dvr），用目前的開啟密碼上鎖
+  async function offerRawBackup(files, span) {
+    if (!S.vault || S.demo) return;
+    const names = files.map((f) => f.name).join('、');
+    const v = await ask({
+      title: '要把原始檔做成加密備份嗎？',
+      desc: `<p>把「${esc(names)}」<strong>原封不動</strong>（包括 RECEIVE、PAY 這些網站沒用到的欄位）加密成一個備份檔，用<strong>目前的開啟密碼</strong>上鎖。沒有密碼打不開。</p>` +
+        '<p>之後到「資料與設定」→「原始檔備份」，輸入密碼就能還原。</p><p>存好之後，就可以把電腦上的 JMSSAL、JMSSBK 刪掉。</p>',
+      fields: [], submit: '存成加密備份', cancel: '不用',
+    });
+    if (!v) { toast('沒有做備份。JMSSAL、JMSSBK 用完記得刪掉', 5000); return; }
+    try {
+      const out = await Dataset.makeRawBackup(S.vault, files, { range: span });
+      const now = new Date(), today = (now.getFullYear() - 1911) * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
+      const tag = span ? (span.from === span.to ? String(span.from) : `${span.from}-${span.to}`) : String(today);
+      const name = `原始資料備份_${tag}.dvr`;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([out], { type: 'application/octet-stream' }));
+      a.download = name; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      showProgress(1, `已存成加密備份「${name}」（${(out.length / 1e6).toFixed(1)} MB）。現在可以把 ${names} 刪掉了。`);
+      toast('加密備份已存好，現在可以刪掉 JMSSAL、JMSSBK', 6000);
+    } catch (err) { toast('備份失敗：' + err.message, 6000); }
+  }
+
+  // 還原原始檔備份：輸入做備份當時的開啟密碼 → 直接匯入網站（不會產生沒加密的檔案），或存回原本的 DBF 檔
+  async function restoreRawBackup(file) {
+    if (demoBlock()) return;
+    if (!file) return;
+    go('data');
+    const u8 = new Uint8Array(await file.arrayBuffer());
+    if (!Dataset.isRawBackup(u8)) { toast('這不是原始檔備份（.dvr）', 4000); return; }
+    let res = null;
+    const v = await ask({
+      title: '還原原始檔備份',
+      desc: `<p>「${esc(file.name)}」。請輸入<strong>做備份當時</strong>的開啟密碼。</p>` +
+        '<ul><li><strong>匯入網站</strong>（建議）：直接把資料讀進網站，電腦上不會出現沒加密的檔案。</li>' +
+        '<li><strong>存回 DBF 檔</strong>：還原成和系統匯出一模一樣的 JMSSAL.DBF、JMSSBK.DBF（例如給總表更新工具用），用完記得刪掉。</li></ul>',
+      fields: [{ name: 'pw', label: '開啟密碼', autocomplete: 'current-password' }],
+      submit: '匯入網站', alt: '存回 DBF 檔',
+      validate: async (x) => {
+        if (!x.pw) return '請輸入密碼';
+        try { res = await Dataset.openRawBackup(u8, x.pw); } catch (e) { return e.code === 'BAD_PASSWORD' ? '密碼不正確，請再試一次' : e.message; }
+        return '';
+      },
+    });
+    if (!v || !res) { res = null; return; }
+    const names = res.files.map((f) => f.name).join('、');
+    try {
+      if (v.alt) {
+        const blobs = res.files.map((f) => ({ name: f.name, url: URL.createObjectURL(new Blob([f.bytes], { type: 'application/octet-stream' })) }));
+        blobs.forEach((b, i) => setTimeout(() => {
+          const a = document.createElement('a'); a.href = b.url; a.download = b.name; a.click();
+          setTimeout(() => URL.revokeObjectURL(b.url), 4000);
+        }, i * 600));
+        showProgress(1, `已還原成 ${names}，存在下載資料夾。這些檔案沒有加密，用完記得刪掉。`);
+        toast('已存回原本的 DBF 檔', 5000);
+        return;
+      }
+      if (!S.raw && !S.vault) S.vault = await Dataset.Vault.create(v.pw); // 這台裝置還沒有資料：開啟密碼沿用備份的密碼
+      await addRawFiles(res.files.map((f) => ({ name: f.name, bytes: f.bytes.slice() })), { backup: false });
+    } finally {
+      v.pw = ''; res.files.forEach((f) => f.bytes.fill(0)); res = null;
     }
   }
 
@@ -1123,10 +1265,13 @@
     $('#dbPeriod').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.dash.period = b.dataset.v; store.set('dash', S.dash); renderDashboard(); });
     const fa = $('#fileAdd');
     $('#pickAdd').addEventListener('click', () => fa.click());
-    fa.addEventListener('change', () => { addMonthXlsx(fa.files[0]); fa.value = ''; });
+    fa.addEventListener('change', () => { const fs = [...fa.files]; fa.value = ''; if (fs.length && fs.every((f) => /\.dbf$/i.test(f.name))) addRawFiles(fs); else addMonthXlsx(fs[0]); });
+    const fb = $('#fileBak');
+    $('#pickBak').addEventListener('click', () => fb.click());
+    fb.addEventListener('change', () => { restoreRawBackup(fb.files[0]); fb.value = ''; });
     // 整個視窗也可拖放
     window.addEventListener('dragover', (e) => e.preventDefault());
-    window.addEventListener('drop', (e) => { if (S.locked) { e.preventDefault(); return; } if (!drop.contains(e.target)) { e.preventDefault(); const fs2 = [...e.dataTransfer.files]; if (fs2.length) (fs2.some((x) => /\.dvp$/i.test(x.name)) || (fs2.length === 1 && !/\.(xls[xm]?|dbf)$/i.test(fs2[0].name)) ? openPackFile(fs2.find((x) => /\.dvp$/i.test(x.name)) || fs2[0]) : importXlsx(fs2)); } });
+    window.addEventListener('drop', (e) => { if (S.locked) { e.preventDefault(); return; } if (!drop.contains(e.target)) { e.preventDefault(); const fs2 = [...e.dataTransfer.files]; if (fs2.length) (fs2.some((x) => /\.dvp$/i.test(x.name)) || (fs2.length === 1 && !/\.(xls[xm]?|dbf|dvr)$/i.test(fs2[0].name)) ? openPackFile(fs2.find((x) => /\.dvp$/i.test(x.name)) || fs2[0]) : importXlsx(fs2)); } });
     $('#themePick').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setTheme(b.dataset.theme); });
     $('#packExport').addEventListener('click', async () => {
       if (demoBlock()) return;
@@ -1203,6 +1348,7 @@
       const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
       const sig = String.fromCharCode(...head.slice(0, 4));
       if (sig === 'DVPK') { await openPackBuffer(await file.arrayBuffer(), $('#openPw').value); return; }
+      if (sig === 'DVRB') { restoreRawBackup(file); return; } // 原始檔備份
       if (!file.size) throw new Error('這個檔案是空的（0 KB），可能還沒下載完成。請重新傳送一次資料包。');
       if (/\.dbf$/i.test(file.name)) { importXlsx([file], { force: true }); return; } // 系統原始資料（DBF）
       if (head[0] === 0xd0 && head[1] === 0xcf) { importXlsx(file, { force: true }); return; } // 有密碼的 Excel

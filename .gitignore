@@ -4,6 +4,8 @@
 *.xls
 *.csv
 *.dvp
+*.dvr
+*.DVR
 *.zip
 data/
 .DS_Store
