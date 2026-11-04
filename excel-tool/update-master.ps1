@@ -889,17 +889,40 @@ try {
     $d = New-Object System.Windows.Forms.SaveFileDialog
     $d.Title = '另存新的總表'; $d.Filter = 'Excel 檔案|*' + [IO.Path]::GetExtension($Master)
     $d.InitialDirectory = Split-Path $Master
-    $d.FileName = "00_總表_$(Get-Date -Format 'yyyy-MM-dd')" + [IO.Path]::GetExtension($Master)
-    if ($d.ShowDialog($owner) -ne 'OK') { Say '沒有存檔，這次的更新放棄了（原本的總表沒有改動）。'; return }
-    $Out = $d.FileName
+    $ext = [IO.Path]::GetExtension($Master)
+    # 預設檔名：00_總表_今天日期；同一天跑第二次時（和原本的總表同名）自動加 _2、_3…
+    $base = "00_總表_$(Get-Date -Format 'yyyy-MM-dd')"; $name = $base + $ext; $i = 2
+    while ((Join-Path (Split-Path $Master) $name) -ieq $Master -or (Test-Path -LiteralPath (Join-Path (Split-Path $Master) $name))) { $name = "${base}_$i$ext"; $i++ }
+    $d.FileName = $name
+    $fmt = if ($ext -match '\.xlsm$') { 52 } else { 51 }
+    $xl.ScreenUpdating = $true; $xl.EnableEvents = $true
+    # 存檔：選錯檔名或存不進去都讓你重選，不會把做好的更新丟掉
+    while ($true) {
+      if ($d.ShowDialog($owner) -ne 'OK') {
+        if ((Show-Msg $owner "還沒有存檔。`n`n確定不存嗎？選「是」這次的更新就會放棄；選「否」回去選檔名。" 'Warning' 'YesNo') -eq 'Yes') { Say '沒有存檔，這次的更新放棄了（原本的總表沒有改動）。'; return }
+        continue
+      }
+      $Out = [IO.Path]::GetFullPath($d.FileName)
+      if ($Out -ieq $Master) {
+        Show-Msg $owner "不能和原本的總表用同一個檔名：原本的總表要留著當備份，而且它現在正開著。`n`n請換一個名字（例如 $name）。" 'Warning' | Out-Null
+        $d.FileName = $name; continue
+      }
+      Say "存檔：$Out …"
+      try { $wb.SaveAs($Out, $fmt); break }
+      catch {
+        Say ('存檔失敗：' + $_.Exception.Message)
+        Show-Msg $owner ("存不進去：`n" + $_.Exception.Message + "`n`n可能是那個檔案正在 Excel 裡開著，或資料夾不能寫入。做好的更新還在，請換一個檔名或位置再存一次。") 'Warning' | Out-Null
+      }
+    }
+  } else {
+    if (-not $Out) { throw '沒有指定要存成的新檔名' }
+    $Out = [IO.Path]::GetFullPath($Out)
+    if ($Out -ieq $Master) { throw '新檔名不能和原本的總表一樣，請換一個名字（保留原檔當備份）。' }
+    Say "存檔：$Out …"
+    $fmt = if ($Out -match '\.xlsm$') { 52 } else { 51 }
+    $xl.ScreenUpdating = $true; $xl.EnableEvents = $true
+    $wb.SaveAs($Out, $fmt)
   }
-  if (-not $Out) { throw '沒有指定要存成的新檔名' }
-  $Out = [IO.Path]::GetFullPath($Out)
-  if ($Out -ieq $Master) { throw '新檔名不能和原本的總表一樣，請換一個名字（保留原檔當備份）。' }
-  Say "存檔：$Out …"
-  $fmt = if ($Out -match '\.xlsm$') { 52 } else { 51 }
-  $xl.ScreenUpdating = $true; $xl.EnableEvents = $true
-  $wb.SaveAs($Out, $fmt)
   $rep = Join-Path (Split-Path $Out) ("更新報告_$(Get-Date -Format 'yyyyMMdd_HHmm').txt")
   [IO.File]::WriteAllLines($rep, $L, (New-Object Text.UTF8Encoding($true)))
   Say "完成！報告：$rep"
