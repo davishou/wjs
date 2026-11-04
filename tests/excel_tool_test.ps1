@@ -292,6 +292,28 @@ ok ((RunTool $MASTER_PW $OUTPW @('-MasterPassword', 'pw1234', '-NoRefresh')) -eq
 $h = [IO.File]::ReadAllBytes($OUTPW)[0..3]
 ok ($h[0] -eq 0xD0 -and $h[1] -eq 0xCF -and $h[2] -eq 0x11 -and $h[3] -eq 0xE0) '另存的新總表仍然有開啟密碼'
 
+# 系統裡已經沒有的單（作廢）：在原始資料期間內、總表有但原始資料沒有 → 加 -RemoveMissing 會從新總表刪除
+$srcSal = @{}; foreach ($r in $newSales) { $srcSal[$r[0]] = 1 }
+$srcBk = @{}; foreach ($r in $dbfRows) { $srcBk[$r[0]] = 1 }
+$goneS = @($sales | Where-Object { $_[0].Substring(0, 5) -ge '11403' -and $_[0].Substring(0, 5) -le '11409' -and -not $srcSal.ContainsKey($_[0]) })
+$goneR = @($rets | Where-Object { $_[0].Substring(0, 5) -ge '11402' -and $_[0].Substring(0, 5) -le '11409' -and -not $srcBk.ContainsKey($_[0]) })
+ok ($rt.Contains('系統裡已經沒有的單') -and $rt.Contains('這次保留沒有刪除')) '沒加 -RemoveMissing：報告列出系統裡已經沒有的單，但保留'
+$OUT3 = Join-Path $FX 'out_remove.xlsx'
+ok ((RunTool $MASTER $OUT3 @('-RemoveMissing', '-NoRefresh')) -eq 0) '加 -RemoveMissing 再跑一次'
+$xl = New-Object -ComObject Excel.Application; $xl.DisplayAlerts = $false
+try {
+  $wb = $xl.Workbooks.Open($OUT3, 0, $true)
+  $ws = $wb.Worksheets.Item('原始進貨表'); $last = Last-Row $ws 1; $v = $ws.Range("A1:A$last").Value2
+  $keys = @{}; for ($i = 2; $i -le $last; $i++) { $keys[[string]$v[$i, 1]] = 1 }
+  ok ($last - 1 -eq $sales.Count + $expSalesAdd - $goneS.Count -and @($goneS | Where-Object { $keys.ContainsKey($_[0]) }).Count -eq 0 -and $keys.ContainsKey('1140100001')) "進貨：刪除系統裡已經沒有的 $($goneS.Count) 筆（期間外的 114/01 單保留）"
+  ok ($ws.ListObjects.Item('表格1').Range.Rows.Count -eq $last -and -not $ws.Cells.Item($last + 1, 23).HasFormula) '刪除後表格1 縮到最後一筆，下面沒有殘留公式'
+  $wr = $wb.Worksheets.Item('原始退貨表'); $rl = Last-Row $wr 1
+  ok ($rl - 1 -eq $rets.Count + 3 - $goneR.Count) "退貨：刪除系統裡已經沒有的 $($goneR.Count) 筆"
+  $wb.Close($false)
+} finally { $xl.Quit(); [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($xl); $xl = $null; [GC]::Collect(); [GC]::WaitForPendingFinalizers() }
+$rep3 = Get-ChildItem $FX -Filter '更新報告_*.txt' | Sort-Object LastWriteTime | Select-Object -Last 1
+ok ([IO.File]::ReadAllText($rep3.FullName).Contains('已從新總表刪除')) '報告寫出刪除了哪些單'
+
 # 自動找檔案：檔名日期最新的總表優先（不要挑到 cd 副本、Excel 暫存檔、其他 Excel）、最新的 JMSSAL／JMSSBK
 $FD = Join-Path $FX 'find'; New-Item -ItemType Directory -Force $FD | Out-Null
 $files = [ordered]@{ '00_總表_2026-08-31.xlsx' = '2026-09-03'; '00_總表_2026-08-31cd.xlsx' = '2026-10-21'; '00_總表_2026-10-22.xlsx' = '2026-10-22 09:00'; '~$00_總表_2026-11-01.xlsx' = '2026-11-01'

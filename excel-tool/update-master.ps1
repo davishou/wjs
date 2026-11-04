@@ -8,6 +8,7 @@ param(
   [string]$Master, [string]$Sales, [string]$Returns, [string]$Out,
   [string]$MasterPassword,   # 只給自動測試用；平常由 Excel 自己跳出密碼視窗
   [switch]$NoUI, [switch]$NoRefresh,
+  [switch]$RemoveMissing,   # 只給自動測試用：不跳視窗，直接刪除系統裡已經沒有的單
   [string]$FindIn, [string]$SmokeShot   # 只給自動測試用：列出會自動選到的檔案／把確認視窗存成圖片
 )
 $ErrorActionPreference = 'Stop'
@@ -193,6 +194,7 @@ function Merge-Kind($wb, $kind, $src) {
   if ((Txt $ws.Cells.Item(1, 1).Value2).Trim() -ne $kind.Key) { throw "「$($kind.Sheet)」的 A1 不是「$($kind.Key)」，請確認選的是總表。" }
   $n = $kind.NRaw
   $rep = $n - 1   # 業務員是原始資料的最後一欄（進貨 V、退貨 U）
+  $oi = [Array]::IndexOf($kind.Head, 'DELIVORD')   # 第幾項（進貨 B 欄、退貨 C 欄）
   $last = Last-Row $ws 1
   if ($last -lt 2) { throw "「$($kind.Sheet)」裡沒有資料，請確認選的是總表。" }
   Say "[$($kind.Label)] 總表目前有 $($last - 1) 筆，檢查重複…"
@@ -209,12 +211,39 @@ function Merge-Kind($wb, $kind, $src) {
   $a = Get-Values (Rng $ws 2 1 $last 1)
   $hits = New-Object 'System.Collections.Generic.List[int]'
   $exMax = ''
+  # 這次原始資料涵蓋的單號月份（例如 110/01～115/11）。在這段期間內、總表有但原始資料沒有的單 = 系統裡已經作廢或刪除
+  $srcMin = 999999; $srcMax = 0
+  foreach ($k in $groups.Keys) { $y = Ym $k; if ($y) { if ($y -lt $srcMin) { $srcMin = $y }; if ($y -gt $srcMax) { $srcMax = $y } } }
+  $missRows = New-Object 'System.Collections.Generic.List[int]'
+  $missOrd = New-Object 'System.Collections.Generic.List[string]'
+  $missMon = New-Object 'System.Collections.Generic.SortedDictionary[int,int]'
+  $prevMiss = ''
   for ($i = 1; $i -le $last - 1; $i++) {
     $k = Key $a[$i, 1]
     if ([string]::CompareOrdinal($k, $exMax) -gt 0) { $exMax = $k }
-    if ($groups.ContainsKey($k)) { $hits.Add($i + 1) }
+    if ($groups.ContainsKey($k)) { $hits.Add($i + 1); continue }
+    $y = Ym $k
+    if ($k -ne '' -and $y -ge $srcMin -and $y -le $srcMax) {
+      $missRows.Add($i + 1)
+      if ($k -ne $prevMiss) { $missOrd.Add($k); if ($missMon.ContainsKey($y)) { $missMon[$y]++ } else { $missMon[$y] = 1 } }
+      $prevMiss = $k
+    }
   }
   $a = $null
+  $removeMiss = $false; $missNote = ''
+  if ($missRows.Count) {
+    $fmtYm = { param($v) '{0}/{1:00}' -f [math]::Floor($v / 100), ($v % 100) }
+    $mon = @(); foreach ($e in $missMon.GetEnumerator()) { $mon += ('{0}：{1} 張' -f (& $fmtYm $e.Key), $e.Value) }
+    $ex20 = [string]::Join('、', ($missOrd | Select-Object -First 20)) + $(if ($missOrd.Count -gt 20) { '…' } else { '' })
+    $range = "$(& $fmtYm $srcMin)～$(& $fmtYm $srcMax)"
+    $missNote = "系統裡已經沒有的單（這次原始資料涵蓋 $range，總表有、原始資料沒有，多半是作廢或刪除）：$($missOrd.Count) 張、$($missRows.Count) 筆。月份：$([string]::Join('、', $mon))。單號：$ex20"
+    if ($NoUI) { $removeMiss = [bool]$RemoveMissing }
+    else {
+      $q = "「$($kind.Sheet)」裡有 $($missOrd.Count) 張單（$($missRows.Count) 筆），單號月份在這次 $($kind.Label)原始資料的期間（$range）內，但系統裡已經沒有這張單，多半是作廢或刪除了。`n`n單號：$ex20`n`n要從新的總表刪除這些單嗎？`n（只影響另存的新總表，原本的總表不會被改動。如果這次的原始資料不是完整匯出整段期間，請按「否」。）"
+      $removeMiss = (Show-Msg $owner $q 'Question' 'YesNo') -eq 'Yes'
+    }
+    Say "[$($kind.Label)] 系統裡已經沒有的單：$($missOrd.Count) 張、$($missRows.Count) 筆$(if ($removeMiss) { '，會從新總表刪除' } else { '，保留' })"
+  }
   # 讀出這些單號在總表裡的內容（相鄰的列一次讀）
   $exRows = New-Object 'System.Collections.Generic.Dictionary[string,System.Collections.Generic.List[int]]'
   $exVals = New-Object 'System.Collections.Generic.Dictionary[string,System.Collections.Generic.List[object]]'
@@ -256,11 +285,24 @@ function Merge-Kind($wb, $kind, $src) {
       if ((Sorted-Sigs $rows $n) -ceq $es) { $dup++; $dupRows += $rows.Count } else { $keptRep++ }
       continue
     }
-    # 哪些欄位不一樣（筆數相同時逐列比對）
+    # 哪些欄位不一樣（筆數相同時比對）。同一張單裡各列的順序可能和系統不同，所以先依 DELIVORD（第幾項）對齊再比，
+    # 否則順序一不同，每一欄都會被當成不同
     $cols = New-Object 'System.Collections.Generic.List[string]'
     if ($ex.Count -eq $merged.Count) {
+      $pair = $null
+      if ($oi -ge 0) {
+        $mm = @{}; foreach ($x in $merged) { $mm[(Norm $x[$oi])] = $x }
+        if ($mm.Count -eq $merged.Count) {
+          $pair = New-Object 'System.Collections.Generic.List[object]'
+          foreach ($x in $ex) { $o = Norm $x[$oi]; if ($mm.ContainsKey($o)) { $pair.Add($mm[$o]) } else { $pair = $null; break } }
+        }
+      }
+      if (-not $pair) {   # 對不起來時：兩邊各自依內容排序再比
+        $sortRows = { param($rs) , @($rs | Sort-Object { SigRow $_ $n }) }
+        $exS = & $sortRows $ex; $pair = & $sortRows $merged
+      } else { $exS = $ex }
       for ($c = 0; $c -lt $n; $c++) {
-        for ($i = 0; $i -lt $ex.Count; $i++) { if ((Norm $ex[$i][$c]) -cne (Norm $merged[$i][$c])) { $cols.Add((Txt $heads[1, ($c + 1)])); break } }
+        for ($i = 0; $i -lt $exS.Count; $i++) { if ((Norm $exS[$i][$c]) -cne (Norm $pair[$i][$c])) { $cols.Add((Txt $heads[1, ($c + 1)])); break } }
       }
     }
     $replace.Add([pscustomobject]@{ Key = $k; Rows = $exRows[$k]; New = $merged; ExCount = $ex.Count; Cols = $cols })
@@ -308,6 +350,20 @@ function Merge-Kind($wb, $kind, $src) {
     for ($i = $m; $i -lt $rp.New.Count; $i++) { $add.Add($rp.New[$i]) }
     for ($i = $m; $i -lt $rp.Rows.Count; $i++) { [void](Rng $ws $rp.Rows[$i] 1 $rp.Rows[$i] $n).ClearContents(); if ($dc) { [void]$ws.Cells.Item($rp.Rows[$i], $dc).ClearContents() }; $cleared++ }
     foreach ($r in $rp.New) { $changed.Add($r) }
+  }
+  $removed = 0
+  if ($removeMiss) {
+    Say "[$($kind.Label)] 刪除系統裡已經沒有的 $($missOrd.Count) 張單…"
+    # 相鄰的列一次清空
+    $j = 0
+    while ($j -lt $missRows.Count) {
+      $s0 = $missRows[$j]; $e0 = $s0
+      while ($j + 1 -lt $missRows.Count -and $missRows[$j + 1] -eq $e0 + 1) { $j++; $e0 = $missRows[$j] }
+      $j++
+      [void](Rng $ws $s0 1 $e0 $n).ClearContents(); if ($dc) { [void](Rng $ws $s0 $dc $e0 $dc).ClearContents() }
+      $removed += $e0 - $s0 + 1
+    }
+    $cleared += $removed
   }
   $start = $last + 1; $end = $last + $add.Count; $sorted = $false
   $newMax = $exMax; $minAdd = $null
@@ -391,6 +447,7 @@ function Merge-Kind($wb, $kind, $src) {
   }
   return [pscustomobject]@{
     Kind = $kind; Ws = $ws; Before = $last - 1; After = $newLast - 1; NewLast = $newLast; Sorted = $sorted; Trim = $trim
+    MissNote = $missNote; Removed = $removed; RemovedOrders = $(if ($removed) { $missOrd.Count } else { 0 })
     DateCol = $dc; DateLetter = $dateLetter; DateFill = $dateFill; DateNew = $dateNew; DateBlank = $dateBlank; DateNote = $dateNote; DateWhy = $dateWhy
     AddOrders = $addOrders; AddRows = $addRows; Dup = $dup; DupRows = $dupRows; KeptRep = $keptRep; Replace = $replace
     Changed = $changed; FCols = $fcols; MaxYm = (Ym $newMax)
@@ -693,6 +750,7 @@ try {
     $k = $res.Kind
     $L.Add(''); $L.Add("【$($k.Label)】$(Split-Path ($(if ($k.Label -eq '進貨') { $Sales } else { $Returns })) -Leaf)")
     $L.Add("  原本 $($res.Before) 筆 → 現在 $($res.After) 筆")
+    $L.Add('  （「不同的欄位」是同一張單依第幾項 DELIVORD 對齊後比較的結果；退貨總金額／出貨總額在系統只記在第一列，其他列是 0，和空白一樣）')
     $L.Add("  新增 $($res.AddOrders) 張單、$($res.AddRows) 筆")
     $L.Add("  重複跳過 $($res.Dup) 張單、$($res.DupRows) 筆")
     $L.Add("  只有業務員不同、保留總表原本的：$($res.KeptRep) 張單")
@@ -702,6 +760,10 @@ try {
       $L.Add("    單號 $($rp.Key)：$why")
     }
     if ($res.Changed.Count) { $L.Add($(if ($res.Sorted) { '  已整張依單號重新排序' } else { '  新資料都接在最後面，原本的順序沒有動' })) }
+    if ($res.MissNote) {
+      $L.Add('  ' + $res.MissNote)
+      $L.Add($(if ($res.Removed) { "    → 已從新總表刪除 $($res.RemovedOrders) 張、$($res.Removed) 筆" } else { '    → 這次保留沒有刪除' }))
+    }
     if ($res.DateNote) { $L.Add('  ' + $res.DateNote) }
     if ($res.DateCol) {
       $L.Add("  實際日期（$($res.DateLetter) 欄）：新加入的 $($res.DateNew) 筆有日期、總表原有的單補上 $($res.DateFill) 筆；目前還有 $($res.DateBlank) 筆沒有實際日期")
@@ -717,9 +779,9 @@ try {
 
   # ---------- 另存新檔 ----------
   if (-not $NoUI) {
-    $nAdd = 0; $nRep = 0; $nDate = 0; foreach ($res in $results) { $nAdd += $res.AddRows; $nRep += $res.Replace.Count; $nDate += $res.DateFill }
+    $nAdd = 0; $nRep = 0; $nDate = 0; $nDel = 0; foreach ($res in $results) { $nAdd += $res.AddRows; $nRep += $res.Replace.Count; $nDate += $res.DateFill; $nDel += $res.Removed }
     if ($totalChanged) {
-      $msg = "新增 $nAdd 筆。" + $(if ($nRep) { "`n有 $nRep 張單號內容不一樣，已改用新資料（業務員保留原本的），詳細寫在報告裡。" } else { '' }) + $(if ($nDate) { "`n總表原有的單補上 $nDate 筆實際日期。" } else { '' }) + "`n`n接下來請選擇要存成的新檔名（原本的總表不會被改動）。"
+      $msg = "新增 $nAdd 筆。" + $(if ($nDel) { "`n刪除系統裡已經沒有的單 $nDel 筆。" } else { '' }) + $(if ($nRep) { "`n有 $nRep 張單號內容不一樣，已改用新資料（業務員保留原本的），詳細寫在報告裡。" } else { '' }) + $(if ($nDate) { "`n總表原有的單補上 $nDate 筆實際日期。" } else { '' }) + "`n`n接下來請選擇要存成的新檔名（原本的總表不會被改動）。"
       Show-Msg $owner $msg | Out-Null
     } elseif ($nDate) {
       if ((Show-Msg $owner "沒有新的單，但總表原有的單補上了 $nDate 筆實際出貨／退貨日期。`n`n要另存成新檔嗎？" 'Question' 'YesNo') -ne 'Yes') { Say '沒有存檔（原本的總表沒有改動）。'; return }
