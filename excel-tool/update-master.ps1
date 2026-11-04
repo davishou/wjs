@@ -270,16 +270,33 @@ function Merge-Kind($wb, $kind, $src) {
   $add = New-Object 'System.Collections.Generic.List[object]'
   $replace = New-Object 'System.Collections.Generic.List[object]'
   $dup = 0; $dupRows = 0; $keptRep = 0; $addOrders = 0
+  $repChg = New-Object 'System.Collections.Generic.SortedDictionary[string,int]'   # 「原本 → 系統」的業務員：幾張單
+  $repEx = New-Object 'System.Collections.Generic.Dictionary[string,string]'       # 每種改法舉一個單號
   foreach ($k in $keys) {
     $rows = $groups[$k]
     if (-not $exRows.ContainsKey($k)) { foreach ($r in $rows) { $add.Add($r) }; $addOrders++; continue }
     $ex = $exVals[$k]
+    # 業務員一律保留總表原本的（系統事後改了業務員，總表仍記當初實際負責的人）：
+    #   依第幾項（DELIVORD）找到總表原本那一列的業務員；系統多出來的列，用這張單原本的業務員；總表原本是空白才用系統的
+    $orig = @{}; $first = $null
+    foreach ($x in $ex) {
+      if ((Norm $x[$rep]) -eq '') { continue }
+      if ($null -eq $first) { $first = $x[$rep] }
+      if ($oi -ge 0) { $o = Norm $x[$oi]; if (-not $orig.ContainsKey($o)) { $orig[$o] = $x[$rep] } }
+    }
     $merged = New-Object 'System.Collections.Generic.List[object]'
+    $chgThis = $null
     for ($i = 0; $i -lt $rows.Count; $i++) {
       $x = $rows[$i].Clone()
-      $x[$rep] = if ($ex.Count -eq $rows.Count) { $ex[$i][$rep] } else { $ex[0][$rep] }
+      $o = if ($oi -ge 0) { Norm $x[$oi] } else { '' }
+      $keep = if ($orig.ContainsKey($o)) { $orig[$o] } elseif ($ex.Count -eq $rows.Count -and (Norm $ex[$i][$rep]) -ne '') { $ex[$i][$rep] } else { $first }
+      if ($null -ne $keep) {
+        if ($null -eq $chgThis -and (Norm $keep) -cne (Norm $x[$rep])) { $chgThis = "$(Norm $keep) → $(Norm $x[$rep])" }
+        $x[$rep] = $keep
+      }
       $merged.Add($x)
     }
+    if ($chgThis) { if ($repChg.ContainsKey($chgThis)) { $repChg[$chgThis]++ } else { $repChg[$chgThis] = 1; $repEx[$chgThis] = $k } }
     $es = Sorted-Sigs $ex $n
     if ((Sorted-Sigs $merged $n) -ceq $es) {
       if ((Sorted-Sigs $rows $n) -ceq $es) { $dup++; $dupRows += $rows.Count } else { $keptRep++ }
@@ -449,6 +466,7 @@ function Merge-Kind($wb, $kind, $src) {
     Kind = $kind; Ws = $ws; Before = $last - 1; After = $newLast - 1; NewLast = $newLast; Sorted = $sorted; Trim = $trim
     MissNote = $missNote; Removed = $removed; RemovedOrders = $(if ($removed) { $missOrd.Count } else { 0 })
     DateCol = $dc; DateLetter = $dateLetter; DateFill = $dateFill; DateNew = $dateNew; DateBlank = $dateBlank; DateNote = $dateNote; DateWhy = $dateWhy
+    RepChg = $repChg; RepEx = $repEx
     AddOrders = $addOrders; AddRows = $addRows; Dup = $dup; DupRows = $dupRows; KeptRep = $keptRep; Replace = $replace
     Changed = $changed; FCols = $fcols; MaxYm = (Ym $newMax)
   }
@@ -754,6 +772,11 @@ try {
     $L.Add("  新增 $($res.AddOrders) 張單、$($res.AddRows) 筆")
     $L.Add("  重複跳過 $($res.Dup) 張單、$($res.DupRows) 筆")
     $L.Add("  只有業務員不同、保留總表原本的：$($res.KeptRep) 張單")
+    if ($res.RepChg.Count) {
+      $nChg = 0; foreach ($v in $res.RepChg.Values) { $nChg += $v }
+      $L.Add("  系統裡業務員被改過、總表保留原本業務員的：$nChg 張單（原本 → 系統現在）")
+      foreach ($e in $res.RepChg.GetEnumerator()) { $L.Add("    業務員 $($e.Key)：$($e.Value) 張單，例如單號 $($res.RepEx[$e.Key])") }
+    }
     $L.Add("  內容不一樣、改用新資料（業務員保留原本的）：$($res.Replace.Count) 張單")
     foreach ($rp in $res.Replace) {
       $why = if ($rp.Cols.Count) { '不同的欄位：' + [string]::Join('、', $rp.Cols) } else { "筆數不同：總表 $($rp.ExCount) 筆 → 新資料 $($rp.New.Count) 筆" }

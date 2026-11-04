@@ -272,6 +272,7 @@ try {
 $rep = Get-ChildItem $FX -Filter '更新報告_*.txt' | Sort-Object LastWriteTime | Select-Object -Last 1
 $rt = [IO.File]::ReadAllText($rep.FullName)
 ok ($rt.Contains('只有業務員不同、保留總表原本的：1 張單') -and $rt.Contains('改用新資料（業務員保留原本的）：4 張單')) "報告：只有業務員不同 1 張、改用新資料 4 張：$($rep.Name)"
+ok ($rt.Contains('系統裡業務員被改過、總表保留原本業務員的') -and $rt.Contains('業務員 12 → 13')) '報告寫出系統改過的業務員（原本 → 系統現在）'
 ok ($rt.Contains('單號 1140800005：不同的欄位：數量') -and $rt.Contains('單號 1140800002：不同的欄位：售價') -and $rt.Contains('單號 1140700004：筆數不同')) '報告寫出每張單哪些欄位不同'
 ok ($rt.Contains('空白列和公式已清掉') -and $rt.Contains('和 AK 欄的清單一樣')) '報告寫出清掉空白列、對照表改成和 AK 一樣'
 ok ($rt.Contains('新增 AF 欄「實際出貨日期」') -and $rt.Contains('新增 AC 欄「實際退貨日期」') -and $rt.Contains('實際日期（AF 欄）')) '報告寫出新增的實際日期欄與筆數'
