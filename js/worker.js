@@ -60,13 +60,6 @@ self.onmessage = async (e) => {
       const cls = await readOther(file, password);
       if (!cls) throw new Error('這是總表，不是商品類別代碼表。總表請拖到上面的「更新資料」。');
       self.postMessage({ type: 'done', classification: cls });
-    } else if (type === 'merge') {
-      // 每月加入：讀新的 Excel，併進目前的資料（同月份取代）
-      const add = await readExcel(file, password);
-      self.postMessage({ type: 'progress', stage: '合併到目前的資料', pct: 1, rows: add.n });
-      const { raw, stats } = self.Dataset.merge(self.Dataset.deserialize(e.data.base), add, file.name);
-      const buf = self.Dataset.serialize(raw);
-      self.postMessage({ type: 'done', buf, stats }, [buf]);
     } else if (type === 'readAdd') {
       // 加入系統原始資料：只讀檔，合併在畫面這邊做（要先讓使用者確認）
       const add = await readExcel(e.data.files, password, { allowNoSales: true });

@@ -646,3 +646,5 @@ button.bd-kpi { cursor: pointer; } button.bd-kpi:hover { border-color: var(--lin
 #dlg .desc li { margin: .25em 0; }
 #dlg .desc .warn { color: var(--warn); }
 #dlg .actions { flex-wrap: wrap; }
+.drop .drop-how { text-align: left; max-width: 760px; margin: 10px auto; padding-left: 1.3em; }
+.drop .drop-how li { margin: 4px 0; }

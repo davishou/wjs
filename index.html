@@ -229,15 +229,13 @@
         <div class="drop" id="drop">
           <input type="file" id="fileXlsx" accept=".xlsx,.xlsm,.dbf,.DBF" multiple hidden>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm-1 7V3.5L18.5 9zM8 13h2l1 2 1-2h2l-2 3 2 3h-2l-1-2-1 2H8l2-3z"/></svg>
-          <p><strong>把總表 Excel，或系統的 JMSSAL、JMSSBK（.DBF）拖到這裡</strong>，或 <button class="btn primary" id="pickXlsx">選擇檔案</button></p>
-          <p class="hint">可以選總表，也可以一次選系統匯出的 JMSSAL 和 JMSSBK（.DBF 直接選就好，不用先轉 Excel，中文才不會變亂碼）。原始資料有實際出貨日期，月份會更準。總表只讀「原始進貨表」「原始退貨表」，其他工作表一律忽略。檔案只在這台裝置上處理，不會上傳。有開啟密碼的 Excel 也可以直接匯入，會請你輸入密碼，在瀏覽器內解密。</p>
-        </div>
-        <div class="add-month" id="addMonth" hidden>
-          <h3>加入新資料</h3>
-          <p class="hint"><strong>系統原始資料（建議）</strong>：從系統匯出新的 JMSSAL、JMSSBK（一個月、幾天都可以），按「加入新資料」一起選，或直接拖到上面的框框。依<strong>單號</strong>比對：新的單直接加入；網站裡已經有的單改用系統的新資料，但<strong>業務員保留原本的</strong>（系統事後改了業務員也一樣）。這段期間內網站有、系統沒有的單，會先列出來問你要不要刪。加入前會先讓你確認，完成後問你要不要把原檔做成加密備份。</p>
-          <p class="hint">也可以選總表格式的 Excel（有「原始進貨表」「原始退貨表」，只放新月份）：檔案裡有的月份會整月取代。</p>
-          <input type="file" id="fileAdd" accept=".xlsx,.xlsm,.dbf,.DBF" multiple hidden>
-          <div class="row"><button class="btn" id="pickAdd">加入新資料</button></div>
+          <p><strong>把系統的 JMSSAL、JMSSBK（.DBF），或總表 Excel 拖到這裡</strong>，或 <button class="btn primary" id="pickXlsx">選擇檔案</button></p>
+          <ul class="hint drop-how">
+            <li><strong>第一次</strong>：選全部期間的 JMSSAL 和 JMSSBK（或總表），整份匯入。</li>
+            <li><strong>之後每個月、每天</strong>：只要匯出新的期間，JMSSAL、JMSSBK 一起選。依單號加入或更新，<strong>業務員保留原本的</strong>；這段期間內網站有、系統沒有的單（多半是作廢）會先問你要不要刪。完成後問你要不要把原檔做成加密備份。</li>
+            <li><strong>總表 Excel</strong>：已經有資料時，會問你要「只更新檔案裡的月份」還是「整份取代」。</li>
+          </ul>
+          <p class="hint">.DBF 直接選就好，不用先轉 Excel，中文才不會變亂碼。商品類別代碼表、原始檔備份（.dvr）也可以丟進來，會自動辨識。檔案只在這台裝置上處理，不會上傳；有開啟密碼的 Excel 會請你輸入密碼，在瀏覽器內解密。</p>
         </div>
         <div class="progress" id="importProgress" hidden><div class="bar"><i></i></div><p></p></div>
         <dl class="facts" id="dataFacts"></dl>

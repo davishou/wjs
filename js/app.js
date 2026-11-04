@@ -948,6 +948,7 @@
         const d = await runWorker({ type: 'ingest', files, password: xlsPw }, [], (s) => showProgress(s.pct || 0, `${s.stage}… ${s.rows ? nf0.format(s.rows) + ' 筆' : ''}`));
         xlsPw = null;
         if (d.classification) { appPw = null; showProgress(1, '這是商品類別代碼表，已套用'); await applyClassification(d.classification); return; }
+        if (S.raw) { await chooseExcelMode(d.buf, names); return; } // 已經有資料：問要只更新檔案裡的月份，還是整份取代
         showProgress(1, '加密並儲存到這台裝置…');
         if (appPw) { S.vault = await Dataset.Vault.create(appPw); appPw = null; }
         await loadBuffer(d.buf, { name: names, save: true });
@@ -973,56 +974,31 @@
     }
   }
 
-  // 每月加入新資料：讀新的 Excel，先讓使用者確認哪些月份會加入／取代，再加密存檔
-  async function addMonthXlsx(file) {
-    if (demoBlock()) return;
-    if (!file) return;
-    if (/\.xls$/i.test(file.name)) { toast('舊版 .xls 格式無法讀取，請在 Excel「另存新檔」為 .xlsx 再加入', 5000); return; }
-    if (!/\.xls[xm]$/i.test(file.name)) { toast('請選擇 .xlsx 檔案'); return; }
-    if (!S.raw || !S.vault) { toast('請先匯入完整的總表，之後才能每月加入'); return; }
-    go('data');
-    let xlsPw = null;
-    if (await isCfbFile(file)) {
-      const r = await askImportPasswords(file.name, true, false, '');
-      if (!r) { toast('已取消加入'); return; }
-      xlsPw = r.xlsPw;
-    }
-    for (;;) {
-      showProgress(0, '準備讀取 ' + file.name);
-      let d;
-      try {
-        const base = S.raw.slice(0);
-        d = await runWorker({ type: 'merge', file, password: xlsPw, base }, [base], (s) => showProgress(s.pct || 0, `${s.stage}… ${s.rows ? nf0.format(s.rows) + ' 筆' : ''}`));
-        xlsPw = null;
-      } catch (err) {
-        worker && worker.terminate(); worker = null;
-        if (err.code === 'BAD_PASSWORD' || err.code === 'NEED_PASSWORD') {
-          showProgress(0, 'Excel 密碼不正確');
-          const r = await askImportPasswords(file.name, true, false, err.code === 'BAD_PASSWORD' ? 'Excel 密碼不正確，請再試一次。' : '');
-          if (!r) { showProgress(0, '已取消加入'); return; }
-          xlsPw = r.xlsPw;
-          continue;
-        }
-        xlsPw = null;
-        showProgress(0, '讀取失敗：' + err.message);
-        return;
-      }
-      const st = d.stats;
-      const isNew = new Set(st.newMonths);
-      const replaced = st.months.length - st.newMonths.length;
-      const desc = `<p>「${esc(file.name)}」裡有 <strong>${nf0.format(st.addSales)}</strong> 筆進貨、<strong>${nf0.format(st.addReturns)}</strong> 筆退貨，月份：</p>` +
-        `<ul class="month-tags">${st.months.map((m) => `<li class="${isNew.has(m) ? 'new' : ''}">${ymLabel(m)}${isNew.has(m) ? '（新）' : '（取代）'}</li>`).join('')}</ul>` +
-        (replaced ? `<p>標「取代」的月份目前已有資料：會先拿掉目前這些月份的 ${nf0.format(st.delSales)} 筆進貨、${nf0.format(st.delReturns)} 筆退貨，換成新檔案的內容。</p>` : '<p>都是新的月份，目前的資料不會被改動。</p>') +
-        (st.noMonth ? `<p>另有 ${nf0.format(st.noMonth)} 筆的單號看不出月份，會直接加入。</p>` : '') +
-        `<p>加入後共 ${nf0.format(st.nSales)} 筆進貨、${nf0.format(st.nReturns)} 筆退貨。</p>`;
-      const v = await ask({ title: '確認加入新資料', desc, fields: [], submit: '加入' });
-      if (!v) { showProgress(0, '已取消加入，資料沒有改變'); return; }
-      showProgress(1, '加密並儲存到這台裝置…');
-      await loadBuffer(d.buf, { save: true });
+  // 已經有資料時匯入總表格式的 Excel：先列出檔案裡的月份，讓使用者選「只更新這些月份」（預設，其他月份不動）或「整份取代」
+  async function chooseExcelMode(buf, names) {
+    showProgress(1, '讀取完成，請在視窗選擇要怎麼匯入…');
+    const add = Dataset.deserialize(buf);
+    const { raw, stats: st } = Dataset.merge(Dataset.deserialize(S.raw), add, names);
+    const isNew = new Set(st.newMonths);
+    const replaced = st.months.length - st.newMonths.length;
+    const desc = `<p>「${esc(names)}」裡有 <strong>${nf0.format(st.addSales)}</strong> 筆進貨、<strong>${nf0.format(st.addReturns)}</strong> 筆退貨，月份：</p>` +
+      `<ul class="month-tags">${st.months.map((m) => `<li class="${isNew.has(m) ? 'new' : ''}">${ymLabel(m)}${isNew.has(m) ? '（新）' : '（取代）'}</li>`).join('')}</ul>` +
+      `<ul><li><strong>只更新這些月份</strong>（建議）：標「新」的月份加進去${replaced ? `，標「取代」的月份換成這個檔案的內容（拿掉目前的 ${nf0.format(st.delSales)} 筆進貨、${nf0.format(st.delReturns)} 筆退貨）` : ''}，其他月份不動。同一個檔案加兩次也不會重複。完成後共 ${nf0.format(st.nSales)} 筆進貨、${nf0.format(st.nReturns)} 筆退貨。</li>` +
+      `<li><strong>整份取代</strong>：網站裡目前的資料全部換成這個檔案（${nf0.format(add.nSales)} 筆進貨、${nf0.format(add.nReturns)} 筆退貨），檔案裡沒有的月份會不見。</li></ul>` +
+      (st.noMonth ? `<p>另有 ${nf0.format(st.noMonth)} 筆的單號看不出月份，會直接加入。</p>` : '');
+    const v = await ask({ title: '這份 Excel 要怎麼匯入？', desc, fields: [], submit: '只更新這些月份', alt: '整份取代' });
+    if (!v) { showProgress(0, '已取消匯入，資料沒有改變'); return; }
+    showProgress(1, '加密並儲存到這台裝置…');
+    if (v.alt) {
+      await loadBuffer(buf, { save: true });
+      const di = S.E.ds.dates;
+      showProgress(1, `完成：整份取代，目前共 ${nf0.format(S.E.ds.nSales)} 筆進貨、${nf0.format(S.E.ds.nReturns)} 筆退貨` +
+        (di.dated ? `。${nf0.format(di.dated)} 筆有實際日期，其中 ${nf0.format(di.moved)} 筆的單號月份和實際月份不同` : ''));
+    } else {
+      await loadBuffer(Dataset.serialize(raw), { save: true });
       showProgress(1, `完成：加入 ${st.months.map(ymLabel).join('、')}，目前共 ${nf0.format(S.E.ds.nSales)} 筆進貨、${nf0.format(S.E.ds.nReturns)} 筆退貨`);
-      toast('新資料已加入，已加密保存在這台裝置');
-      return;
     }
+    toast('資料已更新，已加密保存在這台裝置');
   }
 
   // ---------- 加入系統原始資料（JMSSAL／JMSSBK .DBF，任何期間）----------
@@ -1226,7 +1202,6 @@
       : '尚未設定：匯入 Excel（電腦）或開啟資料包（手機，會沿用資料包的密碼）時會設定。';
     $('#changePw').hidden = $('#lockNow').hidden = !S.vault;
     const f = $('#dataFacts');
-    $('#addMonth').hidden = !S.E;
     if (!S.E) { f.innerHTML = '<div><dt>目前狀態</dt><dd>尚未載入資料</dd></div>'; return; }
     const ds = S.E.ds;
     const items = [
@@ -1263,9 +1238,6 @@
     $('#classClear').addEventListener('click', async () => {
       if (demoBlock()) return; const m = { ...(S.meta || {}) }; delete m.cat; S.meta = m; if (S.raw) await loadBuffer(Dataset.withMeta(S.raw, m), { save: true }); renderData(); toast('已移除商品類別代碼表'); });
     $('#dbPeriod').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.dash.period = b.dataset.v; store.set('dash', S.dash); renderDashboard(); });
-    const fa = $('#fileAdd');
-    $('#pickAdd').addEventListener('click', () => fa.click());
-    fa.addEventListener('change', () => { const fs = [...fa.files]; fa.value = ''; if (fs.length && fs.every((f) => /\.dbf$/i.test(f.name))) addRawFiles(fs); else addMonthXlsx(fs[0]); });
     const fb = $('#fileBak');
     $('#pickBak').addEventListener('click', () => fb.click());
     fb.addEventListener('change', () => { restoreRawBackup(fb.files[0]); fb.value = ''; });

@@ -34,13 +34,18 @@ async def dlg_fill(page, vals, check=None):
         if (await page.is_checked('#dlg_check')) != check: await page.click('#dlg_check')
     for k,v in vals.items(): await page.fill(f'#dlg_{k}', v)
     await page.click('#dlgOk')
-async def wait_done(page):
-    await page.wait_for_function("document.querySelector('#importProgress p') && /完成|失敗|取消/.test(document.querySelector('#importProgress p').textContent)", timeout=120000)
+async def wait_done(page, mode='all'):
+    """等匯入完成。已經有資料時再丟總表 Excel 會問「只更新這些月份／整份取代」：舊測試都是整份重新匯入，所以預設選整份取代。"""
+    js = "document.querySelector('#importProgress p') && (/完成：|失敗|取消/.test(document.querySelector('#importProgress p').textContent) || /請在視窗選擇/.test(document.querySelector('#importProgress p').textContent))"
+    await page.wait_for_function(js, timeout=120000)
+    if '請在視窗選擇' in await page.text_content('#importProgress p'):
+        await page.wait_for_selector('#dlg[open]'); await page.click('#dlgAlt' if mode == 'all' else '#dlgOk')
+        await page.wait_for_function("/完成：|失敗|取消/.test(document.querySelector('#importProgress p').textContent)", timeout=120000)
     return await page.text_content('#importProgress p')
 async def facts(page):
     return await page.text_content('#dataFacts')
 async def add_month_open(page, f):
-    await page.set_input_files('#fileAdd', FX+'/'+f)
+    await page.set_input_files('#fileXlsx', FX+'/'+f)
     await page.wait_for_selector('#dlg[open]', timeout=60000)
     return await page.text_content('#dlgForm')
 async def add_month_done(page):
@@ -49,10 +54,10 @@ async def add_month_done(page):
     return await page.text_content('#importProgress p')
 async def add_month(page, app_pw):
     """每月加入新資料：plain.xlsx（1,080 筆進貨、8 筆退貨，112/01–114/12）＋ month.xlsx。"""
-    ok(await page.is_visible('#pickAdd'), '有資料時顯示「加入新月份」')
+    ok(await page.locator('#fileAdd, #pickAdd').count() == 0 and '之後每個月' in await page.text_content('#drop'), '只有一個入口：「更新資料」框框說明第一次和之後的做法')
     # 取消 → 資料不變
     d = await add_month_open(page, 'month.xlsx')
-    ok('115/01（新）' in d and '114/12（取代）' in d and '1,085' in d, '加入前的確認視窗列出新增與取代的月份')
+    ok('115/01（新）' in d and '114/12（取代）' in d and '1,085' in d and '整份取代' in d, '已有資料時丟總表 Excel：列出新增與取代的月份，可選只更新這些月份或整份取代')
     await page.screenshot(path=SH+'/10_add_month.png')
     await page.click('#dlgCancel'); await page.wait_for_function("document.querySelector('#importProgress p').textContent.includes('已取消')")
     ok('1,080' in await facts(page) and '114/12' in await page.text_content('#brandSub'), '取消加入 → 資料沒有改變')
@@ -64,9 +69,9 @@ async def add_month(page, app_pw):
     d = await add_month_open(page, 'month.xlsx'); ok('115/01（取代）' in d, '同一個檔案再加一次：月份都標「取代」')
     t = await add_month_done(page); ok('1,085 筆進貨' in t and '10 筆退貨' in t, '同一個檔案加兩次不會重複：'+t)
     # 有密碼的 Excel 也能加入
-    await page.set_input_files('#fileAdd', FX+'/month_agile.xlsx'); await page.wait_for_selector('#dlg_xls')
+    await page.set_input_files('#fileXlsx', FX+'/month_agile.xlsx'); await page.wait_for_selector('#dlg_xls')
     await dlg_fill(page, {'xls':'wrong'}); await page.wait_for_function("document.querySelector('#dlgErr') && document.querySelector('#dlgErr').textContent.includes('不正確')", timeout=60000)
-    await dlg_fill(page, {'xls':'測試pw123'}); await page.wait_for_selector('#dlgOk:text("加入")', timeout=60000)
+    await dlg_fill(page, {'xls':'測試pw123'}); await page.wait_for_selector('#dlgOk:text("只更新這些月份")', timeout=60000)
     t = await add_month_done(page); ok('1,085 筆進貨' in t, '有密碼的 Excel 也能每月加入：'+t)
     # 新客戶、舊客戶都在客戶列表裡（合併後代碼對應正確）
     await page.click('a[data-view=customers]'); await page.wait_for_selector('#view-customers:not([hidden])')
@@ -82,6 +87,13 @@ async def add_month(page, app_pw):
         await page.evaluate(f"document.documentElement.dataset.theme='{th}'")
         await add_month_open(page, 'month.xlsx'); await page.screenshot(path=SH+f'/10_add_month_{th}.png'); await page.click('#dlgCancel')
     await page.evaluate("document.documentElement.dataset.theme='indigo'")
+    # 整份取代：只剩 month.xlsx 的資料，再匯回 plain.xlsx 讓後面的測試不受影響
+    await add_month_open(page, 'month.xlsx'); await page.click('#dlgAlt')
+    await page.wait_for_function("/完成：整份取代/.test(document.querySelector('#importProgress p').textContent)", timeout=60000)
+    ok(await page.evaluate('window.__app.E.ds.nSales') == 35, '選「整份取代」：只剩這個檔案的 35 筆進貨')
+    await add_month_open(page, 'plain.xlsx'); await page.click('#dlgAlt')
+    await page.wait_for_function("/完成：整份取代/.test(document.querySelector('#importProgress p').textContent)", timeout=60000)
+    await add_month_open(page, 'month.xlsx'); t = await add_month_done(page); ok('1,085 筆進貨' in t, '再整份取代回總表、加入月份：' + t)
 
 async def main():
   async with async_playwright() as p:
@@ -516,7 +528,7 @@ async def raw_add(b):
     ok('甲商行'.encode('big5') not in raw and b'DELIVNO' not in raw and orig[32:64] not in raw, '備份檔裡看不到客戶名、欄位名稱（已加密）')
     await pg.wait_for_function("/可以把/.test(document.querySelector('#importProgress p').textContent)")
     # 加入新資料
-    await pg.set_input_files('#fileAdd', [FX + '/add/JMSSAL.DBF', FX + '/add/JMSSBK.DBF'])
+    await pg.set_input_files('#fileXlsx', [FX + '/add/JMSSAL.DBF', FX + '/add/JMSSBK.DBF'])
     await pg.wait_for_selector('#dlg[open]', timeout=60000); t = await pg.text_content('#dlgForm')
     await pg.screenshot(path=SH + '/33_raw_add_dialog.png')
     ok(f"新的單：{info['new_orders'] + 1} 張" in t and f"已經有的單：{info['upd']} 張" in t and '其中 1 張內容有變動' in t, '確認視窗：新的單、已經有的單、內容有變動：' + t)
@@ -533,7 +545,7 @@ async def raw_add(b):
     got = sum((await pg.evaluate(NET_BY_YM)).values())
     ok(abs(got - want) < 0.01, f'加入後淨銷售 {got:.1f}（Python {want:.1f}），改過數量的單用新資料')
     # 同一個檔案再加一次：不會重複；勾選刪除作廢的單
-    await pg.set_input_files('#fileAdd', [FX + '/add/JMSSAL.DBF', FX + '/add/JMSSBK.DBF'])
+    await pg.set_input_files('#fileXlsx', [FX + '/add/JMSSAL.DBF', FX + '/add/JMSSBK.DBF'])
     await pg.wait_for_selector('#dlg[open]', timeout=60000); t = await pg.text_content('#dlgForm')
     ok('新的單：0 張' in t, '同一個檔案再加一次：沒有新的單')
     await pg.click('#dlg_check'); await pg.click('#dlgOk')

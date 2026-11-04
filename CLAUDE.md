@@ -61,10 +61,12 @@ BB/BC/BI 對照表整張改成和 AK/AT/BM 一樣，其他對照表只加進貨�
 - **電腦匯入 Excel**：worker 讀檔頭；若是加密檔（D0 CF 11 E0）就用 `OfficeCrypto.decryptXlsx` 在記憶體內解密成 Uint8Array（不建立 Blob，避免被暫存到硬碟），讀完 `fill(0)` 清空。→ `Dataset.serialize` → `Vault.save` 加密存進 IndexedDB。
 - **開啟密碼（Vault）**：IndexedDB 資料庫 `dv-analytics`、store `kv`、key `vault` = `{v, iter, salt, iv, ct}`。AES-256-GCM，PBKDF2-SHA256 60 萬次，內容先 gzip。金鑰只放記憶體（`S.vault`），重新整理就上鎖。舊版的未加密 key `data` 會在第一次開啟時轉成加密並刪除。
 - **資料包（.dvp）**：`'DVPK'` + flag + salt + iv + AES-GCM(gzip(serialize))。手機開啟資料包後，開啟密碼沿用資料包密碼。LINE 會把資料包包成 zip，`openPackFile` 會自動解開；選到 Excel 會直接匯入。
-- **加入系統原始資料（2026-11-04）**：「加入新資料」或更新資料框選 .DBF（這台裝置已有資料時一律走這條；沒有資料＝第一次整份匯入）。worker `readAdd` 只讀檔（可以只有退貨），
+- **只有一個入口（2026-11-04 使用者要求）**：「資料與設定」的「更新資料」框框（`#fileXlsx`）。原本的「每月加入」區（`#addMonth`、`#fileAdd`、`addMonthXlsx`、worker `merge`）已移除。
+  已有資料時丟總表格式的 Excel → `chooseExcelMode`：列出月份，選「只更新這些月份」（預設，`Dataset.merge` 同月份整月取代）或「整份取代」。
+- **加入系統原始資料（2026-11-04）**：更新資料框選 .DBF（這台裝置已有資料時一律走這條；沒有資料＝第一次整份匯入）。worker `readAdd` 只讀檔（可以只有退貨），
   畫面這邊 `Dataset.planOrders` 算出要做什麼、跳確認視窗，再 `Dataset.mergeOrders`。規則和總表更新工具一樣（使用者指定）：依整張單號（進貨、退貨分開）取代或新增；
   業務員保留原本的（同一張單依列的順序對齊，對不到或空白用該單原本第一個業務員，原本完全沒有才用系統的；網站沒存 DELIVORD）；
-  「期間內網站有、新檔案沒有」的單：期間＝新檔案實際日期最早～最晚（沒有日期才用單號月份），列出後由使用者勾選要不要刪（預設不刪）。總表格式的 Excel 仍走舊的 `merge`（同月份整月取代）。
+  「期間內網站有、新檔案沒有」的單：期間＝新檔案實際日期最早～最晚（沒有日期才用單號月份），列出後由使用者勾選要不要刪（預設不刪）。總表格式的 Excel 見上一條。
   沒做：業務交接.csv（只有總表更新工具有）。
 - **原始檔加密備份（.dvr）**：匯入 DBF 完成後問要不要做（使用者選擇「最後匯完問我」）。`Dataset.makeRawBackup`：原檔位元組原封不動，
   `'DVRB'` + 版本 1 + 次數(4) + salt16 + iv12 + AES-GCM(gzip(標頭長度＋JSON 標頭＋檔案))，AAD `DVRAWBK1`，用目前 Vault 的金鑰（salt、次數寫在檔裡，還原時用密碼重新產生）。
