@@ -298,9 +298,13 @@ async def dashboard(b):
     jumps = await pg.evaluate("[...document.querySelectorAll('#dbAlerts [data-jump]')].map(b => [b.dataset.jump, !!document.getElementById(b.dataset.jump)])")
     ok(jumps and all(x[1] for x in jumps), f'「看數據」都連得到下面的數據表：{[x[0] for x in jumps]}')
     ok(await pg.locator('#dbMarginDrill tbody tr').count() >= 1, '毛利率下降 → 下面多一張「毛利率掉最多的款號」')
-    await pg.click('#dbAlerts [data-jump=dbMarginDrill]'); await pg.wait_for_timeout(900)
-    box = await pg.evaluate("(() => { const r = document.getElementById('dbMarginDrill').getBoundingClientRect(); return [r.top, innerHeight]; })()")
-    ok(0 <= box[0] < box[1] * 0.5, f'按「看數據」會捲到那張表（位置 {box[0]:.0f}）')
+    for tgt in ('dbMarginDrill', 'dbHighRet'):
+        await pg.click(f'#dbAlerts [data-jump={tgt}]'); await pg.wait_for_timeout(400)
+        fl = await pg.evaluate(f"document.getElementById('{tgt}').closest('.panel').classList.contains('flash')")
+        await pg.wait_for_timeout(900)
+        box = await pg.evaluate(f"(() => {{ const p = document.getElementById('{tgt}').closest('.panel'), h = p.querySelector('h2').getBoundingClientRect(); return [p.getBoundingClientRect().top, h.top]; }})()")
+        ok(fl and 0 <= box[0] <= 40 and box[1] > 0, f'按「看數據」→ 捲到「{tgt}」整個框框的最上面，標題看得到（框框在 {box[0]:.0f}、標題在 {box[1]:.0f}），並閃紅框')
+    ok(await pg.evaluate("[...document.querySelectorAll('#dbAlerts details.ideas')].every(d => getComputedStyle(d).backgroundColor === 'rgba(0, 0, 0, 0)')"), '每個提醒只有一個框框（建議做法沒有另外的框）')
     await pg.screenshot(path=SH + '/21_alert_ideas.png')
     await pg.evaluate('window.scrollTo(0, 0)')
     await board_page(pg, d, exp)
@@ -415,6 +419,8 @@ async def reps_page(pg, d):
     """業務頁：每位業務加起來等於全公司；搜尋一位業務看詳細情形。"""
     await pg.click('a[data-view=reps]'); await pg.click('#rsPeriod button[data-v=ytd]'); await pg.wait_for_selector('#rsBars .hb-row')
     r = await pg.evaluate('window.__reps')
+    cols = await pg.evaluate("[...new Set(window.__reps.rows.map(x => window.__colorOf('rep', x.rep)))].length + '/' + window.__reps.rows.length")
+    ok(cols.split('/')[0] == cols.split('/')[1], f'每位業務一個不同的顏色（{cols}）')
     ok(r['mode'] == 'all' and abs(sum(x['net'] for x in r['rows']) - d['cur']['net']) < 0.01, f"業務：每位業務的淨銷售加起來 {sum(x['net'] for x in r['rows']):.0f} = 全公司 {d['cur']['net']:.0f}（{len(r['rows'])} 位）")
     ok(await pg.locator('#rsMonthChart svg').count() == 1 and await pg.locator('#rsYears table').count() == 1, '業務：每月曲線、每年表')
     one = r['rows'][0]

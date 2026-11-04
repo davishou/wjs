@@ -9,7 +9,7 @@
   const mk = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const col = (cls) => `var(--${cls || 's1'})`;
-  const PAL = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8'];
+  const PAL = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'c10', 'c11', 'c12', 'c13', 'c14', 'c15', 'c16']; // 16 個明顯不同的顏色，相鄰的色相差很多
 
   // 讓格線落在整齊的數字上（1、2、5 的倍數）
   function niceStep(span) {
@@ -159,8 +159,10 @@
   }
 
   // 橫條排名：rows = [{label, value, prev?, cls?, note?}]；同一個刻度，去年同期用細線標示
+  // 整張圖只有一種顏色時（例如前 10 大客戶），改成每一列不同顏色，比較好分辨（使用者要求顏色豐富）
   function hbars(el, { rows, fmt, onClick = null, prevLabel = '去年同期', limit = 12 }) {
-    const list = rows.slice(0, limit);
+    let list = rows.slice(0, limit);
+    if (list.length > 1 && new Set(list.map((r) => r.cls || 's1')).size === 1) list = list.map((r, i) => ({ ...r, cls: PAL[i % PAL.length] }));
     const mx = Math.max(1, ...list.map((r) => Math.max(r.value || 0, r.prev || 0)));
     const w = (v) => Math.max(0, Math.min(100, ((v || 0) / mx) * 100));
     el.innerHTML = list.length ? `<div class="hb">${list.map((r, i) => `<div class="hb-row${onClick ? ' click' : ''}" data-i="${i}" title="${esc(r.label)}：${esc(fmt(r.value))}${r.prev != null ? `\n${prevLabel}：${esc(fmt(r.prev))}` : ''}">

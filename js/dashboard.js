@@ -340,7 +340,16 @@
           (I.ideas.length ? `<details class="ideas"${a.lv === 'bad' ? ' open' : ''}><summary>建議可以怎麼做（${I.ideas.length} 點）</summary><ol>${I.ideas.map((x) => `<li>${x}</li>`).join('')}</ol></details>` : '') +
           (I.go ? `<button type="button" class="btn small" data-jump="${I.go}">看數據 ↓</button>` : '') + '</div></li>'; }).join('')}</ul>`
       : '<p class="hint">這段期間沒有特別需要注意的地方。</p>');
-    $$('#dbAlerts [data-jump]').forEach((b) => { b.onclick = () => { const t = $('#' + b.dataset.jump); if (!t) return; t.scrollIntoView({ behavior: 'smooth', block: 'start' }); t.classList.remove('flash'); void t.offsetWidth; t.classList.add('flash'); }; });
+    // 「看數據」：跳到那張表所在的整個框框，標題要看得到（扣掉上方固定的選單高度），再閃 4 下粗紅框
+    $$('#dbAlerts [data-jump]').forEach((b) => { b.onclick = () => {
+      const el = $('#' + b.dataset.jump); if (!el) return;
+      const t = el.classList.contains('panel') ? el : el.closest('.panel') || el;
+      const nav = document.querySelector('.nav'), nr = nav ? nav.getBoundingClientRect() : null;
+      const top = nr && nr.height < 140 && nr.top < 40 ? nr.bottom + 14 : 16; // 夜航、市集的選單在上方
+      window.scrollTo({ top: Math.max(0, t.getBoundingClientRect().top + window.scrollY - top), behavior: 'smooth' });
+      t.classList.remove('flash'); void t.offsetWidth; t.classList.add('flash');
+      clearTimeout(t._fl); t._fl = setTimeout(() => t.classList.remove('flash'), 3000);
+    }; });
     return { cur, prev, alerts, top10Share, newCust: newCust.length };
   }
 

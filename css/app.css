@@ -8,6 +8,7 @@
   --s1: #2D5AA0; --s2: #C0503F; --s3: #9AA7BD;
   /* 分類配色（區域、大類）：已用色盲檢查驗證，light／dark 各一組 */
   --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100; --c5: #e87ba4; --c6: #008300; --c7: #6250d6; --c8: #e34948; --c-ink: #ffffff; --c4-ink: #0b0b0b;
+  --c9: #0f9fb5; --c10: #9c5a2b; --c11: #6cbcf5; --c12: #8ab31b; --c13: #b5338a; --c14: #5b6b80; --c15: #8a1c2b; --c16: #3a3a3a;
   --heat-0: #EEF2F8; --heat-1: #C9D5EA; --heat-2: #8EA6CF; --heat-3: #4E6FA8; --heat-4: #26437A;
   --font: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
   --font-head: "Noto Serif TC", "Songti TC", "PMingLiU", serif;
@@ -24,6 +25,7 @@
   --good: #3CC2A0; --warn: #F3B23C; --bad: #F0705A;
   --s1: #2FA898; --s2: #E0674E; --s3: #5B6F8F;
   --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181; --c6: #008300; --c7: #9085e9; --c8: #e66767; --c-ink: #ffffff; --c4-ink: #ffffff;
+  --c9: #2ec4d9; --c10: #c98a5a; --c11: #9ad4ff; --c12: #a6cf3a; --c13: #e070bd; --c14: #9aa9bd; --c15: #e0707f; --c16: #d9d9d9;
   --heat-0: #1B2A44; --heat-1: #22445A; --heat-2: #24676E; --heat-3: #2A8B84; --heat-4: #3CB59E;
   --font: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
   --font-head: "Noto Sans TC", "PingFang TC", sans-serif;
@@ -40,6 +42,7 @@
   --good: #13805F; --warn: #B56F00; --bad: #C2453A;
   --s1: #13805F; --s2: #C77D05; --s3: #9DB3A8;
   --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100; --c5: #e87ba4; --c6: #008300; --c7: #6250d6; --c8: #e34948; --c-ink: #ffffff; --c4-ink: #0b0b0b;
+  --c9: #0f9fb5; --c10: #9c5a2b; --c11: #6cbcf5; --c12: #8ab31b; --c13: #b5338a; --c14: #5b6b80; --c15: #8a1c2b; --c16: #3a3a3a;
   --heat-0: #EEF6F1; --heat-1: #CBE7D8; --heat-2: #8ACBAD; --heat-3: #3FA57D; --heat-4: #13805F;
   --font: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
   --font-head: "Huninn", "Noto Sans TC", sans-serif;
@@ -693,14 +696,23 @@ small .up, small .down { font-size: 1.25em; }
 
 /* 提醒：建議做法、看數據 */
 .alerts .al-body { min-width: 0; }
-.alerts details.ideas { margin: 8px 0 6px; background: var(--surface); border-radius: var(--radius); padding: 8px 12px; }
+.alerts details.ideas { margin: 6px 0 6px; padding: 0; background: none; border: 0; }
 .alerts details.ideas summary { cursor: pointer; font-weight: 700; font-size: .9rem; color: var(--ink); }
 .alerts details.ideas ol { margin: 6px 0 2px; padding-left: 1.4em; color: var(--ink-2); font-size: .9rem; }
 .alerts details.ideas li { display: list-item; margin: 4px 0; padding: 0; background: none; border: 0; border-radius: 0; }
 .btn.small { padding: 4px 10px; font-size: .82rem; }
-.panel.drill { scroll-margin-top: 70px; }
-.panel.flash { animation: flash 1.6s ease-out; }
-@keyframes flash { 0%, 30% { box-shadow: 0 0 0 3px var(--primary); } 100% { box-shadow: var(--shadow, none); } }
+
+.panel.flash { animation: flash .6s ease-in-out 4; }
+@keyframes flash { 0%, 100% { outline: 5px solid transparent; outline-offset: 3px; } 35%, 65% { outline: 5px solid var(--bad); outline-offset: 3px; } }
 /* 表格欄位多時在自己的框裡左右捲，不要把整頁撐寬 */
 main { min-width: 0; }
 .table-wrap { overflow-x: auto; }
+
+/* 儀表板的 ▲▼ 再放大（使用者要求：加大許多） */
+.bd-delta { font-size: 1.15rem; }
+.bd-delta.good, .bd-delta.bad { font-size: 1.3rem; font-weight: 800; }
+.bd-delta small { font-size: .78rem; }
+.up, .down { font-size: 1.22em; font-weight: 800; }
+td .up, td .down, .hb-note .up, .hb-note .down { font-size: 1.25em; }
+.kpi .d .up, .kpi .d .down { font-size: 1.35em; }
+small .up, small .down { font-size: 1.35em; }
