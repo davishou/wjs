@@ -305,6 +305,12 @@ async def dashboard(b):
         box = await pg.evaluate(f"(() => {{ const p = document.getElementById('{tgt}').closest('.panel'), h = p.querySelector('h2').getBoundingClientRect(); return [p.getBoundingClientRect().top, h.top]; }})()")
         ok(fl and 0 <= box[0] <= 40 and box[1] > 0, f'按「看數據」→ 捲到「{tgt}」整個框框的最上面，標題看得到（框框在 {box[0]:.0f}、標題在 {box[1]:.0f}），並閃紅框')
     ok(await pg.evaluate("[...document.querySelectorAll('#dbAlerts details.ideas')].every(d => getComputedStyle(d).backgroundColor === 'rgba(0, 0, 0, 0)')"), '每個提醒只有一個框框（建議做法沒有另外的框）')
+    hl = await pg.evaluate("(() => { const p = document.getElementById('dbHighRet').closest('.panel'); const b = p.querySelector('.hl-banner'); return [p.classList.contains('hl-bad'), b ? b.className : '', b ? b.textContent : '', getComputedStyle(b).backgroundColor, getComputedStyle(p).outlineStyle]; })()")
+    ok(hl[0] and 'bad' in hl[1] and '退貨率上升' in hl[2] and hl[4] == 'solid', f'要注意 → 紅框留著，框框上面有紅底白字的標題：「{hl[2][:24]}…」')
+    ok(await pg.locator('#dbMarginDrill .hl-banner').count() == 0, '跳到別的提醒時，上一個框框的標題列會拿掉')
+    await pg.click('#dbAlerts [data-jump=dbTop10Drill]'); await pg.wait_for_timeout(1200)
+    ok(await pg.evaluate("document.getElementById('dbTop10Drill').classList.contains('hl-warn') && !!document.querySelector('#dbTop10Drill .hl-banner.warn')"), '留意 → 黃框和黃色標題列')
+    await pg.screenshot(path=SH + '/22_alert_banner.png')
     await pg.screenshot(path=SH + '/21_alert_ideas.png')
     await pg.evaluate('window.scrollTo(0, 0)')
     await board_page(pg, d, exp)
@@ -337,8 +343,11 @@ async def dashboard(b):
     await pg.click('a[data-view=data]'); await pg.set_input_files('#fileXlsx', FX + '/plain.xlsx'); await wait_done(pg)
     ok('7 個代碼' in await pg.text_content('#classState') and '100,000' in await pg.text_content('#metaState'), '重新匯入總表後，分類表與設定保留')
     # 商品：款號層級、尺寸與顏色
-    await pg.click('a[data-view=products]'); await pg.click('#prLevel button[data-v=style]'); await pg.fill('#prSearch', 'AR9006'); await pg.wait_for_timeout(400)
-    await pg.click('#prTable tbody tr:first-child'); await pg.wait_for_selector('#dwSize .best')
+    await pg.click('a[data-view=products]'); await pg.wait_for_selector('#prTable')
+    ok(await pg.locator('#prLevel').count() == 0, '商品頁只用商品代號（沒有商品代號／簡化代碼／款號的切換）')
+    await pg.fill('#prSearch', 'AR9006'); await pg.wait_for_timeout(400)
+    ok(await pg.locator('#prTable tbody tr').count() >= 2, '商品頁搜尋款號也找得到（AR9006 的各尺寸）')
+    await pg.evaluate("window.__drill('style', 0, 'AR9006')"); await pg.wait_for_selector('#dwSize .best')
     best = await pg.text_content('#dwSize .best'); top = max(exp['size'], key=exp['size'].get)
     sizes = await pg.evaluate("[...document.querySelectorAll('#dwSize .share')[0].querySelectorAll('.srow')].map(r => r.querySelector('.sl').textContent)")
     ok(f'尺寸 {top}' in best and all(any(s.replace('🏆 ', '').startswith(k) and f'{v:,} 件'.replace(',', ',') in s for s in sizes) for k, v in exp['size'].items()),
@@ -541,7 +550,8 @@ async def raw_import(b):
     await pg.select_option('#tdDay', str(exp['firstOct'])); await pg.wait_for_timeout(300)
     ok((await pg.evaluate('window.__today'))['date'] == exp['firstOct'], '今日：可以切換日期')
     await pg.screenshot(path=SH + '/32_today.png', full_page=True)
-    await pg.click('#tdRepBars .hb-row'); await pg.wait_for_selector('#rsBack')
+    ok('全公司合計' in await pg.text_content('#tdRepBars .hb-row:first-child'), '今月：各業務長條第一條是全公司合計（這份假資料沒有去年，所以沒有細線）')
+    await pg.click('#tdRepBars .hb-row:nth-child(2)'); await pg.wait_for_selector('#rsBack')
     ok((await pg.evaluate('window.__reps'))['mode'] == 'one', '今日：點業務的橫條 → 業務頁的詳細情形')
     # 有實際日期：近 30 天每天一根、近 90 天每週一根，加起來等於那段日期的淨銷售
     await pg.click('a[data-view=customers]'); await pg.click('#cuPeriod button[data-v=d30]'); await pg.wait_for_timeout(400)
@@ -673,6 +683,14 @@ async def report_page(b):
     r = await pg.evaluate("window.__report")
     ok(abs(r['cur']['net'] - exp['cur']['net']) < 0.01 and abs(r['cur']['netProfit'] - exp['cur']['netProfit']) < 0.01, f"報告 114 年淨營收 {r['cur']['net']:.0f}、淨毛利 {r['cur']['netProfit']:.0f}（Python {exp['cur']['net']:.0f}、{exp['cur']['netProfit']:.0f}）")
     ok(abs(r['top10Share'] - exp['top10']) < 0.001, f"TOP10 客戶合計佔比 {r['top10Share']:.4f}（Python {exp['top10']:.4f}）")
+    # 選不同年度的同期比較：114 年和 112 年比
+    ok(await pg.locator('#rpVs option').count() == 2 and (await pg.input_value('#rpVs')) == '113', '圖表報告：對照年度預設前一年，可選更早的年份')
+    await pg.select_option('#rpVs', '112'); await pg.wait_for_timeout(500)
+    r2 = await pg.evaluate("window.__report"); sub = await pg.text_content('#rpSub')
+    want112 = sum((rr['amt'] if rr['src'] == 0 else -rr['amt']) for rr in exp['rows'] if rr['ym'] // 100 == 112)
+    ok('112年同期' in sub and '112年' in await pg.text_content('#rpMonthly') and abs(r2['prev']['net'] - want112) < 0.01,
+       f"選 112 年 → 和 112 年同期比：{sub}（112 年淨營收 {r2['prev']['net']:.0f}，Python {want112:.0f}）")
+    await pg.select_option('#rpVs', '113'); await pg.wait_for_timeout(300)
     big = {x['n']: x['cs'] for x in r['big']}
     ok(all(abs(big.get(k, 0) - v) < 0.001 for k, v in exp['big'].items()), f'男女童比例 {big}（Python {exp["big"]}）')
     ok(await pg.locator('#rpBody .rp-card').count() == 9 and await pg.locator('#rpCust .rb-row').count() >= 5 and await pg.locator('#rpRegion .rp-pie svg').count() == 2, '9 張圖：封面、每月、歷年、TOP10 客戶、TOP15 商品、區域、品項、男女童、毛利貢獻；區域有今年和去年兩條')

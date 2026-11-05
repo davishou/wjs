@@ -1,4 +1,4 @@
-/* 今日：用實際出貨／退貨日期看「現在」的表現。
+/* 今月：用實際出貨／退貨日期看「現在」的表現。
    - 選一天（預設最新一天）：當天、本月累計（和上月同期、去年同月同期比）、今年累計、月底預估
    - 本月累計走勢（本月、上個月、去年同月，同一個刻度）、最近 30 天每天的淨銷售
    - 本月各業務、本月前 10 大客戶、最近幾個出貨日、當天的單、該來買卻還沒來的客戶
@@ -79,9 +79,9 @@
     html.push(`<div class="grid2"><div class="panel"><div class="panel-head"><h2>本月累計走勢</h2></div><p class="hint">每一天加起來的淨銷售。本月的線在上個月、去年同月的上面，就是表現比較好。</p><div class="chart" id="tdCumChart"></div></div>
       <div class="panel"><div class="panel-head"><h2>最近 30 天每天的淨銷售</h2></div><p class="hint">長條是每天的淨銷售，線是前 7 天的平均（看趨勢）。沒有出貨的日子是空的。</p><div class="chart" id="tdDayChart"></div></div></div>`);
     html.push(`<div class="panel"><div class="panel-head"><h2>本月各業務（${m}/1～${m}/${dd}）</h2><a href="#reps" class="link" id="tdAllReps">業務頁</a></div>
-      <div class="grid2 tight"><div><h3>佔本月的比例</h3><div id="tdRepPie"></div></div><div><h3>本月到今天${hasPm ? '（細線 = 上月同期）' : ''}</h3><div id="tdRepBars"></div></div></div>
+      <div class="grid2 tight"><div><h3>佔本月的比例</h3><div id="tdRepPie"></div></div><div><h3>本月到今天${hasLm ? '（細線 = 去年同月同期，內衣有淡旺季，所以和去年比）' : ''}</h3><div id="tdRepBars"></div></div></div>
       <details class="numtab"><summary>數字表</summary><div id="tdReps" class="db-scroll"></div></details></div>`);
-    html.push(`<div class="panel"><div class="panel-head"><h2>本月前 10 大客戶</h2></div>${hasLm ? '<p class="hint">細線是去年同月同期。點客戶看明細。</p>' : ''}<div id="tdCust"></div></div>`);
+    html.push(`<div class="panel"><div class="panel-head"><h2>本月前 10 大客戶</h2></div><p class="hint">顏色是客戶的區域（和客戶頁一樣）。${hasLm ? '細線是去年同月同期。' : ''}點客戶看明細。</p><div id="tdCust"></div></div>`);
     html.push(`<div class="panel"><div class="panel-head"><h2>${dayLabel(D)} 的單</h2></div><div id="tdOrders" class="db-scroll"></div></div>`);
     box.innerHTML = html.join('');
 
@@ -121,10 +121,13 @@
     ];
     if (hasPm) rcols.push({ key: 'pnet', label: '上月同期', n: 1, fmt: 'money' }, { key: 'pchg', label: '比上月', n: 1, render: (r) => (r.pnet ? arrow(chg(r.net, r.pnet)) : '<span class="muted">—</span>') });
     if (hasLm) rcols.push({ key: 'lnet', label: '去年同月同期', n: 1, fmt: 'money' }, { key: 'lchg', label: '比去年', n: 1, render: (r) => (r.lnet ? arrow(chg(r.net, r.lnet)) : '<span class="muted">新</span>') });
-    rcols.push({ key: 'margin', label: '毛利率', n: 1, fmt: 'pct' }, { key: 'custs', label: '客戶數', n: 1, fmt: 'int' });
+    rcols.push({ key: 'margin', label: '總毛利率', n: 1, fmt: 'pct' }, { key: 'custs', label: '客戶數', n: 1, fmt: 'int' });
     table($('#tdReps'), rcols, reps, { limit: 30, onRow: (r) => ctx.goRep(r.rep), empty: '這個月還沒有資料' });
     Charts.donut($('#tdRepPie'), { items: reps.filter((r) => r.net > 0).map((r) => ({ label: r.label, value: r.net, cls: ctx.colorOf('rep', r.rep), rep: r.rep })), fmt: fmt.big, title: '各業務佔本月的比例', center: { value: fmt.big(T.mtd.net), label: '本月' }, onClick: (d) => ctx.goRep(d.rep) });
-    Charts.hbars($('#tdRepBars'), { rows: reps.map((r) => ({ label: r.label, value: r.net, prev: hasPm ? r.pnet : null, cls: ctx.colorOf('rep', r.rep), rep: r.rep, note: hasPm && r.pnet ? arrow(chg(r.net, r.pnet)) : '' })), fmt: fmt.big, prevLabel: '上月同期', onClick: (r) => ctx.goRep(r.rep) });
+    // 第一條是全公司合計（顏色和各業務不同），細線都是去年同月同期
+    const lNote = (v, lv) => (hasLm ? (lv ? arrow(chg(v, lv)) : '<span class="muted">新</span>') : '');
+    Charts.hbars($('#tdRepBars'), { rows: [{ label: '全公司合計', value: T.mtd.net, prev: hasLm ? T.lmtd.net : null, cls: 'c16', total: true, note: lNote(T.mtd.net, T.lmtd.net) }]
+      .concat(reps.map((r) => ({ label: r.label, value: r.net, prev: hasLm ? r.lnet : null, cls: ctx.colorOf('rep', r.rep), rep: r.rep, note: lNote(r.net, r.lnet) }))), fmt: fmt.big, prevLabel: '去年同月同期', limit: 30, onClick: (r) => ctx.goRep(r.total ? null : r.rep) });
     $('#tdAllReps').onclick = (e) => { e.preventDefault(); ctx.goRep(null); };
 
     // ---------- 本月前 10 大客戶 ----------
@@ -136,7 +139,7 @@
     if (hasLm) ccols.push({ key: 'lnet', label: '去年同月同期', n: 1, fmt: 'money' }, { key: 'x', label: '變化', n: 1, render: (r) => (r.lnet ? arrow(chg(r.net, r.lnet)) : '<span class="muted">新</span>') });
     const openCk = (r) => { const c = E.customers({ dims: { ck: new Set([r.ck]) } }, ctx.refYm()).list[0]; if (c) ctx.openCustomer(c); };
     void ccols;
-    Charts.hbars($('#tdCust'), { rows: top.map((r) => ({ label: r.name, value: r.net, prev: hasLm ? r.lnet : null, ck: r.ck, cls: 'c1', note: hasLm ? (r.lnet ? arrow(chg(r.net, r.lnet)) : '<span class="muted">新</span>') : '' })), fmt: fmt.big, prevLabel: '去年同月同期', onClick: openCk, limit: 10 });
+    Charts.hbars($('#tdCust'), { rows: top.map((r) => ({ label: r.name, value: r.net, prev: hasLm ? r.lnet : null, ck: r.ck, cls: ctx.custColor(r.ck), note: hasLm ? (r.lnet ? arrow(chg(r.net, r.lnet)) : '<span class="muted">新</span>') : '' })), fmt: fmt.big, prevLabel: '去年同月同期', onClick: openCk, limit: 10 });
 
     // ---------- 當天的單 ----------
     const od = E.pivot({ rows: ['ord', 'src', 'ck', 'rep'], cols: null, measures: ['sales', 'returns', 'rows'], filter: { dFrom: D, dTo: D } });

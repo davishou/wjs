@@ -53,7 +53,7 @@
       }).filter((r) => r.sales || r.returns || r.prevNet).sort((a, b) => b.net - a.net);
       body.innerHTML = `<div class="panel"><div class="panel-head"><h2>每位業務的銷售狀況</h2></div><p class="hint">點圖或名字看那位業務的詳細情形；也可以在上面搜尋。</p>
         <div class="grid2 tight"><div><h3>佔全公司淨銷售</h3><div id="rsPie"></div></div><div><h3>淨銷售${hasPrev ? '（細線 = 去年同期）' : ''}</h3><div id="rsBars"></div></div></div>
-        <details class="numtab"><summary>數字表（淨毛利、毛利率、退貨率、客戶數、單數）</summary><div id="rsTable" class="db-scroll"></div></details></div>
+        <details class="numtab"><summary>數字表（毛利（扣退貨）、總毛利率、退貨率、客戶數、單數）</summary><div id="rsTable" class="db-scroll"></div></details></div>
         <div class="panel"><div class="panel-head"><h2>每月淨銷售（近 24 個月）</h2></div><p class="hint">這段期間淨銷售最高的 ${Math.min(COLORS.length, rows.length)} 位業務，每人一條線。</p><div class="chart tall" id="rsMonthChart"></div></div>
         <div class="panel"><div class="panel-head"><h2>每年淨銷售</h2></div><p class="hint">每位業務每一年的淨銷售，▲▼ 是和前一年比。${ref % 100 < 12 ? `今年還沒過完（到 ${ymLabel(E.maxYm)}），最右邊另外列出每年 1～${ref % 100} 月的同期比較；圖上有 * 的年份還沒過完。` : ''}</p><div class="chart" id="rsYearChart"></div><details class="numtab"><summary>數字表</summary><div id="rsYears" class="table-wrap db-scroll"></div></details></div>`;
       const cols = [
@@ -63,7 +63,7 @@
       ];
       if (hasPrev) cols.push({ key: 'prevNet', label: '去年同期', n: 1, fmt: 'money' }, { key: 'yoy', label: '成長', n: 1, render: (r) => (r.prevNet ? arrow(r.yoy) : '<span class="muted">新</span>') });
       cols.push(
-        { key: 'netProfit', label: '淨毛利', n: 1, fmt: 'money' }, { key: 'margin', label: '毛利率', n: 1, fmt: 'pct' }, { key: 'retRate', label: '退貨率', n: 1, fmt: 'pct' },
+        { key: 'netProfit', label: '毛利（扣退貨）', n: 1, fmt: 'money' }, { key: 'margin', label: '總毛利率', n: 1, fmt: 'pct' }, { key: 'retRate', label: '退貨率', n: 1, fmt: 'pct' },
         { key: 'custs', label: '客戶數', n: 1, render: (r) => nf0.format(r.custs) + (hasPrev ? `<small class="muted">（去年 ${nf0.format(r.prevCusts)}）</small>` : '') },
         { key: 'orders', label: '出貨單數', n: 1, fmt: 'int' }, { key: 'avg', label: '平均每單', n: 1, fmt: 'money' },
       );
@@ -122,7 +122,7 @@
     body.innerHTML = `<div class="panel rs-head"><div class="panel-head"><h2>${esc(repName(sel))} 的詳細情形</h2><button class="btn" id="rsBack">‹ 全部業務</button></div>
         <div class="kpis">${[
           kpi('淨銷售', fmt.big(c.net), hasPrev ? `比去年同期 ${arrow(chg(c.net, p.net))}` : '', rank ? `第 ${rank} 名，佔全公司 ${fmt.pct(rate(c.net, totNet))}` : ''),
-          kpi('淨毛利', fmt.big(c.netProfit), `毛利率 ${fmt.pct(rate(c.profit, c.sales))}`, hasPrev ? `去年同期 ${fmt.pct(rate(p.profit, p.sales))} ${arrow(rate(c.profit, c.sales) - rate(p.profit, p.sales), true, true)}` : ''),
+          kpi('毛利（扣退貨）', fmt.big(c.netProfit), `總毛利率 ${fmt.pct(rate(c.profit, c.sales))}`, hasPrev ? `去年同期 ${fmt.pct(rate(p.profit, p.sales))} ${arrow(rate(c.profit, c.sales) - rate(p.profit, p.sales), true, true)}` : ''),
           kpi('退貨率', fmt.pct(rate(c.returns, c.sales)), `退貨 ${fmt.big(c.returns)}`, hasPrev ? `去年同期 ${fmt.pct(rate(p.returns, p.sales))}` : ''),
           kpi('交易客戶數', nf0.format(c.custs), `新客戶 ${nf0.format(newC)} 位`, hasPrev ? `去年同期 ${nf0.format(p.custs)} 位、沒再買 ${nf0.format(lost.length)} 位` : ''),
           kpi('出貨單數', nf0.format(c.orders), `平均每單 ${fmt.money(rate(c.sales, c.orders))}`, hasPrev ? `去年同期 ${nf0.format(p.orders)} 張` : ''),
@@ -142,8 +142,8 @@
     void shareRows;
     const newNet = [...cc.entries()].filter(([k]) => isNewC(k)).reduce((t, [, v]) => t + v[0], 0);
     Charts.donut($('#rsNewOld'), { items: [{ label: '老客戶', value: c.net - newNet, cls: 'c1' }, { label: '新客戶（這段期間第一次跟他買）', value: newNet, cls: 'c3' }].filter((x) => x.value > 0), fmt: fmt.big, title: '新客戶／老客戶', sort: false });
-    Charts.hbars($('#rsTopCust'), { rows: custRows.filter((r) => r.net > 0).slice(0, 10).map((r) => ({ label: r.name, value: r.net, prev: hasPrev ? r.prevNet : null, cls: 'c1', r, note: hasPrev ? (r.prevNet ? arrow(chg(r.net, r.prevNet)) : '<span class="muted">新</span>') : '' })), fmt: fmt.big, limit: 10, onClick: (x) => { if (x.r.info && x.r.info.ck != null) ctx.openCustomer(x.r.info); } });
-    Charts.hbars($('#rsTopProd'), { rows: prodRows.filter((r) => r.net > 0).slice(0, 10).map((r) => ({ label: r.label, value: r.net, prev: hasPrev ? r.prevNet : null, cls: 'c4', r, note: hasPrev ? (r.prevNet ? arrow(chg(r.net, r.prevNet)) : '<span class="muted">新</span>') : '' })), fmt: fmt.big, limit: 10, onClick: (x) => ctx.drill('style', x.r.code, x.r.label) });
+    Charts.hbars($('#rsTopCust'), { rows: custRows.filter((r) => r.net > 0).slice(0, 10).map((r) => ({ label: r.name, value: r.net, prev: hasPrev ? r.prevNet : null, cls: ctx.custColor(r.ck), r, note: hasPrev ? (r.prevNet ? arrow(chg(r.net, r.prevNet)) : '<span class="muted">新</span>') : '' })), fmt: fmt.big, limit: 10, onClick: (x) => { if (x.r.info && x.r.info.ck != null) ctx.openCustomer(x.r.info); } });
+    Charts.hbars($('#rsTopProd'), { rows: prodRows.filter((r) => r.net > 0).slice(0, 10).map((r) => ({ label: r.label, value: r.net, prev: hasPrev ? r.prevNet : null, r, note: hasPrev ? (r.prevNet ? arrow(chg(r.net, r.prevNet)) : '<span class="muted">新</span>') : '' })), fmt: fmt.big, limit: 10, onClick: (x) => ctx.drill('style', x.r.code, x.r.label) });
     $('#rsBack').onclick = () => { st.sel = null; ctx.save(); ctx.rerender(); };
     // 每年表
     const yp = E.pivot({ rows: ['year'], cols: null, measures: MS, filter: { dims } }).rows.map((r) => ({ y: parseInt(r.labels[0], 10), ...obj(r.vals[0]) }));
@@ -154,15 +154,15 @@
       { key: 'y', label: '年', cls: 'lbl', render: (r) => r.y + ' 年' + (r.y === Math.floor(E.maxYm / 100) && E.maxYm % 100 < 12 ? `<small class="muted">（到 ${E.maxYm % 100} 月）</small>` : '') },
       { key: 'net', label: '淨銷售', n: 1, fmt: 'money' },
       { key: 'g', label: '比前一年', n: 1, render: (r) => (!ypm.get(r.y - 1) ? '<span class="muted">—</span>' : pN && r.y === pY ? arrow(chg(ySame.get(r.y) || 0, ySame.get(r.y - 1))) + `<small class="muted">（1～${pN} 月同期）</small>` : arrow(chg(r.net, ypm.get(r.y - 1).net))) },
-      { key: 'netProfit', label: '淨毛利', n: 1, fmt: 'money' },
-      { key: 'm', label: '毛利率', n: 1, render: (r) => fmt.pct(rate(r.profit, r.sales)) },
+      { key: 'netProfit', label: '毛利（扣退貨）', n: 1, fmt: 'money' },
+      { key: 'm', label: '總毛利率', n: 1, render: (r) => fmt.pct(rate(r.profit, r.sales)) },
       { key: 'rr', label: '退貨率', n: 1, render: (r) => fmt.pct(rate(r.returns, r.sales)) },
       { key: 'custs', label: '客戶數', n: 1, fmt: 'int' }, { key: 'orders', label: '出貨單數', n: 1, fmt: 'int' },
     ], yp.slice().reverse(), {});
     // 客戶表
     const ccols = [{ key: 'name', label: '客戶', cls: 'lbl' }, { key: 'net', label: '淨銷售', n: 1, fmt: 'money' }];
     if (hasPrev) ccols.push({ key: 'prevNet', label: '去年同期', n: 1, fmt: 'money' }, { key: 'x', label: '變化', n: 1, render: (r) => (!r.net && r.prevNet > 0 ? '<span class="down">沒再買</span>' : r.prevNet ? arrow(chg(r.net, r.prevNet)) : '<span class="muted">新</span>') });
-    ccols.push({ key: 'margin', label: '毛利率', n: 1, fmt: 'pct' }, { key: 'last', label: '最近交易', fmt: 'ym' }, { key: 'idle', label: '靜止(月)', n: 1, fmt: 'int' });
+    ccols.push({ key: 'margin', label: '總毛利率', n: 1, fmt: 'pct' }, { key: 'last', label: '最近交易', fmt: 'ym' }, { key: 'idle', label: '靜止(月)', n: 1, fmt: 'int' });
     table($('#rsCust'), ccols, custRows, { limit: 30, onRow: (r) => { if (r.info && r.info.ck != null) ctx.openCustomer(r.info); }, empty: '這段期間沒有客戶' });
     table($('#rsProd'), [{ key: 'label', label: '款號', cls: 'lbl' }, { key: 'net', label: '淨銷售', n: 1, fmt: 'money' }, ...(hasPrev ? [{ key: 'prevNet', label: '去年同期', n: 1, fmt: 'money' }, { key: 'g', label: '變化', n: 1, render: (r) => (r.prevNet ? arrow(chg(r.net, r.prevNet)) : '<span class="muted">新</span>') }] : []), { key: 'qty', label: '賣出數', n: 1, fmt: 'int' }, { key: 'custs', label: '客戶數', n: 1, fmt: 'int' }],
       prodRows, { limit: 15, onRow: (r) => ctx.drill('style', r.code, r.label), empty: '沒有' });

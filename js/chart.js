@@ -162,7 +162,7 @@
   // 整張圖只有一種顏色時（例如前 10 大客戶），改成每一列不同顏色，比較好分辨（使用者要求顏色豐富）
   function hbars(el, { rows, fmt, onClick = null, prevLabel = '去年同期', limit = 12 }) {
     let list = rows.slice(0, limit);
-    if (list.length > 1 && new Set(list.map((r) => r.cls || 's1')).size === 1) list = list.map((r, i) => ({ ...r, cls: PAL[i % PAL.length] }));
+    if (list.length > 1 && list.every((r) => !r.cls)) list = list.map((r, i) => ({ ...r, cls: PAL[i % PAL.length] })); // 沒指定顏色時才每列不同色（指定了就照指定，例如客戶依區域）
     const mx = Math.max(1, ...list.map((r) => Math.max(r.value || 0, r.prev || 0)));
     const w = (v) => Math.max(0, Math.min(100, ((v || 0) / mx) * 100));
     el.innerHTML = list.length ? `<div class="hb">${list.map((r, i) => `<div class="hb-row${onClick ? ' click' : ''}" data-i="${i}" title="${esc(r.label)}：${esc(fmt(r.value))}${r.prev != null ? `\n${prevLabel}：${esc(fmt(r.prev))}` : ''}">

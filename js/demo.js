@@ -87,7 +87,7 @@
             const dozen = (st.big === '男' || st.big === '女') && R() < 0.55;
             const price = dozen ? Math.round(st.price * 12 * 0.94) : st.price;
             const qty = dozen ? pick([0.5, 1, 1, 2, 3]) : ri(1, 24);
-            const costRate = st.cost + (y === 115 ? 0.025 : 0); // 115 年成本變高，毛利率下降
+            const costRate = st.cost + (y === 115 ? 0.025 : 0); // 115 年成本變高，總毛利率下降
             const row = { ord, cat: st.cat, sku: skuOf(st), color: wpick(COLORS[0], COLORS[1]), unit: dozen ? '打' : '件', cust: c.id, cname: c.name, rep: c.rep,
               cost: Math.round(price * costRate * 10) / 10, price, qty, unitn: dozen ? 2 : 1, amt: Math.round(price * qty * 10) / 10, date };
             sales.push(row);

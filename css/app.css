@@ -702,8 +702,16 @@ small .up, small .down { font-size: 1.25em; }
 .alerts details.ideas li { display: list-item; margin: 4px 0; padding: 0; background: none; border: 0; border-radius: 0; }
 .btn.small { padding: 4px 10px; font-size: .82rem; }
 
-.panel.flash { animation: flash .6s ease-in-out 4; }
-@keyframes flash { 0%, 100% { outline: 5px solid transparent; outline-offset: 3px; } 35%, 65% { outline: 5px solid var(--bad); outline-offset: 3px; } }
+/* 提醒「看數據」跳過去的框框：要注意 = 紅、留意 = 黃、不錯 = 綠；閃 4 下後框線留著 */
+.panel.hl { --hl: #f2b705; outline: 5px solid var(--hl); outline-offset: 3px; }
+.panel.hl-bad { --hl: var(--bad); } .panel.hl-good { --hl: var(--good); }
+.panel.hl.flash { animation: hlflash .6s ease-in-out 4; }
+@keyframes hlflash { 0%, 100% { outline-color: var(--hl); } 50% { outline-color: transparent; } }
+.hl-banner { display: flex; align-items: center; gap: 10px; margin: -4px 0 14px; padding: 9px 12px; border-radius: var(--radius); background: #f2b705; color: #1d1d1d; font-size: 1rem; line-height: 1.4; }
+.hl-banner.bad { background: var(--bad); color: #fff; } .hl-banner.good { background: var(--good); color: #fff; }
+.hl-banner b { flex: 1; min-width: 0; }
+.hl-tag { flex: none; font-size: .78rem; font-weight: 800; padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,.25); }
+.hl-x { flex: none; border: 0; background: transparent; color: inherit; font-size: 1rem; cursor: pointer; padding: 2px 6px; }
 /* 表格欄位多時在自己的框裡左右捲，不要把整頁撐寬 */
 main { min-width: 0; }
 .table-wrap { overflow-x: auto; }

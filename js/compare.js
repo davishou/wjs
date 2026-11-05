@@ -9,8 +9,8 @@
   const rate = (a, b) => (b ? a / b : null);
   const METRICS = [
     { k: 'net', label: '淨銷售', f: (v) => v.net, kind: 'money', up: true },
-    { k: 'netProfit', label: '淨毛利', f: (v) => v.netProfit, kind: 'money', up: true },
-    { k: 'margin', label: '毛利率', f: (v) => rate(v.profit, v.sales), kind: 'pct', up: true },
+    { k: 'netProfit', label: '毛利（扣退貨）', f: (v) => v.netProfit, kind: 'money', up: true },
+    { k: 'margin', label: '總毛利率', f: (v) => rate(v.profit, v.sales), kind: 'pct', up: true },
     { k: 'retRate', label: '退貨率', f: (v) => rate(v.returns, v.sales), kind: 'pct', up: false },
     { k: 'sales', label: '銷貨', f: (v) => v.sales, kind: 'money', up: true },
     { k: 'returns', label: '退貨', f: (v) => v.returns, kind: 'money', up: false },

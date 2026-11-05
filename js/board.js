@@ -12,8 +12,8 @@
   const chg = (a, b) => (b ? (a - b) / Math.abs(b) : null);
   const METRIC = {
     net: { label: '淨銷售', f: (v) => v.net, kind: 'money', up: true },
-    netProfit: { label: '淨毛利', f: (v) => v.netProfit, kind: 'money', up: true },
-    margin: { label: '毛利率', f: (v) => rate(v.profit, v.sales), kind: 'pct', up: true },
+    netProfit: { label: '毛利（扣退貨）', f: (v) => v.netProfit, kind: 'money', up: true },
+    margin: { label: '總毛利率', f: (v) => rate(v.profit, v.sales), kind: 'pct', up: true },
     retRate: { label: '退貨率', f: (v) => rate(v.returns, v.sales), kind: 'pct', up: false },
     custs: { label: '交易客戶', f: (v) => v.custs, kind: 'int', up: true },
   };
@@ -83,7 +83,7 @@
       const pRep = hasPrev ? new Map(rowsBy('rep', P).map((r) => [r.label, r.net])) : new Map();
       Charts.hbars($('#bdRep'), { rows: rowsBy('rep', F).sort((a, b) => b.net - a.net).map((r) => ({ label: repName(r.label === '（空白）' ? '' : r.label), rep: r.label, value: r.net, prev: hasPrev ? pRep.get(r.label) || 0 : null, cls: colorOf('rep', r.label) })), fmt: fmt.big, onClick: (r) => ctx.goRep(r.rep === '（空白）' ? '' : r.rep), limit: 8 });
       const pC = hasPrev ? new Map(rowsBy('ck', P).map((r) => [r.code, r.net])) : new Map();
-      Charts.hbars($('#bdCust'), { rows: rowsBy('ck', F).sort((a, b) => b.net - a.net).slice(0, 10).map((r) => ({ label: r.label, code: r.code, value: r.net, prev: hasPrev ? pC.get(r.code) || 0 : null, cls: 'c1' })), fmt: fmt.big, onClick: (r) => ctx.drill('ck', r.code, r.label), limit: 10 });
+      Charts.hbars($('#bdCust'), { rows: rowsBy('ck', F).sort((a, b) => b.net - a.net).slice(0, 10).map((r) => ({ label: r.label, code: r.code, value: r.net, prev: hasPrev ? pC.get(r.code) || 0 : null, cls: ctx.custColor(r.code) })), fmt: fmt.big, onClick: (r) => ctx.drill('ck', r.code, r.label), limit: 10 });
       Object.assign(out, { cur, prev, metric: sel });
     }
 
@@ -142,8 +142,8 @@
       const top10 = rate(custs.slice(0, 10).reduce((s2, r) => s2 + r.net, 0), cur.net);
       box.innerHTML = `<div class="bd-q">錢從哪裡來？<small>${periodText(F)}</small></div>
         <div class="bd-kpis three">
-          <div class="bd-kpi"><span class="k">淨銷售</span><span class="v">${fmt.big(cur.net)}</span><span class="bd-delta muted">淨毛利 ${fmt.big(cur.netProfit)}</span></div>
-          <div class="bd-kpi"><span class="k">毛利率</span><span class="v">${fmt.pct(rate(cur.profit, cur.sales))}</span><span class="bd-delta muted">退貨率 ${fmt.pct(rate(cur.returns, cur.sales))}</span></div>
+          <div class="bd-kpi"><span class="k">淨銷售</span><span class="v">${fmt.big(cur.net)}</span><span class="bd-delta muted">毛利（扣退貨） ${fmt.big(cur.netProfit)}</span></div>
+          <div class="bd-kpi"><span class="k">總毛利率</span><span class="v">${fmt.pct(rate(cur.profit, cur.sales))}</span><span class="bd-delta muted">退貨率 ${fmt.pct(rate(cur.returns, cur.sales))}</span></div>
           <div class="bd-kpi${top10 > 0.5 ? ' warn' : ''}"><span class="k">前 10 大客戶佔</span><span class="v">${fmt.pct(top10)}</span><span class="bd-delta muted" title="超過 50% 代表太依賴少數客戶">共 ${nf0.format(custs.length)} 位</span></div></div>
         <div class="panel"><div class="panel-head"><h2>每月淨銷售，依商品大類</h2></div><div class="chart" id="bdStack"></div></div>
         <div class="bd-grid3">

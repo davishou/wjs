@@ -52,8 +52,8 @@
       <div class="brand-text"><strong>銷售分析</strong><span id="brandSub">尚未載入資料</span></div>
     </div>
     <nav class="tabs">
-      <div class="tab-group g1"><span class="tg-label">每天看</span>
-        <a href="#overview" data-view="overview"><svg viewBox="0 0 24 24"><path d="M7 2v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2zM5 9h14v11H5zm2 2v4h4v-4z"/></svg><span>今日</span></a>
+      <div class="tab-group g1"><span class="tg-label">每月看</span>
+        <a href="#overview" data-view="overview"><svg viewBox="0 0 24 24"><path d="M7 2v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2zM5 9h14v11H5zm2 2v4h4v-4z"/></svg><span>今月</span></a>
         <a href="#board" data-view="board"><svg viewBox="0 0 24 24"><path d="M3 3h8v10H3zm10 0h8v6h-8zM3 15h8v6H3zm10-4h8v10h-8z"/></svg><span>儀表板</span></a>
         <a href="#dashboard" data-view="dashboard"><svg viewBox="0 0 24 24"><path d="M12 4a9 9 0 0 0-9 9 9 9 0 0 0 2.6 6.4l1.4-1.4A7 7 0 1 1 19 13a7 7 0 0 1-2 4.9l1.4 1.5A9 9 0 0 0 12 4zm4.2 4.4-5 4.2a1.6 1.6 0 1 0 2.2 2.2z"/></svg><span>提醒</span></a>
       </div>
@@ -75,10 +75,10 @@
 
   <main id="main">
     <div class="demo-bar" id="demoBar" role="status" hidden><span><b>示範資料</b>：全部是假的，只用來看畫面，不會儲存，也不會影響你的資料。</span><button class="btn" id="demoExit">回到我的資料</button></div>
-    <!-- 今日：依實際日期看最新一天、本月累計 -->
+    <!-- 今月：依實際日期看最新一天、本月累計 -->
     <section class="view" id="view-overview" hidden>
       <div class="view-head">
-        <div><h1>今日</h1><p class="sub" id="tdSub"></p></div>
+        <div><h1>今月</h1><p class="sub" id="tdSub"></p></div>
         <div class="head-actions"><label class="inline">日期 <select id="tdDay"></select></label></div>
       </div>
       <div id="tdBody"></div>
@@ -107,7 +107,7 @@
       <div class="view-head">
         <div><h1>圖表報告</h1><p class="sub" id="rpSub"></p></div>
         <div class="head-actions">
-          <label class="inline">年度 <select id="rpYear"></select></label>
+          <label class="inline">年度 <select id="rpYear"></select></label><label class="inline">和 <select id="rpVs"></select> 同期比</label>
           <button class="btn primary" id="rpPresent">簡報模式</button>
           <button class="btn" id="rpPrint">列印／存成 PDF</button>
         </div>
@@ -212,13 +212,12 @@
       <div class="view-head">
         <div><h1>商品銷售與滯銷</h1><p class="sub" id="prSub"></p></div>
         <div class="head-actions">
-          <div class="seg" id="prLevel"><button data-v="sku" class="on">商品代號</button><button data-v="sku2">簡化代碼</button><button data-v="style">款號</button></div>
           <button class="btn" id="prExport">匯出 CSV</button>
         </div>
       </div>
       <div class="period-bar" id="prPeriod"></div>
       <div class="toolbar">
-        <input type="search" id="prSearch" placeholder="搜尋商品代號">
+        <input type="search" id="prSearch" placeholder="搜尋商品代號、簡化代碼或款號">
         <div class="seg" id="prIdle"><button data-v="all" class="on">全部</button><button data-v="0-2">熱賣中 0～2 月</button><button data-v="3-5">3～5 月沒賣</button><button data-v="6-11">6～11 月</button><button data-v="12-">1 年以上</button></div>
         <div class="chips" id="prFilters"></div>
         <select class="add" id="prAddFilter"><option value="">＋ 篩選</option></select>
@@ -233,7 +232,7 @@
 
       <div class="panel demo-panel">
         <div class="panel-head"><h2>先看看示範</h2></div>
-        <p class="hint">用一組假的公司資料（約 3 年、60 多家虛構客戶），看每一頁的樣子：今日、提醒、比較、業務、客戶、商品、圖表報告、樞紐分析。示範資料只放在畫面上，不會存進這台裝置，也不會蓋掉你的資料；看完按上方的「回到我的資料」。</p>
+        <p class="hint">用一組假的公司資料（約 3 年、60 多家虛構客戶），看每一頁的樣子：今月、提醒、比較、業務、客戶、商品、圖表報告、樞紐分析。示範資料只放在畫面上，不會存進這台裝置，也不會蓋掉你的資料；看完按上方的「回到我的資料」。</p>
         <div class="row"><button class="btn" id="demoStart">看示範資料</button></div>
       </div>
 

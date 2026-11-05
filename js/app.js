@@ -239,8 +239,10 @@
     return Charts.PAL[Math.max(0, i) % Charts.PAL.length];
   }
   window.__colorOf = colorOf;
+  // 客戶的顏色 = 客戶所在區域的顏色（客戶代號第一碼判斷區域），每張客戶的圖都一樣
+  const custColor = (ck) => (S.E ? colorOf('region', Dataset.regionOf(S.E.ds.str.ck.dict[ck] || '')) : 'c1');
   // 頁面共用的工具
-  const baseCtx = () => ({ colorOf,
+  const baseCtx = () => ({ colorOf, custColor,
     S, E: S.E, fmt, nf0, nf1, esc, $, $$, table, Charts, refYm, repName, toast, toDims, renderFilterChips,
     openCustomer, openProduct, drill: dashDrill, goRep, rerender: renderView, saveSpan: () => store.set('span', S.span),
   });
@@ -295,7 +297,7 @@
   }
   function gotoIdle(which) {
     if (which === 'cust-idle') { S.cust.idle = '3-5'; S.cust.sort = { key: 'sales', dir: -1 }; go('customers'); }
-    else { S.prod.idle = '6-11'; S.prod.level = 'sku2'; go('products'); }
+    else { S.prod.idle = '6-11'; go('products'); }
   }
 
   // =====================================================
@@ -308,7 +310,7 @@
       S, E: S.E, fmt, nf0, nf1, esc, $, $$, table, Charts, refYm, repName, toast, after: [],
       saveDash: () => store.set('dash', S.dash),
       saveMeta: async (patch) => { await saveMeta(patch); renderDashboard(); },
-      openCustomer, openProduct, gotoIdle, drill: dashDrill, colorOf, goRep,
+      openCustomer, openProduct, gotoIdle, drill: dashDrill, colorOf, goRep, custColor,
     };
     window.__dash = Dashboard.render(ctx); // 測試用：儀表板算出的數字
     ctx.after.forEach((f) => f());
@@ -318,7 +320,7 @@
   // 圖表報告（計算與版面在 js/report.js）：簡報模式、列印／存成 PDF
   // =====================================================
   function renderReport() {
-    const ctx = { S, E: S.E, fmt, nf0, nf1, esc, $, $$, refYm, repName, drill: dashDrill, colorOf };
+    const ctx = { S, E: S.E, fmt, nf0, nf1, esc, $, $$, refYm, repName, drill: dashDrill, colorOf, custColor };
     window.__report = Report.render(ctx); // 測試用
     S.reportRedraw = window.__report.redraw;
     if (document.body.classList.contains('presenting')) showSlide();
@@ -345,7 +347,8 @@
     if (S.reportRedraw) setTimeout(S.reportRedraw, 30);
   }
   function bindReport() {
-    $('#rpYear').addEventListener('change', (e) => { S.report.year = +e.target.value; store.set('report', S.report); renderReport(); });
+    $('#rpYear').addEventListener('change', (e) => { S.report.year = +e.target.value; S.report.vs = null; store.set('report', S.report); renderReport(); }); // 換年度時，對照年度回到前一年
+    $('#rpVs').addEventListener('change', (e) => { S.report.vs = +e.target.value || null; store.set('report', S.report); renderReport(); });
     $('#rpPresent').addEventListener('click', startPresent);
     $('#rpEnd').addEventListener('click', endPresent);
     $('#rpPrevSlide').addEventListener('click', () => { S.slide--; showSlide(); });
@@ -395,7 +398,7 @@
     { name: '商品排行', rows: ['sku2'], col: null, measures: ['soldQty', 'retQty', 'sales', 'retRate', 'custs'] },
     { name: '月份 × 年（季節性）', rows: ['month'], col: 'year', measures: ['net'] },
     { name: '大類 × 年', rows: ['big'], col: 'year', measures: ['net', 'netProfit', 'margin', 'retRate'] },
-    { name: '季度毛利率、退貨率', rows: ['quarter'], col: null, measures: ['net', 'margin', 'retRate'] },
+    { name: '季度總毛利率、退貨率', rows: ['quarter'], col: null, measures: ['net', 'margin', 'retRate'] },
     { name: '款號 × 尺寸', rows: ['style'], col: 'size', measures: ['soldQty'] },
   ];
   const PIVOT_DIMS = DIMS.map((d) => d.key);
@@ -635,7 +638,7 @@
     { key: 'buyDays', label: '購買天數', n: 1, render: (r) => (r.freqBy === 'date' ? nf0.format(r.buyDays) : '—') },
     { key: 'orders', label: '訂單數', n: 1, fmt: 'int' },
     { key: 'sales', label: '銷貨金額(全部)', n: 1, fmt: 'money' }, { key: 'returns', label: '退貨金額(全部)', n: 1, fmt: 'money' },
-    { key: 'margin', label: '毛利率', n: 1, fmt: 'pct' },
+    { key: 'margin', label: '總毛利率', n: 1, fmt: 'pct' },
   ];
   // 列表被搜尋、活躍狀態縮小時，圖也只算這些客戶（和列表連動）
   function narrowDims(base, key, codes, narrowed) { const d = { ...base }; if (narrowed) d[key] = new Set(codes); return d; }
@@ -668,8 +671,8 @@
         <p class="hint">${narrowed || Object.keys(S.cust.filters).length ? `只算列表裡的 ${nf0.format(list.length)} 位客戶。` : '全部客戶。'}${esc(tr.hint)} 合計 <b>${fmt.big(totNet)}</b>${has ? `，去年同期 ${fmt.big(totPrev)}（${totPrev ? (totNet >= totPrev ? '▲' : '▼') + ' ' + fmt.pct(Math.abs(totNet - totPrev) / Math.abs(totPrev)) : '—'}）` : ''}。</p><div class="chart" id="cuTrend"></div></div>
       <div class="grid2"><div class="panel"><div class="panel-head"><h2>前 15 大客戶 <span class="linked">跟著期間・篩選</span></h2></div><p class="hint">長條是這段期間的淨銷售${has ? '，細線是去年同期' : ''}。點一列看客戶明細。</p><div id="cuTop"></div></div>
         <div class="panel"><div class="panel-head"><h2>客戶組成 <span class="linked">跟著期間・篩選</span></h2></div><p class="hint">這段期間有買的客戶裡，第一次跟我們買的是新客戶${has ? '；「沒再買」是去年同期有買、這段期間沒買' : ''}。點圓餅把列表排成那一群在最上面。</p><div id="cuMix"></div></div></div>`;
-    Charts.render($('#cuTrend'), { type: has ? 'combo' : 'bar', labels: tr.labels, series: [{ name: '淨銷售', kind: 'bar', cls: 'c1', values: tr.cur }, ...(has ? [{ name: '去年同期', kind: 'line', dash: true, cls: 's3', values: tr.prev }] : [])], fmt: fmt.money, axisFmt: fmt.axis, title: '這段期間的淨銷售' });
-    Charts.hbars($('#cuTop'), { rows: top.map((c) => ({ label: c.code + ' ' + c.name, value: c.pNet, prev: has ? c.pPrev : null, cls: colorOf('region', c.region), c, note: has ? growthCell(c) : '' })), fmt: fmt.big, limit: 15, onClick: (x) => openCustomer(x.c) });
+    Charts.render($('#cuTrend'), { type: has ? 'combo' : 'bar', labels: tr.labels, series: [{ name: list.length === 1 ? list[0].name : '合計淨銷售', kind: 'bar', cls: list.length === 1 ? custColor(list[0].ck) : 'c16', values: tr.cur }, ...(has ? [{ name: '去年同期', kind: 'line', dash: true, cls: 's3', values: tr.prev }] : [])], fmt: fmt.money, axisFmt: fmt.axis, title: '這段期間的淨銷售' });
+    Charts.hbars($('#cuTop'), { rows: top.map((c) => ({ label: c.code + ' ' + c.name, value: c.pNet, prev: has ? c.pPrev : null, cls: custColor(c.ck), c, note: has ? growthCell(c) : '' })), fmt: fmt.big, limit: 15, onClick: (x) => openCustomer(x.c) });
     Charts.donut($('#cuMix'), { items: [{ label: '老客戶', value: nOld, cls: 'c1', k: 'old' }, { label: '新客戶', value: nNew, cls: 'c3', k: 'new' }, ...(has ? [{ label: '沒再買', value: nLost, cls: 'c8', k: 'lost' }] : [])].filter((x) => x.value > 0),
       fmt: (v) => nf0.format(v) + ' 位', title: '客戶組成', sort: false, center: { value: nf0.format(buyers.length), label: '有買的客戶' },
       onClick: (d) => { S.cust.sort = d.k === 'lost' ? { key: 'pPrev', dir: -1 } : d.k === 'new' ? { key: 'first', dir: -1 } : { key: 'pNet', dir: -1 }; renderCustomers(); $('#cuTable').scrollIntoView({ behavior: 'smooth', block: 'start' }); } });
@@ -731,7 +734,6 @@
     const { list, res, R } = prodData();
     $('#prSub').textContent = `期間 ${R.label}${R.pf ? `（對照去年同期 ${R.prevLabel}）` : ''}：圖和列表的「期間」欄都跟著上面的期間、篩選和搜尋變。滯銷月數以 ${ymLabel(res.ref)} 為基準月 = 基準月 − 最近一次售出的年月。`;
     $$('#prIdle button').forEach((b) => b.classList.toggle('on', b.dataset.v === S.prod.idle));
-    $$('#prLevel button').forEach((b) => b.classList.toggle('on', b.dataset.v === S.prod.level));
     renderFilterChips($('#prFilters'), $('#prAddFilter'), S.prod.filters, PROD_FILTER_DIMS, renderProducts, (k) => { const d = toDims(S.prod.filters); delete d[k]; return { src: 'sales', dims: d }; });
     Period.mount($('#prPeriod'), S.span, S.E, refYm(), () => { store.set('span', S.span); renderProducts(); }, esc);
     renderProdCharts(list, R);
@@ -758,7 +760,7 @@
       <div class="grid2"><div class="panel"><div class="panel-head"><h2>${what}前 15 名（${LEVEL_NAME[lv]}） <span class="linked">跟著期間・篩選</span></h2></div><p class="hint">長條是這段期間${has ? '，細線是去年同期' : ''}。點一列看商品明細（尺寸、顏色、誰在買）。</p><div id="prTop"></div></div>
         <div class="panel"><div class="panel-head"><h2>${what}從哪裡來 <span class="linked">跟著期間・篩選</span></h2></div><div class="donuts"><div><h3>商品大類</h3><div id="prBig"></div></div><div><h3>區域</h3><div id="prRegion"></div></div></div><p class="hint">點圓餅的一塊，就加上那一塊的篩選。</p></div></div>`;
     $('#prMetric').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; S.prod.metric = b.dataset.v; renderProducts(); };
-    Charts.render($('#prTrend'), { type: has ? 'combo' : 'bar', labels: tr.labels, series: [{ name: what, kind: 'bar', cls: 'c4', values: tr.cur }, ...(has ? [{ name: '去年同期', kind: 'line', dash: true, cls: 's3', values: tr.prev }] : [])], fmt: m === 'soldQty' ? fmt.int : fmt.money, axisFmt: fmt.axis, title: '這段期間的' + what });
+    Charts.render($('#prTrend'), { type: has ? 'combo' : 'bar', labels: tr.labels, series: [{ name: list.length === 1 ? list[0].code : '合計' + what, kind: 'bar', cls: list.length === 1 ? colorOf('big', list[0].big) : 'c16', values: tr.cur }, ...(has ? [{ name: '去年同期', kind: 'line', dash: true, cls: 's3', values: tr.prev }] : [])], fmt: m === 'soldQty' ? fmt.int : fmt.money, axisFmt: fmt.axis, title: '這段期間的' + what });
     Charts.hbars($('#prTop'), { rows: top.map((p) => ({ label: p.code, value: p[key], prev: has ? p[pkey] : null, cls: colorOf('big', p.big), p, note: has ? growthCell(p) : '' })), fmt: vf, limit: 15, onClick: (x) => openProduct(x.p, lv) });
     const addFilter = (dim) => (d) => { const code = E.dim(dim).labels.indexOf(d.label === '（空白）' ? '' : d.label); if (code < 0) return; S.prod.filters = { ...S.prod.filters, [dim]: [code] }; renderProducts(); };
     Charts.donut($('#prBig'), { items: mix('big'), fmt: vf, title: '商品大類', onClick: addFilter('big') });
@@ -768,7 +770,6 @@
   function bindProducts() {
     let t; $('#prSearch').addEventListener('input', (e) => { clearTimeout(t); t = setTimeout(() => { S.prod.q = e.target.value.trim(); renderProducts(); }, 150); });
     $('#prIdle').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.prod.idle = b.dataset.v; renderProducts(); });
-    $('#prLevel').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.prod.level = b.dataset.v; renderProducts(); });
     $('#prExport').addEventListener('click', () => {
       const { list, R } = prodData(); const cols = prodCols(!!R.pf);
       downloadCsv('商品銷售', cols.map((c) => c.label), list.map((r) => cols.map((c) => {
@@ -814,7 +815,7 @@
       { k: '最近交易', v: c.lastDate ? dayLabel(c.lastDate) : ymLabel(c.last), d: c.lastDate && S.E.maxDate ? `距最新資料 ${nf0.format(dayNum(S.E.refDate(refYm())) - dayNum(c.lastDate))} 天・靜止 ${c.idle} 個月` : `靜止 ${c.idle} 個月` },
       { k: '第一筆交易', v: c.firstDate ? dayLabel(c.firstDate) : ymLabel(c.first), d: `交易至今 ${c.tenure} 個月` },
       { k: '購買頻率', v: c.freq == null ? '只買過 1 天' : '每 ' + nf1.format(c.freq) + ' 天', d: c.freqBy === 'date' ? `${c.buyDays} 天有買、${c.orders} 張訂單（依實際日期）` : `${c.orders} 張訂單、${c.activeMonths} 個月有交易（依單號）` },
-      { k: '銷貨金額', v: fmt.big(c.sales), d: `毛利率 ${fmt.pct(c.margin)}` },
+      { k: '銷貨金額', v: fmt.big(c.sales), d: `總毛利率 ${fmt.pct(c.margin)}` },
       { k: '退貨金額', v: fmt.big(c.returns), d: `退貨率 ${fmt.pct(c.sales ? c.returns / c.sales : null)}` },
       { k: '淨銷售', v: fmt.big(c.net), d: `${c.region}・${repName(c.rep)}` },
     ]) + `<div class="panel"><div class="panel-head"><h2>這段期間 <span class="linked">${esc(Period.range(S.E, refYm(), S.span).label)}</span></h2></div><p class="hint" id="dwTrendHint"></p><div class="chart" id="dwTrend"></div></div>
@@ -871,7 +872,7 @@
       { k: '最近售出', v: ymLabel(pr.last), d: `滯銷 ${pr.idle} 個月` },
       { k: '第一筆售出', v: ymLabel(pr.first), d: `已賣 ${pr.tenure} 個月` },
       { k: '賣出數', v: nf0.format(pr.qty), d: `近 12 個月 ${nf0.format(pr.recentQty)}` },
-      { k: '銷貨金額', v: fmt.big(pr.sales), d: `毛利率 ${fmt.pct(pr.margin)}` },
+      { k: '銷貨金額', v: fmt.big(pr.sales), d: `總毛利率 ${fmt.pct(pr.margin)}` },
       { k: '退貨金額', v: fmt.big(pr.returns), d: `退貨數 ${nf0.format(pr.retQty)}` },
       { k: '購買客戶', v: nf0.format(pr.custs), d: `類別 ${pr.cat}` },
     ]) + `<div class="panel"><div class="panel-head"><h2>這段期間的賣出數 <span class="linked">${esc(Period.range(S.E, refYm(), S.span).label)}</span></h2></div><p class="hint" id="dwTrendHint"></p><div class="chart" id="dwTrend"></div></div>
@@ -1513,5 +1514,6 @@
     if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   window.__app = S;
+  window.__drill = dashDrill; // 測試用
   boot();
 })();
