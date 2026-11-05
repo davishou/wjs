@@ -344,10 +344,10 @@ async def dashboard(b):
     ok('7 個代碼' in await pg.text_content('#classState') and '100,000' in await pg.text_content('#metaState'), '重新匯入總表後，分類表與設定保留')
     # 商品：款號層級、尺寸與顏色
     await pg.click('a[data-view=products]'); await pg.wait_for_selector('#prTable')
-    ok(await pg.locator('#prLevel').count() == 0, '商品頁只用商品代號（沒有商品代號／簡化代碼／款號的切換）')
+    ok(await pg.locator('#prLevel').count() == 0 and (await pg.text_content('#prTable thead th:first-child')).strip().startswith('款號'), '商品頁只用款號（沒有切換）')
     await pg.fill('#prSearch', 'AR9006'); await pg.wait_for_timeout(400)
-    ok(await pg.locator('#prTable tbody tr').count() >= 2, '商品頁搜尋款號也找得到（AR9006 的各尺寸）')
-    await pg.evaluate("window.__drill('style', 0, 'AR9006')"); await pg.wait_for_selector('#dwSize .best')
+    ok(await pg.locator('#prTable tbody tr').count() == 1, '商品頁搜尋款號 AR9006 → 一列')
+    await pg.click('#prTable tbody tr:first-child'); await pg.wait_for_selector('#dwSize .best')
     best = await pg.text_content('#dwSize .best'); top = max(exp['size'], key=exp['size'].get)
     sizes = await pg.evaluate("[...document.querySelectorAll('#dwSize .share')[0].querySelectorAll('.srow')].map(r => r.querySelector('.sl').textContent)")
     ok(f'尺寸 {top}' in best and all(any(s.replace('🏆 ', '').startswith(k) and f'{v:,} 件'.replace(',', ',') in s for s in sizes) for k, v in exp['size'].items()),
@@ -459,6 +459,7 @@ async def cust_prod_pages(pg, d):
     ok((await pg.text_content('#cuPeriod .seg button.on')) == '今年累計', '期間在業務、客戶、商品三頁共用（業務頁選的今年累計，客戶頁也是）')
     c = await pg.evaluate('window.__cust')
     ok(abs(sum(c['trend']['cur']) - d['cur']['net']) < 0.01 and '期間淨銷售' in await pg.text_content('#cuTable thead'), f"客戶：這段期間的淨銷售加起來 {sum(c['trend']['cur']):.0f} = 全公司 {d['cur']['net']:.0f}，列表多了「期間淨銷售」")
+    ok(c['region'] >= 2 and await pg.locator('#cuRegion svg').count() == 1, f"客戶：客戶組成旁有區域圓餅（{c['region']} 個區域）")
     ok(c['nNew'] + c['nOld'] >= 1 and len(c['top']) >= 1 and c['top'][0][1] >= c['top'][-1][1], f"客戶：前 15 大客戶、客戶組成（新 {c['nNew']}、老 {c['nOld']}、沒再買 {c['nLost']}）")
     first = c['top'][0]
     await pg.fill('#cuSearch', first[0]); await pg.wait_for_timeout(500)
@@ -473,6 +474,7 @@ async def cust_prod_pages(pg, d):
     ok('賣出數' in await pg.text_content('#prCharts h2'), '商品：可以切換成看賣出數（件）')
     await pg.click('#prBig .dn-legend li.click'); await pg.wait_for_timeout(400)
     ok(await pg.locator('#prFilters .chip').count() >= 1, '商品：點大類圓餅 → 加上那一塊的篩選')
+    ok(await pg.locator('#prCat svg').count() == 1 and await pg.locator('#prRegion').count() == 0, '商品：大類旁邊是類別圓餅（沒有區域）')
     await pg.screenshot(path=SH + '/27_products.png', full_page=True)
     await pg.click('#prFilters .chip .x'); await pg.wait_for_timeout(300)
     await pg.click('#prMetric button[data-v=net]'); await pg.wait_for_timeout(200)
