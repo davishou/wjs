@@ -74,7 +74,7 @@
       box.querySelectorAll('.bd-kpi').forEach((b) => { b.onclick = () => { st.metric = b.dataset.k; ctx.save(); ctx.rerender(); }; });
       const m = METRIC[sel];
       const draw = () => Charts.render($('#bdMain'), { type: 'combo', labels: months12.map(ymLabel),
-        series: [{ name: m.label, kind: 'bar', cls: 'c16', values: months12.map((x) => (mon.has(x) ? m.f(mon.get(x)) : null)) },
+        series: [{ name: m.label, kind: 'bar', cls: 'total', values: months12.map((x) => (mon.has(x) ? m.f(mon.get(x)) : null)) },
           { name: '前一年同月', kind: 'line', dash: true, cls: 's3', values: months12.map((x) => (mon.has(x - 100) ? m.f(mon.get(x - 100)) : null)) }],
         fmt: (v) => vfmt(sel, v), axisFmt: m.kind === 'pct' ? (v) => nf1.format(v * 100) + '%' : m.kind === 'int' ? (v) => nf0.format(v) : fmt.axis, title: m.label });
       draw(); out.redraw = draw;

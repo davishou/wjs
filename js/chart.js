@@ -9,8 +9,8 @@
   const mk = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const col = (cls) => `var(--${cls || 's1'})`;
-  // 前面幾個顏色差最多（藍、橘、綠、紫、黃、洋紅、青、棕…）；c16 深灰留給「合計／淨銷售總數」，不放進來
-  const PAL = ['c1', 'c2', 'c3', 'c7', 'c4', 'c13', 'c9', 'c10', 'c5', 'c12', 'c8', 'c11', 'c6', 'c15', 'c14'];
+  // 分類色（原本的順序）；合計／淨銷售總數用另外的 --total（深紅），不在這裡
+  const PAL = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'c10', 'c11', 'c12', 'c13', 'c14', 'c15', 'c16'];
 
   // 讓格線落在整齊的數字上（1、2、5 的倍數）
   function niceStep(span) {

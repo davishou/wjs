@@ -36,7 +36,7 @@
         ].join('')}</div>
         <div class="panel"><div class="panel-head"><h2>每月淨銷售（近 24 個月）</h2></div><div class="chart" id="tdMonthChart"></div></div>`;
       const t = E.trend({}).slice(-24);
-      Charts.render($('#tdMonthChart'), { type: 'bar', labels: t.map((r) => r.label), series: [{ name: '淨銷售', values: t.map((r) => r.net), cls: 'c16' }], fmt: fmt.money, axisFmt: fmt.axis });
+      Charts.render($('#tdMonthChart'), { type: 'bar', labels: t.map((r) => r.label), series: [{ name: '淨銷售', values: t.map((r) => r.net), cls: 'total' }], fmt: fmt.money, axisFmt: fmt.axis });
       return { mode: 'month', cur, ytd };
     }
 
@@ -101,7 +101,7 @@
       // 7 天平均：往前 7 個日曆天（含今天）的淨銷售 ÷ 7
       const d7 = daily([fromDayNum(d0 - 6), D]);
       const avg7 = last30.map((d) => { let s2 = 0; for (let k = 0; k < 7; k++) s2 += (d7.get(fromDayNum(dayNum(d) - k)) || {}).net || 0; return s2 / 7; });
-      Charts.render($('#tdDayChart'), { type: 'combo', labels: last30.map((d) => `${Math.floor(d / 100) % 100}/${d % 100}`), series: [{ name: '每天', kind: 'bar', cls: 'c16', values: last30.map((d) => (m30.get(d) || {}).net || 0) }, { name: '7 天平均', kind: 'line', cls: 'c2', values: avg7 }], fmt: fmt.money, axisFmt: fmt.axis, title: '最近 30 天每天的淨銷售' });
+      Charts.render($('#tdDayChart'), { type: 'combo', labels: last30.map((d) => `${Math.floor(d / 100) % 100}/${d % 100}`), series: [{ name: '每天', kind: 'bar', cls: 'total', values: last30.map((d) => (m30.get(d) || {}).net || 0) }, { name: '7 天平均', kind: 'line', cls: 'c1', values: avg7 }], fmt: fmt.money, axisFmt: fmt.axis, title: '最近 30 天每天的淨銷售' });
     };
     drawCharts();
 
@@ -126,7 +126,7 @@
     Charts.donut($('#tdRepPie'), { items: reps.filter((r) => r.net > 0).map((r) => ({ label: r.label, value: r.net, cls: ctx.colorOf('rep', r.rep), rep: r.rep })), fmt: fmt.big, title: '各業務佔本月的比例', center: { value: fmt.big(T.mtd.net), label: '本月' }, onClick: (d) => ctx.goRep(d.rep) });
     // 第一條是全公司合計（顏色和各業務不同），細線都是去年同月同期
     const lNote = (v, lv) => (hasLm ? (lv ? arrow(chg(v, lv)) : '<span class="muted">新</span>') : '');
-    Charts.hbars($('#tdRepBars'), { rows: [{ label: '全公司合計', value: T.mtd.net, prev: hasLm ? T.lmtd.net : null, cls: 'c16', total: true, note: lNote(T.mtd.net, T.lmtd.net) }]
+    Charts.hbars($('#tdRepBars'), { rows: [{ label: '全公司合計', value: T.mtd.net, prev: hasLm ? T.lmtd.net : null, cls: 'total', total: true, note: lNote(T.mtd.net, T.lmtd.net) }]
       .concat(reps.map((r) => ({ label: r.label, value: r.net, prev: hasLm ? r.lnet : null, cls: ctx.colorOf('rep', r.rep), rep: r.rep, note: lNote(r.net, r.lnet) }))), fmt: fmt.big, prevLabel: '去年同月同期', limit: 30, onClick: (r) => ctx.goRep(r.total ? null : r.rep) });
     $('#tdAllReps').onclick = (e) => { e.preventDefault(); ctx.goRep(null); };
 
