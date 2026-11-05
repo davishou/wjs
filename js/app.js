@@ -224,6 +224,7 @@
   }
   // 圖的顏色跟著名稱，不跟著名次：同一個區域、大類、業務在每張圖都是同一個顏色（--c1～--c8）
   const COLOR_ORDER = { region: ['大台北地區', '桃竹苗', '中部', '南部', '其他地區'], big: ['男', '女', '童', '百貨', '配件', '未分類', '（未匯入分類表）'] };
+  const REP_SWAP = [[6, 21]];
   function colorOf(dim, label) {
     const E = S.E; if (!E) return 'c1';
     E._colors = E._colors || {};
@@ -236,6 +237,13 @@
     }
     let i = list.indexOf(label);
     if (i < 0 && COLOR_ORDER[dim]) i = list.length + (String(label).length % 3);
+    // 使用者指定互換顏色的業務（2026-11-05：業務 6 和業務 21）；業務代號 06 和 6 視為同一位
+    if (dim === 'rep') for (const [a, b] of REP_SWAP) {
+      const n = +label, other = n === a ? b : n === b ? a : null;
+      if (other == null) continue;
+      const j = list.findIndex((x) => +x === other);
+      if (j >= 0) i = j;
+    }
     return Charts.PAL[Math.max(0, i) % Charts.PAL.length];
   }
   window.__colorOf = colorOf;
