@@ -768,7 +768,7 @@
     Charts.hbars($('#prTop'), { rows: top.map((p) => ({ label: p.code, value: p[key], prev: has ? p[pkey] : null, cls: colorOf('big', p.big), p, note: has ? growthCell(p) : '' })), fmt: vf, limit: 15, onClick: (x) => openProduct(x.p, lv) });
     const addFilter = (dim) => (d) => { const code = E.dim(dim).labels.indexOf(d.label === '（空白）' ? '' : d.label); if (code < 0) return; S.prod.filters = { ...S.prod.filters, [dim]: [code] }; renderProducts(); };
     Charts.donut($('#prBig'), { items: mix('big'), fmt: vf, title: '商品大類', onClick: addFilter('big') });
-    Charts.donut($('#prCat'), { items: mix('cat'), fmt: vf, title: '類別', onClick: addFilter('cat') });
+    Charts.donut($('#prCat'), { items: mix('cat').map(({ cls, ...x }) => x), fmt: vf, title: '類別', onClick: addFilter('cat') }); // 類別很多，依圓餅順序配色才分得清楚
     window.__prod = { trend: tr, top: top.map((p) => [p.code, p[key], p[pkey]]), period: R.label }; // 測試用
   }
   function bindProducts() {

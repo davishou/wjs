@@ -130,13 +130,13 @@
     const drawChart = () => {
       const el = $('#cmpChart'); if (!el) return;
       if (st.gran === 'year') {
-        const series = [{ name: '全年', kind: 'bar', cls: 'c1', values: years.map((yy) => val(full, yy)) }];
+        const series = [{ name: '全年', kind: 'bar', cls: 'c16', values: years.map((yy) => val(full, yy)) }];
         if (refM < 12) series.push({ name: `1～${refM} 月`, kind: 'bar', cls: 'c3', values: years.map((yy) => val(ytd, yy)) });
         Charts.render(el, { type: 'bar', labels: years.map((yy) => yy + '年'), series, fmt: vfull, axisFmt: met.kind === 'pct' ? (v) => nf1.format(v * 100) + '%' : met.kind === 'int' ? (v) => nf0.format(v) : fmt.axis, title: met.label });
       } else {
         // 複合圖：最新一年用長條，往年用線（同一個刻度），一眼看出今年每個月比往年高還是低
         const ys = years.slice(-COLORS.length);
-        const series = ys.map((yy, i) => ({ name: yy + '年', kind: i === ys.length - 1 ? 'bar' : 'line', cls: i === ys.length - 1 ? 'c1' : COLORS[(ys.length - 1 - i) % COLORS.length], values: cols.map((c) => val(cell, yy + '|' + c.c)) }));
+        const series = ys.map((yy, i) => ({ name: yy + '年', kind: i === ys.length - 1 ? 'bar' : 'line', cls: i === ys.length - 1 ? 'c16' : COLORS[(ys.length - 1 - i) % COLORS.length], values: cols.map((c) => val(cell, yy + '|' + c.c)) }));
         Charts.render(el, { type: 'combo', labels: cols.map((c) => c.label), series, fmt: vfull, axisFmt: met.kind === 'pct' ? (v) => nf1.format(v * 100) + '%' : met.kind === 'int' ? (v) => nf0.format(v) : fmt.axis, title: met.label });
       }
     };

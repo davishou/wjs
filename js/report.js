@@ -211,7 +211,7 @@
       const p = E.pivot({ rows: ['ym'], cols: null, measures: ['net'], filter: { ymFrom: vsY * 100 + 1, ymTo: year * 100 + 12 } });
       const by = new Map(p.rows.map((r) => [E.ymList[r.codes[0]], r.vals[0][0]]));
       const labels = Array.from({ length: 12 }, (_, i) => (i + 1) + '月');
-      const series = [{ name: year + '年', kind: 'bar', cls: 'c1', values: labels.map((_, i) => (i + 1 <= endM || year !== refY) && by.has(year * 100 + i + 1) ? by.get(year * 100 + i + 1) : null) }];
+      const series = [{ name: year + '年', kind: 'bar', cls: 'c16', values: labels.map((_, i) => (i + 1 <= endM || year !== refY) && by.has(year * 100 + i + 1) ? by.get(year * 100 + i + 1) : null) }];
       if (hasPrev) series.push({ name: vsY + '年', kind: 'line', cls: 'c2', values: labels.map((_, i) => (by.has(vsY * 100 + i + 1) ? by.get(vsY * 100 + i + 1) : null)) });
       root.Charts.render(el, { type: 'combo', labels, series, fmt: fmt.money, axisFmt: fmt.axis, title: '每月淨營收' });
     };

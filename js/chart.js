@@ -9,7 +9,8 @@
   const mk = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const col = (cls) => `var(--${cls || 's1'})`;
-  const PAL = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'c10', 'c11', 'c12', 'c13', 'c14', 'c15', 'c16']; // 16 個明顯不同的顏色，相鄰的色相差很多
+  // 前面幾個顏色差最多（藍、橘、綠、紫、黃、洋紅、青、棕…）；c16 深灰留給「合計／淨銷售總數」，不放進來
+  const PAL = ['c1', 'c2', 'c3', 'c7', 'c4', 'c13', 'c9', 'c10', 'c5', 'c12', 'c8', 'c11', 'c6', 'c15', 'c14'];
 
   // 讓格線落在整齊的數字上（1、2、5 的倍數）
   function niceStep(span) {
@@ -125,8 +126,9 @@
   // 圓餅（甜甜圈）：items = [{label, value, cls?}]；依大小排，最多 max 塊，其餘併成「其他」（灰色）
   // 顏色：給了 cls 就用（同一個名稱在每張圖都同色），沒給就依順序 --c1～--c8
   function donut(el, { items, fmt, title = '', center = null, max = 8, onClick = null, sort = true }) {
-    let list = items.filter((d) => d.value > 0).map((d, i) => ({ ...d, cls: d.cls || PAL[i % PAL.length] }));
+    let list = items.filter((d) => d.value > 0);
     if (sort) list.sort((a, b) => b.value - a.value);
+    list = list.map((d, i) => ({ ...d, cls: d.cls || PAL[i % PAL.length] })); // 沒指定顏色：依圓餅裡的順序配，相鄰兩塊一定差很多
     if (list.length > max) {
       const rest = list.slice(max - 1);
       list = list.slice(0, max - 1).concat([{ label: `其他 ${rest.length} 項`, value: rest.reduce((s, d) => s + d.value, 0), cls: 'other', other: true }]);

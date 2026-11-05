@@ -475,6 +475,8 @@ async def cust_prod_pages(pg, d):
     await pg.click('#prBig .dn-legend li.click'); await pg.wait_for_timeout(400)
     ok(await pg.locator('#prFilters .chip').count() >= 1, '商品：點大類圓餅 → 加上那一塊的篩選')
     ok(await pg.locator('#prCat svg').count() == 1 and await pg.locator('#prRegion').count() == 0, '商品：大類旁邊是類別圓餅（沒有區域）')
+    cc = await pg.evaluate("[...document.querySelectorAll('#prCat .dn-legend li i')].map(i => i.style.background)")
+    ok(len(cc) == len(set(cc)), f'商品：類別圓餅每一塊顏色都不同（{len(cc)} 塊）')
     await pg.screenshot(path=SH + '/27_products.png', full_page=True)
     await pg.click('#prFilters .chip .x'); await pg.wait_for_timeout(300)
     await pg.click('#prMetric button[data-v=net]'); await pg.wait_for_timeout(200)
