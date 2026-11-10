@@ -759,3 +759,34 @@ small .up, small .down { font-size: 1.35em; }
 .hist-t td, .hist-t th { white-space: nowrap; }
 .kpi.alert { box-shadow: inset 0 0 0 2px var(--bad); }
 .recv-t tr.cont td { background: color-mix(in srgb, var(--ink) 3%, var(--surface)); }
+
+/* 應收帳款區塊用黃色（2026-11-10 使用者要求：和銷售分析的藍色分開） */
+:root { --ar-y: #f2c230; --ar-y-deep: #b88a00; --ar-y-ink: #3d2e00; --ar-y-soft: #fff6d6; }
+[data-theme="night"] { --ar-y-soft: #3a3010; --ar-y-ink: #f7dc7a; }
+[data-theme="indigo"] .tab-group.g5 { background: var(--ar-y); border-color: var(--ar-y-deep); }
+[data-theme="indigo"] .tab-group.g5 .tg-label { color: var(--ar-y-ink); }
+[data-theme="indigo"] .tab-group.g5 a { color: var(--ar-y-ink); }
+[data-theme="indigo"] .tab-group.g5 a:hover { background: rgba(255,255,255,.35); }
+[data-theme="indigo"] .tab-group.g5 a.on { background: #fff; color: var(--ar-y-ink); }
+[data-theme="night"] .tabs a[data-view="recv"], [data-theme="night"] .tabs a[data-view="recvA"],
+[data-theme="market"] .tabs a[data-view="recv"], [data-theme="market"] .tabs a[data-view="recvA"] { background: var(--ar-y-soft); color: var(--ar-y-ink); }
+[data-theme="night"] .tabs a[data-view^="recv"].on { border-bottom-color: var(--ar-y); }
+@media (max-width: 1180px) { [data-theme="indigo"] .tab-group.g5 .tg-label { background: var(--ar-y-ink); opacity: .5; } }
+#view-recv .view-head, #view-recvA .view-head { border-left: 6px solid var(--ar-y); padding-left: 14px; }
+#view-recv .kpi:first-child, #view-recvA .kpi:first-child { background: var(--ar-y); color: var(--ar-y-ink); border-color: var(--ar-y-deep); }
+#view-recv .kpi:first-child .k, #view-recv .kpi:first-child .d, #view-recvA .kpi:first-child .k, #view-recvA .kpi:first-child .d { color: var(--ar-y-ink); opacity: .85; }
+#view-recv .panel, #view-recvA .panel { border-top: 3px solid var(--ar-y); }
+#view-recv .btn.primary { background: var(--ar-y-deep); border-color: var(--ar-y-deep); }
+
+/* 折率%、支票 */
+.recv-t td.pct input { width: 58px; text-align: center; }
+.recv-t td.auto input { background: var(--surface-2); color: var(--ink-2); }
+.pay-btn { display: block; margin: 3px 0 0 auto; border: 1px dashed var(--line-strong); background: transparent; color: var(--muted); font-size: .72rem; border-radius: 6px; padding: 1px 6px; cursor: pointer; }
+.pay-btn.on { border-style: solid; border-color: var(--ar-y-deep); color: var(--ar-y-ink); background: var(--ar-y-soft); }
+.pay-t input, .pay-t select { width: 100%; min-width: 90px; font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+.pay-t td.n input { text-align: right; }
+.pay-t .bad-in { border-color: var(--bad); }
+.pay-cash input { width: 140px; margin-left: 6px; text-align: right; }
+#rcPay .row { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 8px 0; }
+.pay-sum { color: var(--ink-2); }
+#raChecks .soon { color: var(--warn); }

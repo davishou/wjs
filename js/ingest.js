@@ -309,7 +309,7 @@
   // ---- 客戶應收帳款明細表（每個月一張工作表，一張裡有好幾塊：標題「115 年 01 月 客戶應收帳款明細表 新竹 地區 / 業務員: 22」＋表頭「代號…」＋客戶列＋「總計」）----
   // 依表頭名稱對欄（不依欄位字母）；同一張表可以左右並排兩塊。回傳 { rows, months, blocks }
   const RECV_COLS = [['代號', 'code'], ['客戶名稱', 'name'], ['應收帳款', 'ar'], ['退貨金額', 'ret'], ['補價金額', 'bu'], ['折率金額', 'disc'], ['折讓金額', 'disc'],
-    ['稅金', 'tax'], ['其他', 'other'], ['實收金額', 'paid'], ['備註', 'note'], ['前先入', 'preAdv'], ['前溢入', 'preOver'], ['溢入', 'over'], ['保留', 'hold'],
+    ['稅金', 'tax'], ['其他', 'other'], ['尾數', 'other'], ['實收金額', 'paid'], ['備註', 'note'], ['前先入', 'preAdv'], ['前溢入', 'preOver'], ['溢入', 'over'], ['保留', 'hold'],
     ['不足', 'short'], ['多入', 'more'], ['運金', 'freight']];
   async function readRecvBook(src) {
     const X = root.XlsxStream;
