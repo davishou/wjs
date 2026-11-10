@@ -63,6 +63,10 @@
         <a href="#customers" data-view="customers"><svg viewBox="0 0 24 24"><path d="M16 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm-8 1a3 3 0 1 0-3-3 3 3 0 0 0 3 3zm8 1c-2.7 0-8 1.3-8 4v3h16v-3c0-2.7-5.3-4-8-4zm-8 0c-.4 0-.8 0-1.3.1C8 14 9 15.3 9 17v3H1v-3c0-2.2 4.4-4 7-4z"/></svg><span>客戶</span></a>
         <a href="#products" data-view="products"><svg viewBox="0 0 24 24"><path d="M9 3 4 6v4l3 1v10h10V11l3-1V6l-5-3c0 1.7-1.3 3-3 3S9 4.7 9 3z"/></svg><span>商品</span></a>
       </div>
+      <div class="tab-group g5"><span class="tg-label">應收帳款</span>
+        <a href="#recv" data-view="recv"><svg viewBox="0 0 24 24"><path d="M3 4h18v4H3zm0 6h8v10H3zm10 0h8v4h-8zm0 6h8v4h-8z"/></svg><span class="t-long">收款登記</span><span class="t-short">收款</span></a>
+        <a href="#recvA" data-view="recvA"><svg viewBox="0 0 24 24"><path d="M3 21V3h2v16h16v2zm4-4v-6h3v6zm5 0V7h3v10zm5 0v-3h3v3z"/></svg><span class="t-long">應收分析</span><span class="t-short">應收</span></a>
+      </div>
       <div class="tab-group g3"><span class="tg-label">報告與工具</span>
         <a href="#report" data-view="report"><svg viewBox="0 0 24 24"><path d="M4 20h16v2H2V2h2zm2-3V9h3v8zm5 0V4h3v13zm5 0v-6h3v6z"/></svg><span class="t-long">圖表報告</span><span class="t-short">報告</span></a>
         <a href="#pivot" data-view="pivot"><svg viewBox="0 0 24 24"><path d="M3 3h18v4H3zm0 6h5v12H3zm7 0h11v12H10z"/></svg><span class="t-long">樞紐分析</span><span class="t-short">樞紐</span></a>
@@ -137,6 +141,14 @@
     </section>
 
     <!-- 樞紐分析 -->
+    <section class="view" id="view-recv" hidden>
+      <div class="view-head"><div><h1>收款登記</h1><p class="sub">照紅單的欄位輸入每位客戶每個月的收款，網站自動算應收淨額、檢查對不對得上。資料只存在這台裝置，用開啟密碼加密。</p></div></div>
+      <div id="recvBody"></div>
+    </section>
+    <section class="view" id="view-recvA" hidden>
+      <div class="view-head"><div><h1>應收分析</h1><p class="sub">應收、實收、折讓、退貨、補價的每月變化，各地區、各業務的收款狀況，以及還沒結清、對不上的客戶。</p></div></div>
+      <div id="recvABody"></div>
+    </section>
     <section class="view" id="view-pivot" hidden>
       <div class="view-head">
         <div><h1>樞紐分析</h1><p class="sub">選擇分組方式與數值，進貨、退貨可以一起比較。</p></div>
@@ -335,6 +347,7 @@
 <script src="js/reps.js"></script>
 <script src="js/board.js"></script>
 <script src="js/demo.js"></script>
+<script src="js/recv.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

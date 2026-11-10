@@ -732,3 +732,30 @@ small .up, small .down { font-size: 1.35em; }
 :root { --w1: #e03131; --w2: #f76707; --w3: #f2b705; --w4: #e64980; --w5: #ffa94d; --w6: #c2255c; --w7: #ff8787; --w8: #d9480f;
   --m1: #1c7ed6; --m2: #3b5bdb; --m3: #7048e8; --m4: #15aabf; --m5: #9775fa; --m6: #4dabf7; --m7: #364fc7; --m8: #ae3ec9;
   --k1: #2f9e44; --k2: #82c91e; --k3: #0ca678; --k4: #5c940d; --a1: #8d6e63; --a2: #868e96; --a3: #495057; --a4: #c49a6c; --a5: #adb5bd; }
+
+/* ============ 應收帳款（收款登記、應收分析） ============ */
+[data-theme="indigo"] .tab-group.g5 { background: rgba(255, 255, 255, .10); }
+.recv-bar { flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.recv-bar .grow { flex: 1; }
+.recv-add .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.recv-add input { min-width: 260px; flex: 0 1 360px; }
+.recv-wrap { max-height: 70vh; overflow: auto; }
+.recv-t th, .recv-t td { white-space: nowrap; padding: 4px 6px; }
+.recv-t th small, .recv-t td small { display: block; font-size: .7rem; color: var(--muted); font-weight: 400; }
+.recv-t thead th { position: sticky; top: 0; z-index: 2; background: var(--surface); }
+.recv-t .stick { position: sticky; left: 0; z-index: 1; background: var(--surface); min-width: 64px; }
+.recv-t .stick2 { position: sticky; left: 64px; z-index: 1; background: var(--surface); min-width: 120px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.recv-t thead .stick, .recv-t thead .stick2 { z-index: 3; }
+.recv-t input { width: 86px; text-align: right; font: inherit; font-variant-numeric: tabular-nums; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+.recv-t td.note input { width: 200px; text-align: left; }
+.recv-t th.adj { color: var(--ink-2); }
+.recv-t td.due { font-weight: 700; }
+.recv-t .warn-cell input { background: color-mix(in srgb, #f2b705 22%, var(--surface)); border-color: #d9a400; }
+.recv-t tr.bad-row td.stick { box-shadow: inset 4px 0 0 var(--bad); }
+.recv-t .ok, .recv-kpis .ok, .hist-t .ok { color: var(--good); font-weight: 700; }
+.recv-t .bad, .recv-kpis .bad, .hist-t .bad, #raBad .bad, #raMonths .bad, #raRegion .bad, #raRep .bad { color: var(--bad); font-weight: 800; }
+.icon-btn { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 1rem; padding: 2px 6px; }
+.icon-btn:hover { color: var(--bad); }
+.hist-t td, .hist-t th { white-space: nowrap; }
+.kpi.alert { box-shadow: inset 0 0 0 2px var(--bad); }
+.recv-t tr.cont td { background: color-mix(in srgb, var(--ink) 3%, var(--surface)); }

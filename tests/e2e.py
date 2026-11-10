@@ -222,6 +222,7 @@ async def main():
     await dashboard(b)
     await raw_import(b)
     await raw_add(b)
+    await recv_flow(b)
     await report_page(b)
     await demo_mode(b)
     await b.close()
@@ -481,7 +482,7 @@ async def cust_prod_pages(pg, d):
     await pg.click('#prFilters .chip .x'); await pg.wait_for_timeout(300)
     await pg.click('#prMetric button[data-v=net]'); await pg.wait_for_timeout(200)
     # 左側選單分區塊
-    ok(await pg.locator('.tab-group').count() == 4 and await pg.is_visible('.tab-group.g1 .tg-label'), '左側選單分成 4 區（每天看、分析、報告與工具、設定）')
+    ok(await pg.locator('.tab-group').count() == 5 and await pg.is_visible('.tab-group.g1 .tg-label'), '左側選單分成 5 區（每月看、分析、應收帳款、報告與工具、設定）')
 
 
 def mf_rows():
@@ -672,6 +673,86 @@ async def raw_add(b):
             ok(got.get('JMSSAL.DBF') == open(FX + '/JMSSAL.DBF', 'rb').read() and got.get('JMSSBK.DBF') == open(FX + '/JMSSBK.DBF', 'rb').read(), f'還原 → 存回 DBF 檔，和原檔一模一樣：{list(got)}')
         ok(not errs, '還原備份沒有 JS 錯誤 ' + str(errs))
         await c.close()
+
+
+async def recv_flow(b):
+    """應收帳款：匯入有密碼的應收帳款 Excel、自動檢查、修改、折率 %、備註、客戶歷史、加入客戶、存檔、應收分析。"""
+    sys.path.insert(0, HERE)
+    import make_fixtures as mf
+    exp = mf.recv_expect()
+    c = await b.new_context(viewport={'width': 1366, 'height': 900})
+    pg = await c.new_page(); errs = []
+    pg.on('pageerror', lambda e: errs.append(str(e)))
+    pg.on('dialog', lambda d: asyncio.ensure_future(d.accept()))
+    await pg.goto(URL + '#data'); await pg.wait_for_timeout(300)
+    await pg.set_input_files('#fileXlsx', [FX + '/JMSSAL.DBF', FX + '/JMSSBK.DBF'])
+    await dlg_fill(pg, {'app': 'rc123', 'app2': 'rc123'}); await wait_done(pg)
+    await pg.wait_for_selector('#dlg[open]'); await pg.click('#dlgCancel'); await pg.wait_for_timeout(200)
+    ok(await pg.locator('.tab-group.g5 a').count() == 2, '左側選單多了「應收帳款」：收款登記、應收分析')
+    await pg.click('a[data-view=recv]'); await pg.wait_for_selector('#rcImport')
+    # 匯入有開啟密碼的應收帳款 Excel
+    await pg.set_input_files('#rcFile', FX + '/recv_enc.xlsx')
+    await dlg_fill(pg, {'xls': 'ar123'})
+    await pg.wait_for_selector('#dlg[open]'); t = await pg.text_content('#dlgForm')
+    ok(f"{len(exp)} 筆" in t and '其中 1 位客戶' in t, f'匯入有密碼的應收帳款 Excel：讀到 {len(exp)} 筆（含 1 行續行），1 位客戶對不上：' + t[:90])
+    await pg.click('#dlgOk'); await pg.wait_for_selector('#recvBody tbody tr[data-id]')
+    r = await pg.evaluate('window.__recv')
+    ok(r['ym'] == 11411 and len(r['rows']) == sum(1 for x in exp if x['ym'] == 11411) and all(abs(x['diff']) < 0.5 for x in r['rows']), f"打開最新的 114/11：{len(r['rows'])} 筆，全部對得上")
+    ok(await pg.locator('#recvBody tr:has-text("7K02") .warn-cell').count() == 1 and await pg.locator('#recvBody .warn-cell').count() == 1, '7K02 的應收和銷售資料的出貨不同 → 標黃（只有這一格）')
+    await pg.select_option('#rcYm', '11409'); await pg.wait_for_timeout(300)
+    r = await pg.evaluate('window.__recv'); r5 = [x for x in r['rows'] if x['code'] == '5X03']
+    ok(len(r5) == 2 and all(abs(x['diff']) >= 0.5 for x in r5) and abs(r5[0]['group']) < 0.5 and await pg.locator('#recvBody tr.bad-row').count() == 0 and await pg.locator('#recvBody tr.cont').count() == 1,
+       f"Excel 裡代號「-------」的續行算同一位客戶：5X03 兩行各自不平、合起來對得上（{[x['diff'] for x in r5]}）")
+    await pg.select_option('#rcYm', '11410'); await pg.wait_for_timeout(300)
+    r = await pg.evaluate('window.__recv'); bad = [x for x in r['rows'] if abs(x['diff']) >= 0.5]
+    ok(len(bad) == 1 and bad[0]['code'] == '3A11' and abs(bad[0]['diff'] - 10) < 0.01 and await pg.locator('#recvBody tr.bad-row').count() == 1, f'114/10：3A11 差 10 元 → 標紅：{bad}')
+    await pg.screenshot(path=SH + '/40_recv_entry.png', full_page=True)
+    # 改實收 → 自動重算
+    row = pg.locator('#recvBody tr:has-text("3A11")')
+    paid = float(await row.locator('input[data-k=paid]').input_value())
+    await row.locator('input[data-k=paid]').fill(str(int(paid + 10))); await row.locator('input[data-k=paid]').press('Tab'); await pg.wait_for_timeout(300)
+    ok(await pg.locator('#recvBody tr.bad-row').count() == 0 and '全部對得上' in await pg.text_content('#rcSum'), '實收補上 10 元 → 這一筆變成對得上')
+    # 折率打 6%、備註
+    row = pg.locator('#recvBody tr:has-text("2T06")')
+    e = next(x for x in exp if x['code'] == '2T06' and x['ym'] == 11410)
+    await row.locator('input[data-k=disc]').fill('6%'); await row.locator('input[data-k=disc]').press('Tab'); await pg.wait_for_timeout(300)
+    got = await pg.evaluate("window.__app.meta.recv.rows.find(r => r.code === '2T06' && r.ym === 11410).disc")
+    ok(got == round((e['ar'] - e['ret']) * 0.06), f"折率打「6%」→ 自動算成 {got}（（應收 − 退貨）× 6%）")
+    row = pg.locator('#recvBody tr:has-text("2T06")')
+    await row.locator('input[data-k=note]').fill('運費我們付，客人先扣 120'); await row.locator('input[data-k=note]').press('Tab'); await pg.wait_for_timeout(300)
+    # 客戶歷史
+    await pg.locator('#recvBody tr:has-text("2T06") input[data-k=paid]').focus(); await pg.wait_for_timeout(300)
+    h = await pg.evaluate('window.__recvHist')
+    ok(await pg.is_visible('#rcHist') and h['code'] == '2T06' and h['months'] == [x['ym'] for x in exp if x['code'] == '2T06' and x['ym'] < 11410][::-1], f"點到客戶 → 顯示前幾個月的明細：{h}")
+    # 刪掉再從上面加入：應收、退貨自動帶入銷售資料
+    await pg.locator('#recvBody tr:has-text("5X03") [data-del]').click(); await pg.wait_for_timeout(400)
+    ok(await pg.locator('#recvBody tr[data-id]:has-text("5X03")').count() == 0, '刪除一筆（客戶歷史在表格下面，點表格時表格不會跳動）')
+    await pg.fill('#rcNew', '5X03'); await pg.wait_for_timeout(200)
+    ok(await pg.is_visible('#rcHist') and '5X03' in await pg.text_content('#rcHist h2'), '輸入客戶代號時就顯示這位客戶之前的明細')
+    await pg.press('#rcNew', 'Enter'); await pg.wait_for_timeout(400)
+    e5 = next((x for x in exp if x['code'] == '5X03' and x['ym'] == 11410), None)
+    nr = await pg.evaluate("window.__app.meta.recv.rows.filter(r => r.code === '5X03' && r.ym === 11410).map(r => [r.ar, r.ret])")
+    ok(len(nr) == 1 and (e5 is None or (nr[0][0] == e5['ar'] and nr[0][1] == e5['ret'])), f'加入客戶：應收、退貨自動帶入銷售資料 {nr}')
+    await pg.screenshot(path=SH + '/41_recv_hist.png', full_page=True)
+    # 存檔、重新開啟
+    await pg.evaluate('window.__saveRecvNow()'); await pg.wait_for_timeout(300)
+    await pg.reload(); await pg.fill('#lockPw', 'rc123'); await pg.click('#lockGo'); await pg.wait_for_selector('#lock[hidden]', state='attached')
+    rows = await pg.evaluate("window.__app.meta.recv.rows.filter(r => r.ym === 11410).map(r => [r.code, r.note || '', r.disc])")
+    ok(any(x[0] == '2T06' and '運費' in x[1] for x in rows), '重新開啟後，修改和備註都還在（有加密存檔）')
+    # 應收分析
+    await pg.click('a[data-view=recvA]'); await pg.wait_for_selector('#raChart svg')
+    a = await pg.evaluate('window.__recvA')
+    want = await pg.evaluate("window.__app.meta.recv.rows.reduce((t, r) => t + (r.ar||0) - (r.ret||0) - (r.bu||0) - (r.disc||0) + (r.tax||0) - (r.other||0), 0)")
+    ok(a['year'] == 114 and abs(a['due'] - want) < 0.01 and a['bad'] == 1 and await pg.locator('#raBad tbody tr').count() == 1, f"應收分析：114 年應收淨額 {a['due']:.0f}，對不上 {a['bad']} 筆（剛加入、還沒填實收的 5X03）")
+    await pg.screenshot(path=SH + '/42_recv_analysis.png', full_page=True)
+    # 再匯入沒有密碼的同一份：整月取代
+    await pg.click('a[data-view=recv]'); await pg.wait_for_selector('#rcImport')
+    await pg.set_input_files('#rcFile', FX + '/recv.xlsx'); await pg.wait_for_selector('#dlg[open]')
+    ok('整月換成檔案裡的內容' in await pg.text_content('#dlgForm'), '再匯入同樣月份 → 說明會整月取代')
+    await pg.click('#dlgOk'); await pg.wait_for_timeout(800)
+    ok(await pg.evaluate('window.__app.meta.recv.rows.length') == len(exp), '整月取代後，筆數和檔案一樣（不會重複）')
+    ok(not errs, '應收帳款沒有 JS 錯誤 ' + str(errs))
+    await c.close()
 
 
 async def report_page(b):

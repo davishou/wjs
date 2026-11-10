@@ -60,6 +60,15 @@ self.onmessage = async (e) => {
       const cls = await readOther(file, password);
       if (!cls) throw new Error('這是總表，不是商品類別代碼表。總表請拖到上面的「更新資料」。');
       self.postMessage({ type: 'done', classification: cls });
+    } else if (type === 'recvBook') {
+      // 客戶應收帳款明細表（可以有開啟密碼；在記憶體內解密，讀完清空）
+      let src = file, plain = null;
+      const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+      try {
+        if (self.OfficeCrypto.isCfb(head)) { plain = await self.OfficeCrypto.decryptXlsx(new Uint8Array(await file.arrayBuffer()), password, report); src = plain; }
+        const res = await self.Ingest.readRecvBook(src);
+        self.postMessage({ type: 'done', recv: res });
+      } finally { if (plain) plain.fill(0); }
     } else if (type === 'readAdd') {
       // 加入系統原始資料：只讀檔，合併在畫面這邊做（要先讓使用者確認）
       const add = await readExcel(e.data.files, password, { allowNoSales: true });

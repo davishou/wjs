@@ -306,5 +306,67 @@
     return 'other';
   }
 
-  root.Ingest = { ingestXlsx, ingestFiles, readClassification, detectKind, parseDate };
+  // ---- 客戶應收帳款明細表（每個月一張工作表，一張裡有好幾塊：標題「115 年 01 月 客戶應收帳款明細表 新竹 地區 / 業務員: 14」＋表頭「代號…」＋客戶列＋「總計」）----
+  // 依表頭名稱對欄（不依欄位字母）；同一張表可以左右並排兩塊。回傳 { rows, months, blocks }
+  const RECV_COLS = [['代號', 'code'], ['客戶名稱', 'name'], ['應收帳款', 'ar'], ['退貨金額', 'ret'], ['補價金額', 'bu'], ['折率金額', 'disc'], ['折讓金額', 'disc'],
+    ['稅金', 'tax'], ['其他', 'other'], ['實收金額', 'paid'], ['備註', 'note'], ['前先入', 'preAdv'], ['前溢入', 'preOver'], ['溢入', 'over'], ['保留', 'hold'],
+    ['不足', 'short'], ['多入', 'more'], ['運金', 'freight']];
+  async function readRecvBook(src) {
+    const X = root.XlsxStream;
+    const zip = await X.openZip(src);
+    const sheets = await X.listSheets(zip);
+    const sst = X.parseSharedStrings(zip.entries['xl/sharedStrings.xml'] ? await zip.text('xl/sharedStrings.xml') : '');
+    const out = [], months = new Set(); let blocks = 0;
+    for (const sh of sheets) {
+      if (!zip.entries[sh.path]) continue;
+      const grid = new Map(); let cur = [];
+      const h = { maxCol: 70, stop: false, onCell(col, kind, val) { cur[col] = kind === 1 ? sst[val] : val; }, onRowEnd(rn) { grid.set(rn, cur); cur = []; } };
+      await X.scanSheet(zip, sh.path, h);
+      const rowNums = [...grid.keys()].sort((a, b) => a - b);
+      const str = (r, c) => { const row = grid.get(r); const v = row ? row[c] : null; return v == null ? '' : String(v).trim(); };
+      const num = (v) => (typeof v === 'number' ? v : v == null || v === '' ? 0 : (Number(String(v).replace(/[,$\s]/g, '')) || 0));
+      for (const r of rowNums) {
+        const row = grid.get(r);
+        row.forEach((v, c) => {
+          if (String(v == null ? '' : v).trim() !== '代號') return;
+          // 標題在表頭上面幾列、同一欄
+          let title = '';
+          for (let k = 1; k <= 4 && !title; k++) { const t = str(r - k, c); if (t.includes('明細表')) title = t; }
+          const m = title.match(/(\d{2,3})\s*年\s*(\d{1,2})\s*月/);
+          let ym = m ? +m[1] * 100 + +m[2] : 0;
+          if (!ym) return;
+          const region = ((title.split('明細表')[1] || '').split('地區')[0] || '').trim();
+          const rm = title.match(/業務員[:：]\s*([^\s]+)/); const rep = rm ? rm[1].trim() : '';
+          const col = {};
+          for (let cc = c; cc < c + 30; cc++) {
+            const t = str(r, cc).replace(/[\s(（][+\-－＋][)）]|\s/g, '');
+            const hit = RECV_COLS.find(([n]) => t === n || t.replace(/[()（）+\-－＋]/g, '') === n);
+            if (hit && col[hit[1]] == null) col[hit[1]] = cc;
+          }
+          if (col.code == null || col.ar == null || col.paid == null) return;
+          blocks++; months.add(ym);
+          let last = null; // 代號是「-------」的列 = 上一位客戶的第二、三行（同一位客戶），金額要算進去
+          for (const rr of rowNums) {
+            if (rr <= r) continue;
+            let code = str(rr, col.code);
+            if (code.includes('總計') || code.includes('代號') || code.includes('明細表')) break;
+            if (!code) continue;
+            const cont = /^[-—_=－]+$/.test(code);
+            if (cont && !last) continue;
+            let name = col.name != null ? str(rr, col.name) : '';
+            if (cont) { code = last.code; if (!name || /^[-—_=－]+$/.test(name)) name = last.name; }
+            const o = { ym, code, name, region, rep, note: col.note != null ? str(rr, col.note) : '' };
+            if (cont) o.cont = true;
+            let any = !!o.note;
+            for (const [, k] of RECV_COLS) { if (k === 'code' || k === 'name' || k === 'note' || col[k] == null) continue; const g = grid.get(rr); o[k] = num(g ? g[col[k]] : 0); if (o[k]) any = true; }
+            if (!cont) last = { code, name };
+            if (any) out.push(o);
+          }
+        });
+      }
+    }
+    return { rows: out, months: [...months].sort((a, b) => a - b), blocks };
+  }
+
+  root.Ingest = { ingestXlsx, ingestFiles, readClassification, detectKind, parseDate, readRecvBook };
 })(typeof self !== 'undefined' ? self : globalThis);

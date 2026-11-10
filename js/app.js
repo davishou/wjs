@@ -72,7 +72,7 @@
   }
 
   // ---------- 導覽 ----------
-  const VIEWS = ['overview', 'board', 'dashboard', 'compare', 'reps', 'customers', 'products', 'report', 'pivot', 'data'];
+  const VIEWS = ['overview', 'board', 'dashboard', 'compare', 'reps', 'customers', 'products', 'recv', 'recvA', 'report', 'pivot', 'data'];
   function go(view) {
     if (!VIEWS.includes(view)) view = 'overview';
     if (!S.E && view !== 'data') view = 'data';
@@ -86,7 +86,7 @@
   }
   function renderView() {
     if (!S.E) { renderData(); return; }
-    (({ overview: renderToday, board: renderBoard, dashboard: renderDashboard, compare: renderCompare, reps: renderReps, report: renderReport, pivot: renderPivot, customers: renderCustomers, products: renderProducts, data: renderData })[S.view] || renderToday)();
+    (({ overview: renderToday, board: renderBoard, dashboard: renderDashboard, compare: renderCompare, reps: renderReps, report: renderReport, pivot: renderPivot, customers: renderCustomers, products: renderProducts, recv: () => Recv.renderEntry(recvCtx()), recvA: () => Recv.renderAnalysis(recvCtx()), data: renderData })[S.view] || renderToday)();
   }
 
   // ---------- 表格元件 ----------
@@ -139,6 +139,57 @@
   };
 
   // ---------- CSV ----------
+  // ---------- 應收帳款（js/recv.js）----------
+  // 資料放在 S.meta.recv，跟銷售資料一起加密存檔；每次修改後 0.8 秒存一次（離開頁面前也會存）
+  function custList() {
+    if (!S.E) return [];
+    if (S.E._custList) return S.E._custList;
+    const res = S.E.customers({}, refYm());
+    S.E._custList = res.list.map((c) => ({ code: c.code, name: c.name, region: c.region, rep: c.rep, ck: c.ck }));
+    S.E._custByCode = new Map(S.E._custList.map((c) => [c.code, c]));
+    return S.E._custList;
+  }
+  let recvTimer = null, recvSaving = null;
+  function saveRecv(now) {
+    clearTimeout(recvTimer);
+    const run = async () => {
+      if (!S.raw) return;
+      S.raw = Dataset.withMeta(S.raw, S.meta);
+      if (S.demo || !S.vault) return;
+      recvSaving = Dataset.Vault.save(S.vault, S.raw); await recvSaving; recvSaving = null;
+      const n = document.getElementById('recvSaved'); if (n) n.textContent = '已加密儲存 ' + new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+    };
+    if (now) return run();
+    recvTimer = setTimeout(() => { recvTimer = null; run(); }, 800);
+  }
+  window.addEventListener('pagehide', () => { if (recvTimer) saveRecv(true); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && recvTimer) saveRecv(true); });
+  window.__saveRecvNow = () => saveRecv(true); // 測試用
+  // 匯入原本的「客戶應收帳款明細表」Excel：檔案裡有的月份整月取代
+  async function importRecv(file) {
+    if (demoBlock()) return;
+    let pw = null;
+    if (await isCfbFile(file)) { const r = await askImportPasswords(file.name, true, false, ''); if (!r) return; pw = r.xlsPw; }
+    let d;
+    try { d = await runWorker({ type: 'recvBook', file, password: pw }, []); } catch (err) { worker && worker.terminate(); worker = null; toast('讀取失敗：' + err.message, 6000); return; }
+    const res = d.recv;
+    if (!res.rows.length) { toast('這個 Excel 裡找不到「客戶應收帳款明細表」的資料（要有「代號」「應收帳款」「實收金額」等表頭）', 7000); return; }
+    S.meta = S.meta || {}; if (!S.meta.recv) S.meta.recv = { v: 1, rows: [] };
+    const R = S.meta.recv, ms = new Set(res.months);
+    const had = R.rows.filter((r) => ms.has(r.ym)).length;
+    const bad = [...Recv.groupDiffs(res.rows).values()].filter((d) => Math.abs(d) >= 0.5).length; // 同一位客戶同月的幾行合起來算
+    const v = await ask({ title: '匯入應收帳款', desc: `<p>「${esc(file.name)}」：${res.blocks} 個表、${nf0.format(res.rows.length)} 筆，月份 ${res.months.map(ymLabel).join('、')}。</p>` +
+      (had ? `<p>這些月份網站裡已經有 ${nf0.format(had)} 筆，匯入後會<strong>整月換成檔案裡的內容</strong>。</p>` : '') +
+      (bad ? `<p class="warn">其中 ${bad} 位客戶（同一個月的幾行合起來）應收淨額和實收＋調整對不上，匯入後會標紅，可以在收款登記裡改。</p>` : '<p>每一位客戶都對得上（同一個月的幾行合起來算）。</p>'), fields: [], submit: '匯入' });
+    if (!v) return;
+    R.rows = R.rows.filter((r) => !ms.has(r.ym)).concat(res.rows.map((r) => ({ ...r, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7), src: 'xls' })));
+    S.recvYm = res.months[res.months.length - 1];
+    await saveRecv(true);
+    toast(`已匯入 ${nf0.format(res.rows.length)} 筆應收帳款，已加密保存`);
+    go('recv');
+  }
+  const recvCtx = () => ({ S, E: S.E, $, $$, esc, fmt, nf0, ymLabel, Charts, table, go, downloadCsv, saveRecv, importRecv, custList, custByCode: () => { custList(); return S.E ? S.E._custByCode : new Map(); } });
+
   function downloadCsv(name, header, rows) {
     const q = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
     const text = '﻿' + [header, ...rows].map((r) => r.map(q).join(',')).join('\r\n');

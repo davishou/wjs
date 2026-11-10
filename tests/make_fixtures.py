@@ -325,6 +325,55 @@ def make_raw_add(fx):
     print(f"加入新資料用的 JMSSAL／JMSSBK: {len(add)} 筆出貨、{len(bk_add)} 筆退貨（作廢 {info['gone']}、改業務員 {info['rep_changed']}）")
 
 
+def recv_expect():
+    """應收帳款假資料的期望值：每位客戶每月 應收 = 那個月（依實際日期）的出貨金額，退貨 = 退貨金額，折讓 6%，實收 = 應收淨額去掉尾數（百位以下）。
+    故意讓 3A11 在 114/10 的實收少 10 元（對不上），7K02 在 114/11 的應收多打 500（和銷售資料不同）。"""
+    sal, bk = raw_rows()
+    out = []
+    for ym in (11409, 11410, 11411):
+        for code, name in RAW_CUSTS:
+            s = round(sum(r['SALEGET'] for r in sal if r['ID'] == code and int(r['DELIVDATE']) // 100 == ym))
+            rt = round(sum(r['SALEGET'] for r in bk if r['ID'] == code and int(r['DELIVDATE']) // 100 == ym))
+            if not s: continue
+            ar = s + (500 if (code, ym) == ('7K02', 11411) else 0)
+            disc = round((ar - rt) * 0.06)
+            due = ar - rt - disc
+            paid = due // 100 * 100
+            tail = due - paid                       # 尾數放在「其他」
+            if (code, ym) == ('3A11', 11410): paid -= 10   # 故意對不上
+            if (code, ym) == ('5X03', 11409):   # 分兩次付：第二行代號寫「-------」（續行），兩行合起來才對得上
+                out.append(dict(ym=ym, code=code, name=name, ar=ar, ret=rt, disc=disc, other=tail, paid=paid - 1000))
+                out.append(dict(ym=ym, code=code, name=name, ar=0, ret=0, disc=0, other=0, paid=1000, cont=True))
+                continue
+            out.append(dict(ym=ym, code=code, name=name, ar=ar, ret=rt, disc=disc, other=tail, paid=paid))
+    return out
+
+
+def make_recv(fx):
+    """照使用者的「客戶應收帳款明細表」排版：每月一張，左邊一塊（新竹）、右邊並排一塊（中部，從 AG 欄開始），標題＋表頭＋客戶列＋總計。"""
+    from openpyxl import Workbook
+    rows = recv_expect()
+    wb = Workbook(); wb.remove(wb.active)
+    heads = ['代號', '客戶名稱', '應收帳款', '退貨金額', '補價金額', '折率金額', '稅金', '其他', '實收金額', '備註', '', '前先入(+)', '前溢入(+)', '溢入(-)', '保留(+)', '不足(+)', '多入(-)', '運金(+)']
+    for ym in (11409, 11410, 11411):
+        ws = wb.create_sheet(f'{ym % 100}月')
+        for off, region, rep, codes in ((1, '新竹', '22', ('2T06', '5X03')), (33, '中部', '21', ('3A11', '7K02'))):
+            ws.cell(1, off, f'{ym // 100}    年  {ym % 100:02d} 月       客戶應收帳款明細表      {region}      地區 / 業務員: {rep}')
+            for i, h in enumerate(heads): ws.cell(3, off + i, h)
+            r = 4
+            for x in rows:
+                if x['ym'] != ym or x['code'] not in codes: continue
+                vals = ['-------' if x.get('cont') else x['code'], '' if x.get('cont') else x['name'], x['ar'] or None, x['ret'] or None, None, x['disc'] or None, None, x['other'] or None, x['paid'], '前不足$10' if x['code'] == '3A11' else ('第二次付款' if x.get('cont') else None)]
+                for i, val in enumerate(vals): ws.cell(r, off + i, val)
+                r += 1
+            ws.cell(r, off, '9Z99'); ws.cell(r, off + 1, '空白樣板列')  # 只有代號、沒有金額的列要略過
+            ws.cell(r + 2, off, '總計')
+            ws.cell(r + 3, off, '-------')
+    path = os.path.join(fx, 'recv.xlsx'); wb.save(path)
+    encrypt_agile(path, os.path.join(fx, 'recv_enc.xlsx'), 'ar123', spin=1000)
+    print(f'應收帳款明細表（recv.xlsx、有密碼 ar123 的 recv_enc.xlsx）: {len(rows)} 筆')
+
+
 def make_dated_master(path):
     """總表更新工具加上實際日期欄之後的總表：中文表頭，原始進貨表最後有「實際出貨日期」、原始退貨表有「實際退貨日期」。內容和 raw_rows() 一樣。"""
     sal, bk = raw_rows()
@@ -349,6 +398,7 @@ if __name__ == '__main__':
     os.makedirs(os.path.join(FX, 'add'), exist_ok=True)
     make_raw_add(FX)
     make_dated_master(p('master_dated.xlsx'))
+    make_recv(FX)
     encrypt_agile(p('class.xlsx'), p('class_agile.xlsx'), AGILE_PW)
     encrypt_agile(p('month.xlsx'), p('month_agile.xlsx'), AGILE_PW)
     encrypt_agile(p('plain.xlsx'), p('agile.xlsx'), AGILE_PW)
