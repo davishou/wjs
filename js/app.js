@@ -189,7 +189,8 @@
     try { d = await runWorker({ type: 'recvBook', file, password: pw }, []); } catch (err) { worker && worker.terminate(); worker = null; toast('讀取失敗：' + err.message, 6000); return; }
     const res = d.recv;
     if (!res.rows.length) { toast('這個 Excel 裡找不到「客戶應收帳款明細表」的資料（要有「代號」「應收帳款」「實收金額」等表頭）', 7000); return; }
-    S.meta = S.meta || {}; if (!S.meta.recv) S.meta.recv = { v: 1, rows: [] };
+    S.meta = S.meta || {}; if (!S.meta.recv) S.meta.recv = { v: 2, rows: [] };
+    res.rows.forEach(Recv.normRow); // Excel 的 7 個調整欄 → 一行一行的調整
     const R = S.meta.recv, ms = new Set(res.months);
     const had = R.rows.filter((r) => ms.has(r.ym)).length;
     const bad = [...Recv.groupDiffs(res.rows).values()].filter((d) => Math.abs(d) >= 0.5).length; // 同一位客戶同月的幾行合起來算
