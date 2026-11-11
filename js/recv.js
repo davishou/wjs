@@ -40,6 +40,8 @@
   const gkey = (r) => r.ym + '|' + r.code;
   function groupDiffs(rows) { const m = new Map(); rows.forEach((r) => m.set(gkey(r), r2((m.get(gkey(r)) || 0) + calc(r).diff))); return m; }
   const isBad = (r, gd) => Math.abs(calc(r).diff) >= 0.5 && Math.abs(gd.get(gkey(r)) || 0) >= 0.5;
+  // 詳細（現金、支票）：不填沒關係；填了，合計就要等於實收（2026-11-11 第三次，使用者要求）
+  const payBad = (r) => !!hasPay(r) && Math.abs(payTotal(r) - v(r, 'paid')) >= 0.5;
   // 折率：'6+1' → [6, 1]
   const parsePct = (t) => String(t || '').replace(/%/g, '').split(/[+＋,，、]/).map((x) => parseFloat(x)).filter((x) => Number.isFinite(x) && x > 0).slice(0, 2);
   // 實際的折讓金額（不先四捨五入）
@@ -56,8 +58,25 @@
     return d === Math.floor(t + 1e-9) || d === Math.ceil(t - 1e-9) || Math.abs(d - t) < 0.005;
   }
   function applyPct(r) { const x = discExact(r); if (!x) return; r.disc = Math.round(x.total); delete r.discParts; }
-  const items = () => { const S = root.__app; S.meta = S.meta || {}; const m = S.meta.recvItems || (S.meta.recvItems = []); return ADJ.map((x) => x[1]).concat(m.filter((k) => !ADJ.some((x) => x[1] === k))); };
-  const addItem = (k) => { const S = root.__app; S.meta = S.meta || {}; const m = S.meta.recvItems || (S.meta.recvItems = []); if (k && !items().includes(k)) m.push(k); };
+  // 調整項目清單：⊕（加的）、⊖（減的）分開，使用者可以自己增刪（2026-11-11 第三次）。存在 S.meta.recvItemSets = { plus: [], minus: [] }
+  // 第一次：預設照原本 Excel 的正負號分（前先入、前溢入、保留、不足、運金 → 加；溢入、多入 → 減）；之前自己打的新項目，用過減的放減、其他放加。
+  function itemLists() {
+    const S = root.__app; S.meta = S.meta || {};
+    let L = S.meta.recvItemSets;
+    if (!L || !Array.isArray(L.plus) || !Array.isArray(L.minus)) {
+      L = S.meta.recvItemSets = { plus: ADJ.filter((x) => x[2] === '+').map((x) => x[1]), minus: ADJ.filter((x) => x[2] !== '+').map((x) => x[1]) };
+      (S.meta.recvItems || []).forEach((k) => {
+        if (L.plus.includes(k) || L.minus.includes(k)) return;
+        const neg = store().rows.some((r) => (r.adj || []).some((a) => a.k === k && a.s < 0));
+        (neg ? L.minus : L.plus).push(k);
+      });
+      delete S.meta.recvItems;
+    }
+    return L;
+  }
+  const itemsOf = (sg) => itemLists()[sg < 0 ? 'minus' : 'plus'];
+  const addItem = (sg, k) => { const l = itemsOf(sg); if (k && !l.includes(k)) l.push(k); };
+  const allItems = () => [...new Set(itemLists().plus.concat(itemLists().minus))];
   const rates = () => { const S = root.__app; S.meta = S.meta || {}; return S.meta.recvRates || (S.meta.recvRates = {}); };
   // 支票＋現金
   const hasPay = (r) => (r.checks && r.checks.length) || r.cash;
@@ -137,15 +156,16 @@
       ${cards ? `<div class="panel rc-cards-panel"><div class="rc-cards" id="rcList">${rows.map((r) => cardHtml(r, ctx, gd, r.id === S.recvOpen)).join('') || `<p class="empty">${ymLabel(ym)} 還沒有登記。上面輸入客戶加入，或匯入原本的應收帳款 Excel。</p>`}</div>
         <p class="hint">點一位客戶打開來填。應收淨額 = 應收 − 退貨 − 補價 − 折讓 + 稅金 − 尾數；要等於 實收 + 調整（⊕ 加、⊖ 減）。黃色 = 和銷售資料的出貨、退貨不一樣。</p></div>` :
       `<div class="panel"><div class="table-wrap recv-wrap" id="rcList"><table class="dt recv-t"><thead><tr>
-        <th class="stick">代號</th><th class="stick2">客戶</th>${MAIN.map(([k, l]) => (k === 'disc' ? '<th class="n pct">折率%<small>如 6+1</small></th>' : '') + `<th class="n">${l}${k === 'disc' ? '<small>可自己打</small>' : ''}</th>` + (k === 'paid' ? '<th class="det">詳細<small>現金、支票</small></th>' : '')).join('')}
-        <th class="adj-h">調整<small>⊕ 加　⊖ 減，可加好幾行</small></th>
-        <th class="n">應收淨額<small>自動</small></th><th>檢查</th><th>備註</th><th></th></tr></thead>
+        <th class="stick">代號</th><th class="stick2">客戶</th>${MAIN.map(([k, l]) => (k === 'disc' ? '<th class="n pct">折率%</th>' : '') + `<th class="n c-${k}">${l}</th>` + (k === 'paid' ? '<th class="det">詳細</th>' : '')).join('')}
+        <th class="adj-h">調整 <button type="button" class="it-btn" data-items title="增刪 ⊕／⊖ 的項目">⚙ 項目</button></th>
+        <th class="n due">應收淨額</th><th class="note">備註</th><th></th></tr></thead>
         <tbody>${rows.map((r) => rowHtml(r, ctx, gd)).join('') || `<tr><td colspan="24" class="empty">${ymLabel(ym)} 還沒有登記。上面輸入客戶加入，或匯入原本的應收帳款 Excel。</td></tr>`}</tbody></table></div>
-        <p class="hint">應收淨額 = 應收 − 退貨 − 補價 − 折讓 + 稅金 − 尾數；對得上 = 應收淨額 等於 實收 + 調整（⊕ 加、⊖ 減）。「折率%」填 6 或 6+1，折讓會自動算，也可以自己打：下面小字是實際金額（算到小數第二位），去掉小數或進位都算對。「詳細」可以記現金、支票，不一定要填。黃色的格子 = 和銷售資料的出貨、退貨不一樣。代號「↳ 同上」= 同一位客戶的第二行，幾行加起來對得上就算對。</p></div>`}
+        <p class="hint">應收淨額 = 應收 − 退貨 − 補價 − 折讓 + 稅金 − 尾數；對得上 = 應收淨額 等於 實收 + 調整（⊕ 加、⊖ 減）。「折率%」填 6 或 6+1，折讓會自動算，也可以自己打：下面小字是實際金額（算到小數第二位），去掉小數或進位都算對。「詳細」記現金、支票：不填沒關係，填了現金＋支票的合計就要和實收一樣。黃色的格子 = 和銷售資料的出貨、退貨不一樣。代號「↳ 同上」= 同一位客戶的第二行，幾行加起來對得上就算對。</p></div>`}
       <div id="rcPanels">
+      <div class="panel" id="rcItems" hidden></div>
       <div class="panel" id="rcPay" hidden></div>
       <div class="panel" id="rcHist" hidden></div></div>
-      <datalist id="rcItemList">${items().map((k) => `<option value="${esc(k)}">`).join('')}</datalist>`;
+      `;
     drawSum(ctx, rows);
     const save = () => ctx.saveRecv();
     $('#rcYm').onchange = (e) => { S.recvYm = +e.target.value; renderEntry(ctx); };
@@ -160,7 +180,7 @@
       return custs.find((c) => c.code === code) || custs.find((c) => (c.code + ' ' + c.name) === t) || { code, name: t.slice(code.length).trim(), region: '', rep: '' };
     };
     $('#rcNew').oninput = () => { const c = pick(); if (c && custs.some((x) => x.code === c.code)) showHist(ctx, c.code, c.name); };
-    const park = () => { const home = $('#rcPanels'); ['#rcPay', '#rcHist'].forEach((q) => { const n = $(q); if (n && n.parentNode !== home) { n.hidden = true; home.appendChild(n); } }); };
+    const park = () => { const home = $('#rcPanels'); ['#rcPay', '#rcHist', '#rcItems'].forEach((q) => { const n = $(q); if (n && n.parentNode !== home) { n.hidden = true; home.appendChild(n); } }); };
     // 卡片：點開一位客戶（同時只開一張）
     const openCard = (id) => {
       park();
@@ -209,7 +229,7 @@
       R.rows.filter((x) => x.ym === ym && x.code === r.code).forEach((x) => {
         const n = el.querySelector(`[data-id="${x.id}"]`); if (!n) return;
         if (n.classList.contains('rc-card') && !n.classList.contains('open')) { n.outerHTML = cardHtml(x, ctx, gd, false); return; }
-        n.classList.toggle(n.tagName === 'TR' ? 'bad-row' : 'bad', isBad(x, gd));
+        n.classList.toggle(n.tagName === 'TR' ? 'bad-row' : 'bad', isBad(x, gd) || payBad(x));
         n.querySelectorAll('[data-k]').forEach((i) => { if (i !== ae) i.value = valOf(x, i.dataset.k); });
         const di = n.querySelector('input[data-k="disc"]');
         if (di) {
@@ -221,12 +241,19 @@
         const ab = n.querySelector('.adj-box');
         if (ab && (full || x !== r)) ab.innerHTML = adjBox(x, ctx);
         else if (ab) { const t = ab.querySelector('.adj-foot'); const tmp = document.createElement('div'); tmp.innerHTML = adjBox(x, ctx); t.replaceWith(tmp.querySelector('.adj-foot')); }
-        const pb = n.querySelector('[data-pay]'); if (pb) { pb.textContent = payLabel(x); pb.classList.toggle('on', !!hasPay(x)); }
-        if (n.tagName === 'TR') { n.querySelector('.due').textContent = ctx.fmt.money(calc(x).due); n.querySelector('.chk').innerHTML = chkHtml(x, gd, ctx); }
+        const pb = n.querySelector('[data-pay]'); if (pb) { pb.textContent = payLabel(x); pb.classList.toggle('on', !!hasPay(x)); pb.classList.toggle('bad', payBad(x)); }
+        if (n.tagName === 'TR') { n.querySelector('.due-n').textContent = ctx.fmt.money(calc(x).due); n.querySelector('.chk').innerHTML = chkHtml(x, gd, ctx); }
         else { n.querySelector('.rc-head').innerHTML = cardHead(x, ctx, gd); n.querySelector('.rc-live').innerHTML = cardLive(x, ctx, gd); }
       });
       drawSum(ctx, rows); save();
       window.__recv = { ym, rows: rows.map((x) => ({ code: x.code, ...calc(x), group: gd.get(gkey(x)) })) };
+    };
+    // 增刪項目後，所有調整的下拉重畫
+    const redrawAdj = () => el.querySelectorAll('[data-id]').forEach((n) => { const x = R.rows.find((y) => y.id === n.dataset.id); const ab = n.querySelector('.adj-box'); if (x && ab) ab.innerHTML = adjBox(x, ctx); });
+    const openItems = (from) => {
+      showItems(ctx, redrawAdj);
+      const card = from && from.closest('.rc-card'); const slot = card && card.querySelector('.rc-slot');
+      if (slot) { slot.appendChild($('#rcItems')); $('#rcItems').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
     };
     // 編輯（表格的一列或一張卡片都有 data-id）
     const list = $('#rcList');
@@ -241,11 +268,11 @@
         const line = r.adj[+ai.closest('.adj-line').dataset.i]; if (!line) return;
         const f = ai.dataset.a;
         if (f === 'k') {
+          if (ai.value === '__edit') { ai.value = line.k || ''; openItems(ai); return; }
           if (ai.value === '__new') {
             const name = (prompt('新項目的名稱（例如：代墊運費）') || '').trim();
             if (!name) { ai.value = line.k || ''; return; }
-            line.k = name; addItem(name);
-            const dl = $('#rcItemList'); if (dl) dl.innerHTML = items().map((k) => `<option value="${esc(k)}">`).join('');
+            line.k = name; addItem(line.s, name);
             refresh(r, true); return;
           }
           line.k = ai.value;
@@ -273,6 +300,7 @@
     list.addEventListener('click', (e) => {
       if (e.target.closest('[data-open]')) { const n = e.target.closest('.rc-card'); openCard(n.classList.contains('open') ? null : n.dataset.id); return; }
       if (e.target.closest('[data-close]')) { openCard(null); return; }
+      const ib = e.target.closest('[data-items]'); if (ib) { openItems(ib); return; }
       // 調整：⊕／⊖ 加一行、切換加減、刪一行
       const aa = e.target.closest('[data-aadd]');
       if (aa) {
@@ -308,18 +336,19 @@
   }
   const chkHtml = (r, gd, ctx) => {
     const c = calc(r), gdiff = gd ? gd.get(gkey(r)) || 0 : c.diff;
-    return Math.abs(c.diff) < 0.5 ? '<span class="ok">✓ 對得上</span>' : Math.abs(gdiff) < 0.5 ? '<span class="ok" title="這位客戶這個月的幾行加起來對得上">✓ 合計對得上</span>' : `<span class="bad">差 ${ctx.fmt.money(gdiff)}</span>`;
+    return (Math.abs(c.diff) < 0.5 ? '<span class="ok">✓ 對得上</span>' : Math.abs(gdiff) < 0.5 ? '<span class="ok" title="這位客戶這個月的幾行加起來對得上">✓ 合計對得上</span>' : `<span class="bad">差 ${ctx.fmt.money(gdiff)}</span>`) +
+      (payBad(r) ? `<span class="bad pay-bad" title="現金＋支票 ${ctx.fmt.money(payTotal(r))}，實收 ${ctx.fmt.money(v(r, 'paid'))}">詳細≠實收</span>` : '');
   };
   const adjTxt = (a, ctx) => `${a.s < 0 ? '−' : '+'} ${ctx.esc(a.k || '（沒選項目）')} ${ctx.fmt.money(+a.amt || 0)}${a.note ? `（${ctx.esc(a.note)}）` : ''}`;
   // 調整：一行一行（⊕／⊖、項目、金額、詳細），下面 ⊕ ⊖ 加一行、合計
   function adjBox(r, ctx) {
     const { esc, fmt } = ctx;
     const list = r.adj || [];
-    const opts = (k) => `<option value="" ${!k ? 'selected' : ''} disabled>選項目</option>` + items().concat(k && !items().includes(k) ? [k] : []).map((x) => `<option ${x === k ? 'selected' : ''}>${esc(x)}</option>`).join('') + '<option value="__new">＋ 新項目…</option>';
+    const opts = (sg, k) => { const l = itemsOf(sg); return `<option value="" ${!k ? 'selected' : ''} disabled>選項目</option>` + l.concat(k && !l.includes(k) ? [k] : []).map((x) => `<option ${x === k ? 'selected' : ''}>${esc(x)}</option>`).join('') + `<option value="__new">＋ 新項目…</option><option value="__edit">⚙ 增刪${sg < 0 ? '減' : '加'}的項目…</option>`; };
     const tot = adjSum(r);
     return list.map((a, i) => `<div class="adj-line ${a.s < 0 ? 'neg' : 'pos'}" data-i="${i}">
         <button type="button" class="sgn ${a.s < 0 ? 'minus' : 'plus'}" data-sg title="按一下切換 加／減">${a.s < 0 ? '−' : '+'}</button>
-        <select data-a="k">${opts(a.k)}</select>
+        <select data-a="k">${opts(a.s, a.k)}</select>
         <input data-a="amt" inputmode="decimal" value="${a.amt ? a.amt : ''}" placeholder="金額" autocomplete="off">
         <input data-a="note" value="${esc(a.note || '')}" placeholder="${a.k === '保留' ? '原因（下個月會提醒）' : '詳細'}" autocomplete="off">
         <button type="button" class="icon-btn" data-adel title="刪掉這一行">✕</button></div>`).join('') +
@@ -335,20 +364,20 @@
     const inp = (k) => {
       const warn = (k === 'ar' && offA) || (k === 'ret' && offR) || (k === 'disc' && !discOk(r));
       const tip = k === 'ar' && offA ? `銷售資料這個月出貨 ${fmt.money(s.sales)}` : k === 'ret' && offR ? `銷售資料這個月退貨 ${fmt.money(s.returns)}` : '';
-      const cell = `<td class="n ${warn ? (k === 'disc' ? 'bad-cell' : 'warn-cell') : ''}" ${tip ? `title="${esc(tip)}"` : ''}><input data-k="${k}" inputmode="decimal" value="${r[k] ? r[k] : ''}">` +
+      const cell = `<td class="n c-${k} ${warn ? (k === 'disc' ? 'bad-cell' : 'warn-cell') : ''}" ${tip ? `title="${esc(tip)}"` : ''}><input data-k="${k}" inputmode="decimal" value="${r[k] ? r[k] : ''}">` +
         (k === 'disc' ? discNote(r, ctx) : '') + '</td>';
       return (k === 'disc' ? `<td class="n pct"><input data-k="pct" value="${esc(r.pct || '')}" placeholder="%"></td>` : '') + cell +
-        (k === 'paid' ? `<td class="det"><button class="pay-btn ${hasPay(r) ? 'on' : ''}" data-pay title="記下現金、支票（不一定要填）">${payLabel(r)}</button></td>` : '');
+        (k === 'paid' ? `<td class="det"><button class="pay-btn ${hasPay(r) ? 'on' : ''} ${payBad(r) ? 'bad' : ''}" data-pay title="記下現金、支票（不填沒關係；填了合計要等於實收）">${payLabel(r)}</button></td>` : '');
     };
-    const bad = isBad(r, gd);
+    const bad = isBad(r, gd) || payBad(r);
     return `<tr data-id="${r.id}" class="${bad ? 'bad-row' : ''} ${r.cont ? 'cont' : ''}"><td class="stick">${r.cont ? '<span class="muted">↳ 同上</span>' : esc(r.code)}</td><td class="stick2 lbl">${esc(r.name)}<small>${esc([r.region, r.rep && '業務 ' + r.rep].filter(Boolean).join('・'))}</small>${r.cont ? '' : holdTag(r, ctx)}</td>` +
       MAIN.map(([k]) => inp(k)).join('') +
       `<td class="adj-cell"><div class="adj-box">${adjBox(r, ctx)}</div></td>` +
-      `<td class="n due">${fmt.money(c.due)}</td><td class="chk">${chkHtml(r, gd, ctx)}</td>` +
+      `<td class="n due"><b class="due-n">${fmt.money(c.due)}</b><div class="chk">${chkHtml(r, gd, ctx)}</div></td>` +
       `<td class="note"><input data-k="note" value="${esc(r.note || '')}" placeholder="${adjOf(r, '保留') ? '寫保留的原因，下個月會提醒' : '特殊狀況寫這裡'}"></td><td><button class="icon-btn" data-del title="刪除這一筆">✕</button></td></tr>`;
   }
 
-  const payLabel = (r) => (hasPay(r) ? `詳細 ✓` : '詳細');
+  const payLabel = (r) => (payBad(r) ? '詳細 ≠' : hasPay(r) ? '詳細 ✓' : '詳細');
   const valOf = (r, k) => (k === 'pct' ? r.pct || '' : k === 'note' ? r.note || '' : r[k] ? r[k] : '');
   // 這位客戶上次登記有保留 → 這個月要算（表格的客戶名下面、卡片上都標出來，滑過去看備註）
   function holdTag(r, ctx) {
@@ -379,7 +408,7 @@
     const blank = !v(r, 'paid') && !(r.adj || []).length;
     return `<span class="rh-who"><b>${r.cont ? '↳ 同上' : esc(r.code)}</b> ${esc(r.name)}<small>${esc([r.region, r.rep && '業務 ' + r.rep].filter(Boolean).join('・'))}</small></span>
       <span class="rh-amt"><small>應收淨額</small>${fmt.money(c.due)}</span>
-      <span class="rh-st">${ok ? '<span class="ok">✓ 對得上</span>' : blank ? '<span class="todo">還沒填實收</span>' : `<span class="bad">差 ${fmt.money(gdiff)}</span>`}
+      <span class="rh-st">${ok ? '<span class="ok">✓ 對得上</span>' : blank ? '<span class="todo">還沒填實收</span>' : `<span class="bad">差 ${fmt.money(gdiff)}</span>`}${payBad(r) ? '<span class="bad">詳細≠實收</span>' : ''}
         ${r.cont ? '' : holdTag(r, ctx)}${adjOf(r, '保留') ? `<span class="hold-tag now">本月保留 ${fmt.money(adjOf(r, '保留'))}・下個月要算</span>` : ''}</span>
       ${r.note ? `<span class="rh-note">備註：${esc(r.note)}</span>` : ''}`;
   }
@@ -392,7 +421,7 @@
   function cardHtml(r, ctx, gd, open) {
     const { esc, fmt } = ctx;
     const c = calc(r), gdiff = gd.get(gkey(r)) || 0;
-    const bad = Math.abs(c.diff) >= 0.5 && Math.abs(gdiff) >= 0.5 && (v(r, 'paid') || (r.adj || []).length);
+    const bad = (Math.abs(c.diff) >= 0.5 && Math.abs(gdiff) >= 0.5 && (v(r, 'paid') || (r.adj || []).length)) || payBad(r);
     const head = `<button type="button" class="rc-head" data-open aria-expanded="${open ? 'true' : 'false'}">${cardHead(r, ctx, gd)}</button>`;
     if (!open) return `<div class="rc-card ${bad ? 'bad' : ''}" data-id="${r.id}">${head}</div>`;
     const s = salesOf(ctx, r.code, r.ym);
@@ -405,8 +434,8 @@
     const nAdj = (r.adj || []).length;
     return `<div class="rc-card open ${bad ? 'bad' : ''}" data-id="${r.id}">${head}<div class="rc-body">
       <div class="rc-sec"><h4>應收</h4><div class="rc-grid">${CARD_MAIN.map(([k, l]) => field(k, l)).join('')}</div></div>
-      <div class="rc-sec"><h4>實收</h4><div class="rc-grid">${field('paid', '實收金額')}<div class="rc-f"><span>現金、支票</span><button type="button" class="btn pay-btn2 ${hasPay(r) ? 'on' : ''}" data-pay>${payLabel(r)}</button><small>只是記錄，不一定要填</small></div></div></div>
-      <div class="rc-sec"><h4>調整 <small class="muted">${nAdj ? '' : '不足、溢入、保留…沒有就不用加'}</small></h4><div class="adj-box">${adjBox(r, ctx)}</div></div>
+      <div class="rc-sec"><h4>實收</h4><div class="rc-grid">${field('paid', '實收金額')}<div class="rc-f"><span>現金、支票</span><button type="button" class="btn pay-btn2 ${hasPay(r) ? 'on' : ''}" data-pay>${payLabel(r)}</button><small>不填沒關係；填了合計要等於實收</small></div></div></div>
+      <div class="rc-sec"><h4>調整 <small class="muted">${nAdj ? '' : '沒有就不用加'}</small> <button type="button" class="it-btn" data-items>⚙ 項目</button></h4><div class="adj-box">${adjBox(r, ctx)}</div></div>
       <div class="rc-sec"><label class="rc-f wide"><span>備註</span><textarea data-k="note" rows="2" placeholder="${adjOf(r, '保留') ? '寫保留的原因，下個月會提醒' : '特殊狀況寫這裡'}">${esc(r.note || '')}</textarea></label></div>
       <div class="rc-live">${cardLive(r, ctx, gd)}</div>
       <div class="rc-acts"><button type="button" class="btn" data-hist>前幾個月</button><button type="button" class="btn danger" data-del>刪除</button><span class="grow"></span><button type="button" class="btn primary" data-close>填好了，收起</button></div>
@@ -418,6 +447,7 @@
     const gd = groupDiffs(rows);
     const t = rows.reduce((a, r) => { const c = calc(r); a.due += c.due; a.paid += v(r, 'paid'); a.adj += c.adj; a.disc += v(r, 'disc'); return a; }, { due: 0, paid: 0, adj: 0, disc: 0 });
     t.bad = [...gd.values()].filter((d) => Math.abs(d) >= 0.5).length;
+    t.pay = rows.filter(payBad).length;
     // 調整依項目加總（上面的總數自動加總）
     const by = new Map(); rows.forEach((r) => (r.adj || []).forEach((a) => { const k = a.k || '（沒選項目）'; by.set(k, (by.get(k) || 0) + (a.s < 0 ? -1 : 1) * (+a.amt || 0)); }));
     const byTxt = [...by].filter(([, x]) => Math.abs(x) >= 0.5).map(([k, x]) => `${ctx.esc(k)} ${x > 0 ? '+' : ''}${fmt.money(x)}`).join('、');
@@ -427,10 +457,10 @@
       <div class="kpi"><div class="k">實收合計</div><div class="v">${fmt.money(t.paid)}</div></div>
       <div class="kpi"><div class="k">調整合計</div><div class="v">${t.adj > 0 ? '+' : ''}${fmt.money(t.adj)}</div><div class="d adj-by">${byTxt || '沒有調整'}</div></div>
       <div class="kpi"><div class="k">折讓合計</div><div class="v">${fmt.money(t.disc)}</div></div>
-      <div class="kpi ${t.bad ? 'alert' : ''}"><div class="k">對不上（客戶）</div><div class="v">${t.bad ? `<span class="bad">${nf0.format(t.bad)} 位</span>` : '<span class="ok">全部對得上</span>'}</div><div class="d">差額合計 ${fmt.money(t.due - t.paid - t.adj)}</div></div></div>`;
+      <div class="kpi ${t.bad || t.pay ? 'alert' : ''}"><div class="k">對不上（客戶）</div><div class="v">${t.bad ? `<span class="bad">${nf0.format(t.bad)} 位</span>` : '<span class="ok">全部對得上</span>'}</div><div class="d">差額合計 ${fmt.money(t.due - t.paid - t.adj)}${t.pay ? `<br><span class="bad">${t.pay} 筆「詳細」合計和實收不一樣</span>` : ''}</div></div></div>`;
   }
 
-  // 紅單下半部：支票（號碼、帳號、付款銀行、客票／本人票、到期日、金額）和現金。有填就自動算實收
+  // 紅單下半部：支票（號碼、帳號、付款銀行、客票／本人票、到期日、金額）和現金。不填沒關係，填了合計要等於實收
   const EM = () => root.EngineMeta;
   function parseDue(t) {
     const d = String(t || '').replace(/[^\d/\-.]/g, ''); if (!d) return 0;
@@ -447,7 +477,7 @@
       const tot = payTotal(r);
       el.hidden = false;
       el.innerHTML = `<div class="panel-head"><h2>${esc(r.code)} ${esc(r.name || '')}・${ymLabel(r.ym)} 詳細（現金、支票）</h2><button class="icon-btn" data-x title="關閉">✕</button></div>
-        <p class="hint">照紅單下半部記下現金和支票（不一定要填）。這裡只是記錄，不會改上面的「實收」，也不用和實收一樣。到期日可以打 115/12/05 或 1151205。</p>
+        <p class="hint">照紅單下半部記下現金和支票。<b>不填沒關係；填了，現金＋支票的合計就要和「實收」一樣</b>（不一樣會標紅）。這裡不會改上面的實收。到期日可以打 115/12/05 或 1151205。</p>
         <div class="row pay-cash"><label>現金 <input data-c="cash" inputmode="decimal" value="${r.cash || ''}"></label></div>
         <div class="table-wrap"><table class="dt pay-t"><thead><tr><th>支票號碼</th><th>帳號</th><th>付款銀行</th><th>客／本</th><th>到期日</th><th class="n">支票金額</th><th></th></tr></thead><tbody>
         ${r.checks.map((c, i) => `<tr data-i="${i}"><td><input data-f="no" value="${esc(c.no || '')}"></td><td><input data-f="acct" value="${esc(c.acct || '')}"></td><td><input data-f="bank" value="${esc(c.bank || '')}"></td>
@@ -455,7 +485,7 @@
           <td><input data-f="due" value="${c.due ? EM().dayLabel(c.due) : ''}" placeholder="115/12/05" class="${c.dueBad ? 'bad-in' : ''}"></td><td class="n"><input data-f="amt" inputmode="decimal" value="${c.amt || ''}"></td>
           <td><button class="icon-btn" data-cdel title="刪除這張支票">✕</button></td></tr>`).join('')}</tbody></table></div>
         <div class="row"><button class="btn" data-cadd>＋ 新增一張支票</button>
-          <span class="pay-sum">支票 ${r.checks.length} 張 ${fmt.money(r.checks.reduce((t, c) => t + (+c.amt || 0), 0))} ＋ 現金 ${fmt.money(+r.cash || 0)} ＝ <b>${fmt.money(tot)}</b>（實收 ${fmt.money(v(r, 'paid'))}）</span></div>`;
+          <span class="pay-sum">支票 ${r.checks.length} 張 ${fmt.money(r.checks.reduce((t, c) => t + (+c.amt || 0), 0))} ＋ 現金 ${fmt.money(+r.cash || 0)} ＝ <b>${fmt.money(tot)}</b>　${!hasPay(r) ? `<span class="muted">（還沒填）</span>` : payBad(r) ? `<span class="bad">≠ 實收 ${fmt.money(v(r, 'paid'))}，差 ${fmt.money(tot - v(r, 'paid'))}</span>` : `<span class="ok">✓ 和實收一樣</span>`}</span></div>`;
     };
     const sync = () => { refresh(r); draw(); };
     el.onclick = (e) => {
@@ -473,6 +503,31 @@
       else c[f] = t.value.trim();
       sync();
     };
+    draw();
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // 增刪調整項目：⊕ 加的、⊖ 減的兩邊分開。刪掉項目不會改到已經登記的那幾行
+  function showItems(ctx, done, card) {
+    const { $, esc } = ctx;
+    const el = $('#rcItems'); if (!el) return;
+    const draw = () => {
+      const L = itemLists();
+      const col = (key, sg, title) => `<div class="it-col ${key}"><h3><span class="sgn ${sg < 0 ? 'minus' : 'plus'}">${sg < 0 ? '−' : '+'}</span> ${title}</h3>
+        <div class="it-list">${L[key].map((k, i) => `<span class="it-chip">${esc(k)}<button type="button" class="icon-btn" data-idel="${key}:${i}" title="刪掉這個項目">✕</button></span>`).join('') || '<span class="muted">（沒有項目）</span>'}</div>
+        <div class="row it-add"><input data-inew="${key}" placeholder="新項目名稱" autocomplete="off"><button type="button" class="btn small" data-iadd="${key}">加入</button></div></div>`;
+      el.hidden = false;
+      el.innerHTML = `<div class="panel-head"><h2>增刪調整項目</h2><button class="icon-btn" data-x title="關閉">✕</button></div>
+        <p class="hint">按 ⊕ 時下拉只出現「加的項目」，按 ⊖ 時只出現「減的項目」。刪掉項目不會改到已經登記的資料。</p>
+        <div class="it-cols">${col('plus', 1, '加的項目（⊕）')}${col('minus', -1, '減的項目（⊖）')}</div>`;
+    };
+    const add = (key) => { const inp = el.querySelector(`[data-inew="${key}"]`); const k = inp.value.trim(); if (!k) return; const l = itemLists()[key]; if (!l.includes(k)) l.push(k); ctx.saveRecv(); draw(); done(); const n = el.querySelector(`[data-inew="${key}"]`); if (n) n.focus(); };
+    el.onclick = (e) => {
+      if (e.target.closest('[data-x]')) { el.hidden = true; return; }
+      const d = e.target.closest('[data-idel]'); if (d) { const [key, i] = d.dataset.idel.split(':'); itemLists()[key].splice(+i, 1); ctx.saveRecv(); draw(); done(); return; }
+      const a = e.target.closest('[data-iadd]'); if (a) add(a.dataset.iadd);
+    };
+    el.onkeydown = (e) => { const t = e.target.closest('[data-inew]'); if (t && e.key === 'Enter') { e.preventDefault(); add(t.dataset.inew); } };
     draw();
     el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
@@ -500,7 +555,8 @@
 
   function exportCsv(ctx, ym) {
     const rows = store().rows.filter((r) => r.ym === ym);
-    const names = items().filter((k) => rows.some((r) => (r.adj || []).some((a) => a.k === k)));
+    const used = [...new Set(rows.flatMap((r) => (r.adj || []).map((a) => a.k).filter(Boolean)))];
+    const names = allItems().filter((k) => used.includes(k)).concat(used.filter((k) => !allItems().includes(k)));
     const head = ['月份', '地區', '業務員', '代號', '客戶名稱', '折率%'].concat(MAIN.map((x) => x[1]), names, ['調整合計', '調整明細', '應收淨額', '差額', '備註', '現金', '支票張數', '支票明細']);
     ctx.downloadCsv(`應收帳款_${ym}`, head, rows.map((r) => { const c = calc(r); return [ctx.ymLabel(r.ym), r.region, r.rep, r.code, r.name, r.pct || ''].concat(NUMK.map((k) => v(r, k)), names.map((k) => adjOf(r, k)), [c.adj, (r.adj || []).map((a) => `${a.s < 0 ? '-' : '+'}${a.k} ${a.amt}${a.note ? ' ' + a.note : ''}`).join('；'), c.due, c.diff, r.note || '', +r.cash || 0, (r.checks || []).length,
       (r.checks || []).map((x) => [x.no, x.bank, x.kind === '本' ? '本人票' : '客票', x.due ? EM().dayLabel(x.due) : '', x.amt].join(' ')).join('；')]); }));

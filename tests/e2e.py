@@ -737,9 +737,13 @@ async def recv_flow(b):
     await pg.select_option('#rcPay tr[data-i="0"] select[data-f=kind]', '本'); await pg.wait_for_timeout(200)
     await pg.fill(f'#rcPay tr[data-i="0"] input[data-f=amt]', '123'); await pg.press(f'#rcPay tr[data-i="0"] input[data-f=amt]', 'Tab'); await pg.wait_for_timeout(200)
     rr = await pg.evaluate("(() => { const r = window.__app.meta.recv.rows.find(r => r.code === '3A11' && r.ym === 11410); return [r.paid, r.cash, r.checks.length, r.checks[0].kind, r.checks[0].due]; })()")
-    ok(rr[0] == paid2 and rr[1] == 400 and rr[2] == 1 and rr[3] == '本' and rr[4] == int(due.replace('/', '')) and await pg.locator('#recvBody tr.bad-row').count() == 0
-       and await pg.get_attribute('#recvBody tr:has-text("3A11") input[data-k=paid]', 'readonly') is None and '詳細' in await pg.text_content('#recvBody tr:has-text("3A11") [data-pay]'),
-       f'「詳細」記現金、支票，和實收不一樣也沒關係（實收不會被改、可以直接打）：{rr}')
+    ok(rr[0] == paid2 and rr[1] == 400 and await pg.locator('#recvBody tr:has-text("3A11").bad-row').count() == 1 and '詳細≠實收' in await pg.text_content('#recvBody tr:has-text("3A11")')
+       and '≠ 實收' in await pg.text_content('#rcPay') and '詳細」合計和實收不一樣' in await pg.text_content('#rcSum'),
+       f'「詳細」填了但現金＋支票（523）≠ 實收 → 標紅、上面也提醒；實收不會被改：{rr}')
+    await pg.fill(f'#rcPay tr[data-i="0"] input[data-f=amt]', str(paid2 - 400)); await pg.press(f'#rcPay tr[data-i="0"] input[data-f=amt]', 'Tab'); await pg.wait_for_timeout(200)
+    ok(await pg.locator('#recvBody tr.bad-row').count() == 0 and '和實收一樣' in await pg.text_content('#rcPay') and rr[2] == 1 and rr[3] == '本' and rr[4] == int(due.replace('/', ''))
+       and await pg.get_attribute('#recvBody tr:has-text("3A11") input[data-k=paid]', 'readonly') is None and '詳細 ✓' in await pg.text_content('#recvBody tr:has-text("3A11") [data-pay]'),
+       '現金＋支票合計 = 實收 → 不標紅（沒填的列也不會標紅）')
     await pg.screenshot(path=SH + '/43_recv_checks.png', full_page=True)
     # 折率打 6%、備註
     row = pg.locator('#recvBody tr:has-text("2T06")')
@@ -785,12 +789,31 @@ async def recv_flow(b):
     await pg.select_option(ln1 + ' select', '__new'); await pg.wait_for_timeout(400)
     await pg.fill(ln1 + ' input[data-a=amt]', '20'); await pg.press(ln1 + ' input[data-a=amt]', 'Tab'); await pg.wait_for_timeout(250)
     a2 = await pg.evaluate("window.__app.meta.recv.rows.find(r => r.code === '2T06' && r.ym === 11410).adj")
-    ok(len(a2) == 2 and a2[1]['k'] == '代墊運費' and a2[1]['s'] == -1 and a2[1]['amt'] == 20 and '代墊運費' in await pg.evaluate("window.__app.meta.recvItems"), f'⊖ 選「＋新項目」打「代墊運費」20 → 記成新項目 {a2[1]}')
-    ok('代墊運費' in await pg.text_content('#recvBody tr:has-text("3A11") .adj-box') or await pg.locator('#recvBody tr:has-text("3A11") .adj-line').count() == 0, '（別的客戶加調整時可以選到新項目）')
+    sets = await pg.evaluate("window.__app.meta.recvItemSets")
+    ok(len(a2) == 2 and a2[1]['k'] == '代墊運費' and a2[1]['s'] == -1 and a2[1]['amt'] == 20 and '代墊運費' in sets['minus'] and '代墊運費' not in sets['plus'], f'⊖ 選「＋新項目」打「代墊運費」20 → 記成「減的」新項目 {a2[1]}')
+    ok(sets['plus'] == ['前先入', '前溢入', '保留', '不足', '運金'] and sets['minus'] == ['溢入', '多入', '代墊運費'], f'預設項目：加的放 ⊕、減的放 ⊖ {sets}')
+    sel_txt = "(sg) => [...document.querySelectorAll('#recvBody tr')].find(t => t.textContent.includes('3A11')).querySelector(`.adj-line.${sg} select`).innerText"
     await pg.click('#recvBody tr:has-text("3A11") [data-aadd="1"]'); await pg.wait_for_timeout(200)
-    opts = await pg.evaluate("[...document.querySelectorAll('#recvBody tr')].find(t => t.textContent.includes('3A11')).querySelector('.adj-line select').innerText")
-    ok('代墊運費' in opts and '保留' in opts and '不足' in opts, '打過的新項目，下次在下拉選單裡選得到')
+    opts = await pg.evaluate(sel_txt, 'pos')
+    ok('保留' in opts and '不足' in opts and '溢入' not in opts.split('\n') and '多入' not in opts and '代墊運費' not in opts, '按 ⊕：下拉只有加的項目（沒有溢入、多入）')
     await pg.click('#recvBody tr:has-text("3A11") [data-adel]'); await pg.wait_for_timeout(200)
+    await pg.click('#recvBody tr:has-text("3A11") [data-aadd="-1"]'); await pg.wait_for_timeout(200)
+    opts = await pg.evaluate(sel_txt, 'neg')
+    ok('多入' in opts and '代墊運費' in opts and '保留' not in opts, '按 ⊖：下拉只有減的項目，打過的新項目選得到')
+    await pg.click('#recvBody tr:has-text("3A11") [data-adel]'); await pg.wait_for_timeout(200)
+    # 自己增刪項目
+    await pg.click('#recvBody thead [data-items]'); await pg.wait_for_selector('#rcItems:not([hidden])')
+    await pg.fill('#rcItems [data-inew=minus]', '退款'); await pg.press('#rcItems [data-inew=minus]', 'Enter'); await pg.wait_for_timeout(150)
+    i = await pg.evaluate("[...document.querySelectorAll('#rcItems .it-col.plus .it-chip')].findIndex(c => c.textContent.includes('運金'))")
+    await pg.click(f'#rcItems [data-idel="plus:{i}"]'); await pg.wait_for_timeout(200)
+    sets = await pg.evaluate("window.__app.meta.recvItemSets")
+    po = await pg.evaluate("[...document.querySelectorAll('#recvBody tr')].find(t => t.textContent.includes('2T06')).querySelector('.adj-line.pos select').innerText")
+    ok('退款' in sets['minus'] and '運金' not in sets['plus'] and '運金' not in po, f'⚙ 項目：減的加「退款」、加的刪「運金」→ 下拉跟著變 {sets}')
+    await pg.screenshot(path=SH + '/48_recv_items.png', full_page=True)
+    await pg.click('#rcItems [data-x]')
+    # 一般螢幕（1366 寬）一次看到整排
+    w = await pg.evaluate("(() => { const w = document.querySelector('.recv-wrap'); return [w.scrollWidth, w.clientWidth]; })()")
+    ok(w[0] <= w[1] + 1, f'1366 寬的螢幕：收款登記整排看得到，不用左右捲 {w}')
     ok('代墊運費 -20' in await pg.text_content('#rcSum') and '保留 +300' in await pg.text_content('#rcSum'), '上面的「調整合計」依項目自動加總：' + await pg.text_content('#rcSum .adj-by'))
     await pg.click(ln1 + ' [data-sg]'); await pg.wait_for_timeout(200)
     ok(await pg.evaluate("window.__app.meta.recv.rows.find(r => r.code === '2T06' && r.ym === 11410).adj[1].s") == 1, '按圈起來的 − → 變成 +')
