@@ -49,7 +49,7 @@
     rep: Object.assign({ sel: null, q: '' }, store.get('rep', {})),
     span: Object.assign({ p: 'r12', from: 0, to: 0 }, store.get('span', {})), // 業務、客戶、商品共用的期間（js/period.js）
     board: Object.assign({ opt: 'A', period: 'ytd', metric: 'net' }, store.get('board', {})),
-    view: 'overview',
+    view: 'home', app: store.get('app', 'sales') === 'ar' ? 'ar' : 'sales', // 目前在哪一個應用：sales 銷售分析、ar 應收實收帳款
     ref: store.get('ref', null),
     pivot: store.get('pivot', { src: 'all', rows: ['region'], col: 'year', measures: ['sales', 'returns', 'net', 'margin'], filters: {}, from: 0, to: 0, mode: 'agg' }),
     pvSort: null,
@@ -72,10 +72,24 @@
   }
 
   // ---------- 導覽 ----------
-  const VIEWS = ['overview', 'board', 'dashboard', 'compare', 'reps', 'customers', 'products', 'recv', 'recvA', 'report', 'pivot', 'data'];
+  const VIEWS = ['home', 'overview', 'board', 'dashboard', 'compare', 'reps', 'customers', 'products', 'recv', 'recvA', 'report', 'pivot', 'data'];
+  // 兩個「應用」分開（2026-11-11 使用者要求，像 Odoo 的首頁）：銷售分析（藍）、應收實收帳款（黃）。
+  // 首頁、資料與設定兩邊共用，沿用目前所在的應用；其他頁面決定是哪一個應用。左側選單只顯示目前應用的頁面。
+  const AR_VIEWS = ['recv', 'recvA'];
+  function setApp(app) {
+    S.app = app; store.set('app', app);
+    document.body.dataset.app = app;
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta && app === 'ar') meta.content = '#b88a00';
+    else if (meta) meta.content = { indigo: '#26437A', night: '#0E1726', market: '#13805F' }[document.documentElement.dataset.theme] || '#26437A';
+    document.title = app === 'ar' ? '應收實收帳款' : '銷售分析';
+  }
   function go(view) {
-    if (!VIEWS.includes(view)) view = 'overview';
-    if (!S.E && view !== 'data') view = 'data';
+    if (!VIEWS.includes(view)) view = 'home';
+    if (!S.E && view !== 'data') view = 'data'; // 還沒有資料：直接到資料與設定
+    if (AR_VIEWS.includes(view)) setApp('ar');
+    else if (view !== 'home' && view !== 'data') setApp('sales');
+    else setApp(S.app);
     S.view = view;
     document.body.dataset.view = view; // 每一頁有自己的顏色（繽紛風格）
     $$('.view').forEach((v) => { v.hidden = v.id !== 'view-' + view; });
@@ -85,6 +99,7 @@
     window.scrollTo(0, 0);
   }
   function renderView() {
+    if (S.view === 'home') { renderHome(); return; }
     if (!S.E) { renderData(); return; }
     (({ overview: renderToday, board: renderBoard, dashboard: renderDashboard, compare: renderCompare, reps: renderReps, report: renderReport, pivot: renderPivot, customers: renderCustomers, products: renderProducts, recv: () => Recv.renderEntry(recvCtx()), recvA: () => Recv.renderAnalysis(recvCtx()), data: renderData })[S.view] || renderToday)();
   }
@@ -188,6 +203,23 @@
     toast(`已匯入 ${nf0.format(res.rows.length)} 筆應收帳款，已加密保存`);
     go('recv');
   }
+  // ---------- 首頁（所有功能）----------
+  function renderHome() {
+    const has = !!S.E;
+    const pend = has ? Recv.holdReminders(recvCtx(), Infinity).filter((h) => !h.done) : [];
+    const R = S.meta && S.meta.recv ? S.meta.recv.rows : [];
+    const lastYm = R.length ? Math.max(...R.map((r) => r.ym)) : 0;
+    $('#homeSub').textContent = has ? (S.demo ? '目前看的是示範資料（假的）' : `銷售資料到 ${ymLabel(S.E.maxYm)}${lastYm ? `，應收帳款登記到 ${ymLabel(lastYm)}` : ''}`) : '還沒有載入資料，先到「資料與設定」匯入。';
+    const SALES = '<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="4" y="17" width="5" height="11" rx="1.5"/><rect x="11.5" y="10" width="5" height="18" rx="1.5"/><rect x="19" y="5" width="5" height="23" rx="1.5"/><path d="M26 21h3v7h-3z" opacity=".5"/></svg>';
+    const AR = '<svg viewBox="0 0 32 32" aria-hidden="true"><text x="16" y="25" text-anchor="middle" font-size="26" font-weight="800" font-family="Arial, sans-serif">$</text></svg>';
+    const GEAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3h-4l-.4 2.8a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.6 7.6 0 0 0 1.7 1L11 21h4l.4-2.8a7.6 7.6 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>';
+    $('#homeApps').innerHTML = `
+      <a class="app-tile sales" href="#overview" data-go="overview"><span class="app-ic">${SALES}</span><b>銷售分析</b><small>今月、比較、業務、客戶、商品、報告</small></a>
+      <a class="app-tile ar" href="#recv" data-go="recv"><span class="app-ic">${AR}</span><b>應收實收帳款</b><small>收款登記、應收分析、支票到期</small>${pend.length ? `<span class="app-badge" title="上個月有「保留」，這個月要算">${pend.length} 筆保留要算</span>` : ''}</a>
+      <a class="app-tile set" href="#data" data-go="data"><span class="app-ic">${GEAR}</span><b>資料與設定</b><small>匯入、資料包、密碼、介面風格</small></a>`;
+    $('#homeApps').onclick = (e) => { const a = e.target.closest('[data-go]'); if (!a) return; e.preventDefault(); if (a.dataset.go === 'recv') setApp('ar'); else if (a.dataset.go !== 'data') setApp('sales'); go(a.dataset.go); };
+  }
+
   const recvCtx = () => ({ S, E: S.E, $, $$, esc, fmt, nf0, ymLabel, Charts, table, go, downloadCsv, saveRecv, importRecv, custList, custByCode: () => { custList(); return S.E ? S.E._custByCode : new Map(); } });
 
   function downloadCsv(name, header, rows) {
@@ -1573,7 +1605,7 @@
     $('#demoStart').addEventListener('click', () => { startDemo().catch((e) => toast('示範資料載入失敗：' + e.message)); });
     $('#demoExit').addEventListener('click', exitDemo);
     $$('.tabs a').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); go(a.dataset.view); }));
-    window.addEventListener('hashchange', () => go(location.hash.slice(1) || 'overview'));
+    window.addEventListener('hashchange', () => go(location.hash.slice(1) || 'home'));
     // 視窗大小改變：圖跟著重畫
     const redrawOf = { board: () => window.__board, overview: () => window.__today, compare: () => window.__cmp, reps: () => window.__reps };
     let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => {
@@ -1582,7 +1614,7 @@
       if (S.view === 'dashboard') renderDashboard();
       if (S.view === 'report' && S.reportRedraw) S.reportRedraw();
     }, 200); });
-    const start = (location.hash.slice(1) || 'overview');
+    const start = (location.hash.slice(1) || 'home');
     try {
       if (await Dataset.Vault.exists()) await lockScreen('unlock');
       else {

@@ -790,3 +790,146 @@ small .up, small .down { font-size: 1.35em; }
 #rcPay .row { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 8px 0; }
 .pay-sum { color: var(--ink-2); }
 #raChecks .soon { color: var(--warn); }
+
+/* ============ 兩個應用分開（2026-11-11 使用者要求，像 Odoo 首頁）：銷售分析＝藍、應收實收帳款＝黃 ============ */
+/* 左側選單只顯示目前應用的頁面；「所有功能」回首頁；資料與設定兩邊都有 */
+body[data-app="sales"] .tab-group.g5 { display: none !important; }
+body[data-app="ar"] .tab-group.g1, body[data-app="ar"] .tab-group.g2, body[data-app="ar"] .tab-group.g3 { display: none !important; }
+.brand .mk-ar, .brand .nm-ar { display: none; }
+body[data-app="ar"] .brand .mk-ar, body[data-app="ar"] .brand .nm-ar { display: inline; }
+body[data-app="ar"] .brand .mk-sales, body[data-app="ar"] .brand .nm-sales { display: none; }
+.brand .mk-ar { fill: var(--ar-y); }
+[data-theme="indigo"] .tab-group.g0 { background: transparent; border-color: transparent; padding-top: 0; padding-bottom: 0; }
+/* 應收實收帳款：整條側欄變黃 */
+[data-theme="indigo"] body[data-app="ar"] .nav { background: linear-gradient(180deg, #fbe7a1 0%, #f6d465 40%, #efc23a 75%, #e2ad1c 100%); color: var(--ar-y-ink); }
+[data-theme="indigo"] body[data-app="ar"] .brand .mk-ar { fill: #fff; }
+[data-theme="indigo"] body[data-app="ar"] .tabs a:hover { background: rgba(255,255,255,.4); }
+[data-theme="indigo"] body[data-app="ar"] .tabs a.on { background: #fff; color: var(--ar-y-ink); }
+[data-theme="indigo"] body[data-app="ar"] .tab-group { border-color: rgba(61,46,0,.12); }
+[data-theme="indigo"] body[data-app="ar"] .tab-group.g5 { background: rgba(255,255,255,.35); border-color: rgba(61,46,0,.15); }
+[data-theme="indigo"] body[data-app="ar"] .tab-group.g4 { background: rgba(61,46,0,.07); }
+[data-theme="indigo"] body[data-app="ar"] .tg-label { color: var(--ar-y-ink); opacity: .75; }
+@media (max-width: 1180px) { [data-theme="indigo"] body[data-app="ar"] .tg-label { background: var(--ar-y-ink); opacity: .35; } }
+[data-theme="night"] body[data-app="ar"] .nav { border-bottom: 2px solid var(--ar-y); }
+[data-theme="market"] body[data-app="ar"] .nav { box-shadow: inset 0 0 0 2px var(--ar-y), var(--shadow); }
+[data-theme="night"] body[data-app="ar"] .tabs a[data-view^="recv"], [data-theme="market"] body[data-app="ar"] .tabs a[data-view^="recv"] { background: transparent; }
+[data-theme="market"] body[data-app="ar"] .tabs a.on { background: var(--ar-y); color: var(--ar-y-ink); }
+/* 應收實收帳款的頁面：按鈕、選取都改黃色調（夜航本來就是黃色，不用改） */
+[data-theme="indigo"] body[data-app="ar"] main, [data-theme="market"] body[data-app="ar"] main { --primary: #9a7000; --primary-soft: var(--ar-y-soft); }
+
+/* ---- 首頁：應用程式方塊 ---- */
+.home { max-width: 980px; margin: 0 auto; padding-top: 3vh; }
+.home-head { text-align: center; margin-bottom: 34px; }
+.apps { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 22px; }
+.app-tile { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; padding: 26px 16px 20px; text-decoration: none; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 18px; transition: transform .15s, box-shadow .15s; }
+.app-tile:hover { transform: translateY(-3px); box-shadow: 0 12px 28px -18px rgba(0,0,0,.45); }
+.app-tile b { font-size: 1.12rem; margin-top: 8px; }
+.app-tile small { color: var(--muted); font-size: .8rem; line-height: 1.45; }
+.app-ic { width: 84px; height: 84px; border-radius: 22px; display: grid; place-items: center; box-shadow: 0 6px 16px -10px rgba(0,0,0,.5); }
+.app-ic svg { width: 48px; height: 48px; }
+.app-tile.sales .app-ic { background: linear-gradient(145deg, #3A6AB0, #13284F); fill: #fff; }
+.app-tile.ar .app-ic { background: linear-gradient(145deg, #fbe08a, #e9b41f); fill: var(--ar-y-ink); }
+.app-tile.ar .app-ic svg { width: 56px; height: 56px; }
+.app-tile.set .app-ic { background: linear-gradient(145deg, #c9d0db, #8a95a8); fill: #fff; width: 64px; height: 64px; border-radius: 18px; margin: 10px 0; }
+.app-tile.set .app-ic svg { width: 34px; height: 34px; }
+.app-tile.sales { border-top: 4px solid #2C5596; }
+.app-tile.ar { border-top: 4px solid var(--ar-y); }
+.app-badge { position: absolute; top: 10px; right: 10px; background: var(--bad); color: #fff; font-size: .74rem; font-weight: 700; border-radius: 999px; padding: 2px 9px; }
+@media (max-width: 760px) {
+  .home { padding-top: 0; }
+  .home-head { margin-bottom: 18px; }
+  .apps { grid-template-columns: 1fr 1fr; gap: 12px; }
+  .app-tile { padding: 18px 10px 14px; border-radius: 16px; }
+  .app-ic { width: 66px; height: 66px; border-radius: 18px; }
+  .app-ic svg { width: 38px; height: 38px; }
+  .app-tile.ar .app-ic svg { width: 44px; height: 44px; }
+  .app-tile b { font-size: 1rem; }
+  .app-tile.set { grid-column: 1 / -1; flex-direction: row; text-align: left; gap: 12px; padding: 12px 14px; }
+  .app-tile.set .app-ic { width: 44px; height: 44px; margin: 0; border-radius: 12px; }
+  .app-tile.set .app-ic svg { width: 24px; height: 24px; }
+  .app-tile.set b { margin: 0; }
+  .app-badge { top: 6px; right: 6px; }
+  body[data-app="ar"] .nav { border-top: 3px solid var(--ar-y) !important; }
+  body[data-app="ar"] .tabs a.on { color: var(--ar-y-ink) !important; background: var(--ar-y-soft) !important; }
+}
+
+/* ---- 保留提醒（下個月要算）---- */
+.hold-panel { border: 2px solid var(--ar-y-deep); background: var(--ar-y-soft); }
+#view-recv .hold-panel { border-top-width: 2px; border-top-color: var(--ar-y-deep); }
+.hold-panel.all-done { border-color: var(--line); background: var(--surface); }
+.hold-ic { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--bad); color: #fff; font-size: .85rem; margin-right: 4px; vertical-align: 2px; }
+.hold-list { display: grid; gap: 8px; }
+.hold-item { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(130px, .8fr) minmax(0, 2fr) auto; gap: 6px 14px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-left: 5px solid var(--ar-y); border-radius: 8px; padding: 8px 12px; }
+.hold-item.done { opacity: .6; border-left-color: var(--good); }
+.hi-who small { display: block; color: var(--muted); font-size: .75rem; }
+.hi-note { color: var(--ink); font-weight: 500; }
+.hi-act { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.hi-done { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; white-space: nowrap; }
+.hi-done input { width: 18px; height: 18px; }
+.hold-tag { display: inline-block; margin-top: 3px; font-size: .72rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--ar-y); color: var(--ar-y-ink); cursor: help; white-space: nowrap; }
+.hold-tag.done { background: var(--surface-2); color: var(--muted); font-weight: 500; }
+.hold-tag.now { background: transparent; border: 1px dashed var(--ar-y-deep); }
+.recv-t .stick2 .hold-tag { display: block; width: max-content; }
+.hold-next { display: block; font-size: .68rem; color: var(--ar-y-deep); font-weight: 700; text-align: right; }
+@media (max-width: 760px) {
+  .hold-item { grid-template-columns: 1fr auto; }
+  .hi-note { grid-column: 1 / -1; }
+  .hi-act { grid-column: 1 / -1; justify-content: space-between; }
+}
+
+/* ---- 收款登記：卡片版面（手機好輸入）---- */
+.rc-cards { display: grid; gap: 10px; }
+.rc-card { border: 1px solid var(--line); border-left: 5px solid var(--line-strong); border-radius: 12px; background: var(--surface); overflow: hidden; scroll-margin-top: 12px; }
+.rc-card.bad { border-left-color: var(--bad); }
+.rc-card.open { border-color: var(--ar-y-deep); border-left-color: var(--ar-y-deep); box-shadow: 0 8px 24px -16px rgba(0,0,0,.4); }
+.rc-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; width: 100%; text-align: left; border: 0; background: transparent; padding: 12px 14px; cursor: pointer; color: inherit; font: inherit; }
+.rc-card.open .rc-head { background: var(--ar-y-soft); }
+.rh-who { font-size: 1rem; min-width: 0; }
+.rh-who small { display: block; color: var(--muted); font-size: .76rem; }
+.rh-amt { text-align: right; font-family: var(--font-num); font-weight: 700; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.rh-amt small { display: block; font-family: var(--font); font-weight: 400; font-size: .7rem; color: var(--muted); }
+.rh-st { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: .85rem; }
+.rh-st .hold-tag { margin-top: 0; }
+.rh-st .ok { color: var(--good); font-weight: 700; } .rh-st .bad { color: var(--bad); font-weight: 800; } .rh-st .todo { color: var(--muted); }
+.rh-note { grid-column: 1 / -1; font-size: .84rem; color: var(--ink-2); background: var(--surface-2); border-radius: 6px; padding: 3px 8px; }
+.rc-body { padding: 4px 14px 14px; border-top: 1px solid var(--line); }
+.rc-sec { margin-top: 12px; }
+.rc-sec h4, .rc-sec > summary { margin: 0 0 6px; font-size: .82rem; color: var(--ink-2); font-weight: 700; letter-spacing: .05em; }
+.rc-sec > summary { cursor: pointer; padding: 6px 0; }
+.rc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px 12px; }
+.rc-f { display: flex; flex-direction: column; gap: 3px; font-size: .8rem; color: var(--ink-2); }
+.rc-f.wide { grid-column: 1 / -1; }
+.rc-f em { font-style: normal; color: var(--muted); }
+.rc-f input, .rc-f textarea { font: inherit; font-size: 16px; /* 16px：iPhone 點下去不會放大畫面 */ padding: 10px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); width: 100%; min-width: 0; }
+.rc-f input[inputmode="decimal"] { text-align: right; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.rc-f input:focus, .rc-f textarea:focus { outline: 2px solid var(--ar-y-deep); outline-offset: 0; border-color: var(--ar-y-deep); }
+.rc-f input[readonly] { background: var(--surface-2); color: var(--ink-2); }
+.rc-f small { font-size: .7rem; color: var(--muted); }
+.rc-f.warn input { background: color-mix(in srgb, #f2b705 22%, var(--surface)); border-color: #d9a400; }
+.rc-f.warn small { color: var(--ar-y-deep); font-weight: 700; }
+.pay-btn2 { padding: 10px; font-size: 16px; }
+.pay-btn2.on { border-color: var(--ar-y-deep); background: var(--ar-y-soft); color: var(--ar-y-ink); }
+.rc-live { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 14px; padding: 10px; border-radius: 10px; background: var(--surface-2); position: sticky; bottom: 76px; z-index: 2; }
+.rc-live div { text-align: center; }
+.rc-live small { display: block; font-size: .7rem; color: var(--muted); }
+.rc-live b { font-family: var(--font-num); font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.rc-live .ok b { color: var(--good); } .rc-live .bad b { color: var(--bad); }
+.rc-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+.rc-acts .grow { flex: 1; }
+.rc-acts .btn { padding: 10px 14px; }
+.rc-slot > .panel { margin: 12px 0 0; border: 1px solid var(--line); }
+@media (min-width: 761px) { .rc-live { bottom: 8px; } }
+@media (max-width: 760px) {
+  .recv-add input { min-width: 0; flex: 1 1 100%; font-size: 16px; }
+  .recv-add .hint { display: none; }
+  .rc-grid { grid-template-columns: 1fr 1fr; }
+  .recv-bar .grow { display: none; }
+  /* 支票明細：手機上一張支票排成一塊 */
+  .pay-t thead { display: none; }
+  .pay-t, .pay-t tbody, .pay-t tr, .pay-t td { display: block; width: 100%; }
+  .pay-t tr { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .pay-t td { padding: 0 !important; height: auto; border: 0; }
+  .pay-t input, .pay-t select { font-size: 16px; padding: 8px; }
+  .pay-cash input { font-size: 16px; }
+}

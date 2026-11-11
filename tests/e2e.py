@@ -223,6 +223,7 @@ async def main():
     await raw_import(b)
     await raw_add(b)
     await recv_flow(b)
+    await recv_phone(b)
     await report_page(b)
     await demo_mode(b)
     await b.close()
@@ -482,7 +483,8 @@ async def cust_prod_pages(pg, d):
     await pg.click('#prFilters .chip .x'); await pg.wait_for_timeout(300)
     await pg.click('#prMetric button[data-v=net]'); await pg.wait_for_timeout(200)
     # 左側選單分區塊
-    ok(await pg.locator('.tab-group').count() == 5 and await pg.is_visible('.tab-group.g1 .tg-label'), '左側選單分成 5 區（每月看、分析、應收帳款、報告與工具、設定）')
+    vis = await pg.evaluate("[...document.querySelectorAll('.tab-group')].filter(g => g.offsetParent).map(g => g.className.split(' ')[1])")
+    ok(vis == ['g0', 'g1', 'g2', 'g3', 'g4'] and await pg.is_visible('.tab-group.g1 .tg-label'), f'銷售分析的左側選單：所有功能、每月看、分析、報告與工具、設定（應收帳款不在這裡）{vis}')
 
 
 def mf_rows():
@@ -688,9 +690,14 @@ async def recv_flow(b):
     await pg.set_input_files('#fileXlsx', [FX + '/JMSSAL.DBF', FX + '/JMSSBK.DBF'])
     await dlg_fill(pg, {'app': 'rc123', 'app2': 'rc123'}); await wait_done(pg)
     await pg.wait_for_selector('#dlg[open]'); await pg.click('#dlgCancel'); await pg.wait_for_timeout(200)
-    ok(await pg.locator('.tab-group.g5 a').count() == 2, '左側選單多了「應收帳款」：收款登記、應收分析')
-    ok(await pg.evaluate("getComputedStyle(document.querySelector('.tab-group.g5')).backgroundColor") == 'rgb(242, 194, 48)', '應收帳款區塊是黃色')
-    await pg.click('a[data-view=recv]'); await pg.wait_for_selector('#rcImport')
+    # 首頁：銷售分析（藍）、應收實收帳款（黃、$）分開
+    await pg.goto(URL + '#home'); await pg.wait_for_selector('#homeApps .app-tile.ar')
+    ok(await pg.locator('#homeApps .app-tile').count() == 3 and '應收實收帳款' in await pg.text_content('#homeApps .app-tile.ar') and '$' in await pg.text_content('#homeApps .app-tile.ar .app-ic'), '首頁有三個方塊：銷售分析、應收實收帳款（$ 圖示）、資料與設定')
+    ok(await pg.is_hidden('.tab-group.g5') and await pg.is_visible('.tab-group.g1'), '在銷售分析裡，左側選單看不到應收帳款')
+    await pg.screenshot(path=SH + '/39_home.png')
+    await pg.click('#homeApps .app-tile.ar'); await pg.wait_for_selector('#rcImport')
+    ok(await pg.locator('.tab-group.g5 a').count() == 2 and await pg.is_visible('.tab-group.g5') and await pg.is_hidden('.tab-group.g1') and await pg.is_hidden('.tab-group.g2'), '進到應收實收帳款：左側只有收款登記、應收分析（和設定），看不到銷售分析的頁面')
+    ok('rgb(2' in await pg.evaluate("getComputedStyle(document.querySelector('.nav')).backgroundImage") and await pg.evaluate("document.body.dataset.app") == 'ar' and '應收實收帳款' in await pg.text_content('.brand'), '應收實收帳款的側欄是黃色、標題換成應收實收帳款')
     # 匯入有開啟密碼的應收帳款 Excel
     await pg.set_input_files('#rcFile', FX + '/recv_enc.xlsx')
     await dlg_fill(pg, {'xls': 'ar123'})
@@ -736,6 +743,21 @@ async def recv_flow(b):
     ok(got == round((e['ar'] - e['ret']) * 0.06), f"折率打「6%」→ 自動算成 {got}（（應收 − 退貨）× 6%）")
     row = pg.locator('#recvBody tr:has-text("2T06")')
     await row.locator('input[data-k=note]').fill('運費我們付，客人先扣 120'); await row.locator('input[data-k=note]').press('Tab'); await pg.wait_for_timeout(300)
+    # 保留：114/10 2T06 保留 300（實收少 300）→ 114/11 提醒要算，備註也顯示
+    row = pg.locator('#recvBody tr:has-text("2T06")')
+    p0 = float(await row.locator('input[data-k=paid]').input_value())
+    await row.locator('input[data-k=paid]').fill(str(int(p0 - 300))); await row.locator('input[data-k=paid]').press('Tab'); await pg.wait_for_timeout(250)
+    row = pg.locator('#recvBody tr:has-text("2T06")')
+    await row.locator('input[data-k=hold]').fill('300'); await row.locator('input[data-k=hold]').press('Tab'); await pg.wait_for_timeout(250)
+    ok('下個月要算' in await pg.text_content('#recvBody tr:has-text("2T06")') and await pg.locator('#recvBody tr:has-text("2T06").bad-row').count() == 0, '填了保留 → 那一格標「下個月要算」，還是對得上')
+    await pg.select_option('#rcYm', '11411'); await pg.wait_for_timeout(300)
+    t = await pg.text_content('#rcHold')
+    ok('2T06' in t and '300' in t and '運費我們付' in t and '1 位客戶上次「保留」' in t and await pg.locator('#recvBody tr:has-text("2T06") .hold-tag').count() == 1, '下個月（114/11）出現保留提醒：客戶、金額、備註都顯示，表格客戶名下面也標出來')
+    await pg.screenshot(path=SH + '/44_recv_hold.png', full_page=True)
+    await pg.check('#rcHold [data-hold-done="2T06"]'); await pg.wait_for_timeout(300)
+    ok('都算好了' in await pg.text_content('#rcHold') and await pg.evaluate("window.__app.meta.recv.rows.filter(r => r.code === '2T06' && r.ym === 11410).every(r => r.holdDone)"), '勾「算好了」→ 不再提醒（記在資料裡）')
+    await pg.uncheck('#rcHold [data-hold-done="2T06"]'); await pg.wait_for_timeout(300)
+    await pg.select_option('#rcYm', '11410'); await pg.wait_for_timeout(300)
     # 客戶歷史
     await pg.locator('#recvBody tr:has-text("2T06") input[data-k=paid]').focus(); await pg.wait_for_timeout(300)
     h = await pg.evaluate('window.__recvHist')
@@ -776,6 +798,59 @@ async def recv_flow(b):
     await pg.click('#dlgOk'); await pg.wait_for_timeout(800)
     ok(await pg.evaluate('window.__app.meta.recv.rows.length') == len(exp), '整月取代後，筆數和檔案一樣（不會重複）')
     ok(not errs, '應收帳款沒有 JS 錯誤 ' + str(errs))
+    await c.close()
+
+
+async def recv_phone(b):
+    """手機：首頁兩個應用、應收實收帳款用卡片輸入（不會比螢幕寬）。"""
+    c = await b.new_context(viewport={'width': 390, 'height': 844}, is_mobile=True, has_touch=True, device_scale_factor=2)
+    pg = await c.new_page(); errs = []
+    pg.on('pageerror', lambda e: errs.append(str(e)))
+    pg.on('dialog', lambda d: asyncio.ensure_future(d.accept()))
+    await pg.goto(URL + '#data'); await pg.wait_for_timeout(300)
+    await pg.set_input_files('#fileXlsx', [FX + '/JMSSAL.DBF', FX + '/JMSSBK.DBF'])
+    await dlg_fill(pg, {'app': 'ph123', 'app2': 'ph123'}); await wait_done(pg)
+    await pg.wait_for_selector('#dlg[open]'); await pg.click('#dlgCancel'); await pg.wait_for_timeout(200)
+    await pg.goto(URL); await pg.reload(); await pg.wait_for_selector('#lock:not([hidden])')
+    await pg.fill('#lockPw', 'ph123'); await pg.click('#lockGo'); await pg.wait_for_selector('#homeApps .app-tile')
+    ok(await pg.evaluate('location.hash') == '#home', '沒指定頁面時打開首頁')
+    await pg.screenshot(path=SH + '/45_phone_home.png')
+    for th in ['indigo', 'night', 'market']:
+        await pg.evaluate(f"document.documentElement.dataset.theme='{th}'")
+        await pg.evaluate("location.hash='home'"); await pg.wait_for_timeout(250)
+        ok(await pg.evaluate("document.documentElement.scrollWidth") <= 392, f'手機寬度：{th} 首頁沒有超出螢幕')
+    await pg.evaluate("document.documentElement.dataset.theme='indigo'")
+    await pg.click('#homeApps .app-tile.ar'); await pg.wait_for_selector('#rcImport')
+    await pg.set_input_files('#rcFile', FX + '/recv.xlsx'); await pg.wait_for_selector('#dlg[open]'); await pg.click('#dlgOk')
+    await pg.wait_for_selector('#recvBody .rc-card')
+    vis = await pg.evaluate("[...document.querySelectorAll('.tabs a')].filter(a => a.offsetParent).map(a => a.dataset.view)")
+    ok(vis == ['home', 'recv', 'recvA', 'data'], f'手機下面的選單只有：首頁、收款、應收、設定 {vis}')
+    ok(await pg.locator('#recvBody table.recv-t').count() == 0 and await pg.locator('#recvBody .rc-card').count() >= 3, '手機預設用卡片（一位客戶一張），不是寬表格')
+    card = pg.locator('#recvBody .rc-card:has-text("2T06")').first
+    await card.locator('[data-open]').click(); await pg.wait_for_selector('#recvBody .rc-card.open input[data-k=paid]')
+    op = pg.locator('#recvBody .rc-card.open')
+    ok(await pg.evaluate("parseFloat(getComputedStyle(document.querySelector('.rc-card.open input[data-k=paid]')).fontSize)") >= 16, '輸入格字夠大（16px，iPhone 點下去不會放大）')
+    p0 = float(await op.locator('input[data-k=paid]').input_value())
+    await op.locator('input[data-k=paid]').fill(str(int(p0 - 50))); await op.locator('input[data-k=paid]').press('Tab'); await pg.wait_for_timeout(300)
+    ok('差額' in await op.locator('.rc-live').text_content() and '50' in await op.locator('.rc-live .bad').text_content(), '卡片裡改實收 → 下面馬上顯示差 50')
+    await op.locator('summary').click()
+    await op.locator('input[data-k=short]').fill('50'); await op.locator('input[data-k=short]').press('Tab'); await pg.wait_for_timeout(300)
+    await op.locator('textarea[data-k=note]').fill('少 50 下次補'); await op.locator('textarea[data-k=note]').press('Tab'); await pg.wait_for_timeout(300)
+    r = await pg.evaluate("(() => { const r = window.__app.meta.recv.rows.find(r => r.code === '2T06' && r.ym === 11411); return [r.paid, r.short, r.note]; })()")
+    ok(r[0] == p0 - 50 and r[1] == 50 and r[2] == '少 50 下次補' and '✓' in await op.locator('.rc-live').text_content(), f'填不足 50、備註 → 對得上、存進資料 {r}')
+    await op.locator('[data-pay]').click(); await pg.wait_for_selector('.rc-card.open #rcPay:not([hidden])')
+    ok(True, '按「支票」→ 支票明細就開在這張卡片裡（不用捲到最下面）')
+    ok(await pg.evaluate("document.documentElement.scrollWidth") <= 392, '手機卡片版面沒有超出螢幕')
+    await pg.screenshot(path=SH + '/46_phone_recv_cards.png', full_page=True)
+    await op.locator('[data-close]').click(); await pg.wait_for_timeout(300)
+    ok(await pg.locator('#recvBody .rc-card.open').count() == 0 and '少 50 下次補' in await pg.text_content('#recvBody .rc-card:has-text("2T06")'), '收起後，卡片上看得到備註')
+    await pg.click('#rcLayout [data-v=table]'); await pg.wait_for_selector('#recvBody table.recv-t')
+    ok(True, '手機也可以切回表格')
+    await pg.click('#rcLayout [data-v=cards]'); await pg.wait_for_selector('#recvBody .rc-card')
+    for vw in ['recv', 'recvA', 'data']:
+        await pg.evaluate(f"location.hash='{vw}'"); await pg.wait_for_timeout(400)
+        ok(await pg.evaluate("document.documentElement.scrollWidth") <= 392, f'手機寬度：{vw} 沒有超出螢幕')
+    ok(not errs, '手機應收帳款沒有 JS 錯誤 ' + str(errs))
     await c.close()
 
 

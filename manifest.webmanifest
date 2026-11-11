@@ -3,7 +3,7 @@
   "short_name": "銷售分析",
   "description": "進貨、退貨樞紐分析，客戶交易與商品滯銷追蹤",
   "lang": "zh-Hant",
-  "start_url": "./#overview",
+  "start_url": "./#home",
   "scope": "./",
   "display": "standalone",
   "background_color": "#F7F8FA",
