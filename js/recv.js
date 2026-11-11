@@ -79,7 +79,8 @@
   const allItems = () => [...new Set(itemLists().plus.concat(itemLists().minus))];
   const rates = () => { const S = root.__app; S.meta = S.meta || {}; return S.meta.recvRates || (S.meta.recvRates = {}); };
   // 支票＋現金
-  const hasPay = (r) => (r.checks && r.checks.length) || r.cash;
+  // 有沒有填「詳細」：現金不是 0，或有一張支票填了金額（只按了「新增一張支票」、還沒填金額的不算）
+  const hasPay = (r) => (+r.cash || 0) !== 0 || (r.checks || []).some((c) => (+c.amt || 0) !== 0);
   const payTotal = (r) => (+r.cash || 0) + (r.checks || []).reduce((t, c) => t + (+c.amt || 0), 0);
   const store = () => {
     const S = root.__app; S.meta = S.meta || {}; if (!S.meta.recv) S.meta.recv = { v: 2, rows: [] };

@@ -727,6 +727,12 @@ async def recv_flow(b):
     ok(len(set(tops)) == 1, f'實收和其他格子對齊（同一個高度）{tops}')
     # 詳細（現金、支票）：只是記錄，不改實收
     paid2 = int(paid + 10)
+    await pg.locator('#recvBody tr:has-text("7K02") [data-pay]').click(); await pg.wait_for_selector('#rcPay:not([hidden])')
+    await pg.click('#rcPay [data-cadd]'); await pg.wait_for_timeout(150)
+    await pg.fill('#rcPay tr[data-i="0"] input[data-f=bank]', '台銀'); await pg.press('#rcPay tr[data-i="0"] input[data-f=bank]', 'Tab'); await pg.wait_for_timeout(200)
+    ok('詳細≠實收' not in await pg.text_content('#recvBody tr:has-text("7K02")') and await pg.text_content('#recvBody tr:has-text("7K02") [data-pay]') == '詳細'
+       and await pg.locator('#recvBody tr:has-text("7K02").bad-row').count() == 0, '只按了「新增一張支票」、沒填金額 → 不算有填，不會出現「詳細 ≠」')
+    await pg.click('#rcPay [data-cdel]'); await pg.wait_for_timeout(150)
     await pg.locator('#recvBody tr:has-text("3A11") [data-pay]').click(); await pg.wait_for_selector('#rcPay:not([hidden])')
     await pg.fill('#rcPay input[data-c=cash]', '400'); await pg.press('#rcPay input[data-c=cash]', 'Tab'); await pg.wait_for_timeout(200)
     await pg.click('#rcPay [data-cadd]'); await pg.wait_for_timeout(200)
