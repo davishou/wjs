@@ -515,11 +515,11 @@
     const draw = () => {
       const L = itemLists();
       const col = (key, sg, title) => `<div class="it-col ${key}"><h3><span class="sgn ${sg < 0 ? 'minus' : 'plus'}">${sg < 0 ? '−' : '+'}</span> ${title}</h3>
-        <div class="it-list">${L[key].map((k, i) => `<span class="it-chip">${esc(k)}<button type="button" class="icon-btn" data-idel="${key}:${i}" title="刪掉這個項目">✕</button></span>`).join('') || '<span class="muted">（沒有項目）</span>'}</div>
+        <div class="it-list">${L[key].map((k, i) => `<span class="it-chip" data-k="${esc(k)}" title="按住拖曳可以調整順序"><span class="it-grip" aria-hidden="true">⋮⋮</span>${esc(k)}<button type="button" class="icon-btn" data-idel="${key}:${i}" title="刪掉這個項目">✕</button></span>`).join('') || '<span class="muted">（沒有項目）</span>'}</div>
         <div class="row it-add"><input data-inew="${key}" placeholder="新項目名稱" autocomplete="off"><button type="button" class="btn small" data-iadd="${key}">加入</button></div></div>`;
       el.hidden = false;
       el.innerHTML = `<div class="panel-head"><h2>增刪調整項目</h2><button class="icon-btn" data-x title="關閉">✕</button></div>
-        <p class="hint">按 ⊕ 時下拉只出現「加的項目」，按 ⊖ 時只出現「減的項目」。刪掉項目不會改到已經登記的資料。</p>
+        <p class="hint">按 ⊕ 時下拉只出現「加的項目」，按 ⊖ 時只出現「減的項目」。<b>按住項目拖曳可以調整順序</b>，下拉選單會照這裡的順序。刪掉項目不會改到已經登記的資料。</p>
         <div class="it-cols">${col('plus', 1, '加的項目（⊕）')}${col('minus', -1, '減的項目（⊖）')}</div>`;
     };
     const add = (key) => { const inp = el.querySelector(`[data-inew="${key}"]`); const k = inp.value.trim(); if (!k) return; const l = itemLists()[key]; if (!l.includes(k)) l.push(k); ctx.saveRecv(); draw(); done(); const n = el.querySelector(`[data-inew="${key}"]`); if (n) n.focus(); };
@@ -529,6 +529,32 @@
       const a = e.target.closest('[data-iadd]'); if (a) add(a.dataset.iadd);
     };
     el.onkeydown = (e) => { const t = e.target.closest('[data-inew]'); if (t && e.key === 'Enter') { e.preventDefault(); add(t.dataset.inew); } };
+    // 按住拖曳調整順序（滑鼠、手指都可以）：拖的時候直接在畫面上移動，放開後照畫面上的順序存起來
+    el.onpointerdown = (e) => {
+      const chip = e.target.closest('.it-chip'); if (!chip || e.target.closest('[data-idel]') || e.button > 0) return;
+      const listEl = chip.parentNode, key = chip.closest('.it-col').classList.contains('minus') ? 'minus' : 'plus';
+      e.preventDefault();
+      const x0 = e.clientX, y0 = e.clientY; let moving = false;
+      const move = (ev) => {
+        if (!moving && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return;
+        moving = true; chip.classList.add('dragging');
+        const t = document.elementFromPoint(ev.clientX, ev.clientY);
+        const over = t && t.closest('.it-chip');
+        if (!over || over === chip || over.parentNode !== listEl) return;
+        const b = over.getBoundingClientRect();
+        const after = ev.clientY > b.bottom ? true : ev.clientY < b.top ? false : ev.clientX > b.left + b.width / 2;
+        listEl.insertBefore(chip, after ? over.nextSibling : over);
+      };
+      const up = () => {
+        document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
+        chip.classList.remove('dragging');
+        if (!moving) return;
+        const order = [...listEl.querySelectorAll('.it-chip')].map((c) => c.dataset.k);
+        const L = itemLists(); L[key] = order.concat(L[key].filter((k) => !order.includes(k)));
+        ctx.saveRecv(); draw(); done();
+      };
+      document.addEventListener('pointermove', move); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
+    };
     draw();
     el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }

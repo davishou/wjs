@@ -815,6 +815,16 @@ async def recv_flow(b):
     sets = await pg.evaluate("window.__app.meta.recvItemSets")
     po = await pg.evaluate("[...document.querySelectorAll('#recvBody tr')].find(t => t.textContent.includes('2T06')).querySelector('.adj-line.pos select').innerText")
     ok('退款' in sets['minus'] and '運金' not in sets['plus'] and '運金' not in po, f'⚙ 項目：減的加「退款」、加的刪「運金」→ 下拉跟著變 {sets}')
+    # 按住拖曳：「保留」拖到「前先入」前面
+    src = await pg.locator('#rcItems .it-col.plus .it-chip[data-k="保留"]').bounding_box()
+    dst = await pg.locator('#rcItems .it-col.plus .it-chip[data-k="前先入"]').bounding_box()
+    await pg.mouse.move(src['x'] + 20, src['y'] + src['height'] / 2); await pg.mouse.down()
+    for t in range(1, 9):
+        await pg.mouse.move(src['x'] + 20 + (dst['x'] + 8 - src['x'] - 20) * t / 8, dst['y'] + dst['height'] / 2); await pg.wait_for_timeout(30)
+    await pg.mouse.up(); await pg.wait_for_timeout(250)
+    sets = await pg.evaluate("window.__app.meta.recvItemSets")
+    po = await pg.evaluate("[...[...document.querySelectorAll('#recvBody tr')].find(t => t.textContent.includes('2T06')).querySelector('.adj-line.pos select').options].map(o => o.textContent)")
+    ok(sets['plus'][:2] == ['保留', '前先入'] and po[1:3] == ['保留', '前先入'], f'按住「保留」拖到「前先入」前面 → 存起來，下拉也照新順序 {sets["plus"]} / {po[:4]}')
     await pg.screenshot(path=SH + '/48_recv_items.png', full_page=True)
     await pg.click('#rcItems [data-x]')
     # 一般螢幕（1366 寬）一次看到整排

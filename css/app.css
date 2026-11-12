@@ -1040,3 +1040,8 @@ body[data-view="recv"] main { max-width: none; }
 .recv-t .adj-line .icon-btn { grid-column: 4; grid-row: 1; }
 .recv-t td.note input { width: 96px; }
 .recv-t .adj-foot .hold-next { display: block; width: 100%; }
+/* 增刪項目：按住拖曳排順序 */
+.it-chip { cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none; transition: box-shadow .12s; }
+.it-chip .icon-btn { cursor: pointer; }
+.it-chip.dragging { cursor: grabbing; opacity: .85; box-shadow: 0 6px 16px -6px rgba(0,0,0,.45); border-color: var(--ar-y-deep); background: var(--ar-y-soft); }
+.it-grip { color: var(--muted); font-size: .7rem; letter-spacing: -2px; margin-right: 5px; }
