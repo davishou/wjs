@@ -89,9 +89,13 @@
     else if (meta) meta.content = { indigo: '#26437A', night: '#0E1726', market: '#13805F' }[document.documentElement.dataset.theme] || '#26437A';
     document.title = app === 'ar' ? '應收實收帳款' : app === 'buy' ? '進貨分析' : '銷售分析';
   }
-  function go(view) {
+  function go(view, { boot = false } = {}) {
     if (!VIEWS.includes(view)) view = 'home';
-    if (!S.E && view !== 'data') view = 'data'; // 還沒有資料：直接到資料與設定
+    // 還沒有資料：首頁可以開（2026-11-17 使用者在新電腦按「所有功能」以為壞了）；其他頁面帶到資料與設定，並說明原因。剛打開網站時直接到資料與設定
+    if (!S.E && view !== 'data' && (boot || view !== 'home')) {
+      if (!boot && view !== 'home') toast('這台裝置還沒有資料。請先在「更新資料」匯入（電腦），或開啟資料包（手機）；想先看看畫面可以按「看示範資料」', 6000);
+      view = 'data';
+    }
     if (AR_VIEWS.includes(view)) setApp('ar');
     else if (BUY_VIEWS.includes(view)) setApp('buy');
     else if (view !== 'home' && view !== 'data') setApp('sales');
@@ -1858,7 +1862,7 @@
         if (legacy) await lockScreen('setup', legacy);
       }
     } catch (e) { console.warn(e); }
-    go(start);
+    go(start, { boot: true });
     if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   window.__app = S;

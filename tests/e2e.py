@@ -104,6 +104,11 @@ async def main():
     page.on('pageerror', lambda e: errs.append(str(e))); page.on('console', lambda m: m.type=='error' and 'Failed to load resource' not in m.text and errs.append(m.text))
     await page.goto(URL); await page.wait_for_timeout(500)
     ok(await page.is_hidden('#lock'), '首次開啟（無資料）不顯示開鎖畫面')
+    ok(await page.evaluate('document.body.dataset.view') == 'data', '沒有資料時，剛打開網站到資料與設定')
+    await page.click('a[data-view=home]'); await page.wait_for_timeout(200)
+    ok(await page.evaluate('document.body.dataset.view') == 'home' and await page.locator('#homeApps .app-tile').count() == 4, '沒有資料也能按「所有功能」打開首頁')
+    await page.click('#homeApps .app-tile.sales'); await page.wait_for_timeout(200)
+    ok(await page.evaluate('document.body.dataset.view') == 'data' and '還沒有資料' in await page.text_content('#toast'), '沒有資料時按銷售分析：帶到資料與設定並說明原因')
     # 1. 加密 Excel，先輸入錯的
     await page.set_input_files('#fileXlsx', FX+'/agile.xlsx')
     await page.wait_for_selector('#dlg[open]')
