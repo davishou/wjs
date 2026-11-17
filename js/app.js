@@ -49,7 +49,10 @@
     rep: Object.assign({ sel: null, q: '' }, store.get('rep', {})),
     span: Object.assign({ p: 'r12', from: 0, to: 0 }, store.get('span', {})), // 業務、客戶、商品共用的期間（js/period.js）
     board: Object.assign({ opt: 'A', period: 'ytd', metric: 'net' }, store.get('board', {})),
-    view: 'home', app: store.get('app', 'sales') === 'ar' ? 'ar' : 'sales', // 目前在哪一個應用：sales 銷售分析、ar 應收實收帳款
+    view: 'home', app: ['ar', 'buy'].includes(store.get('app', 'sales')) ? store.get('app', 'sales') : 'sales', // 目前在哪一個應用：sales 銷售分析、ar 應收實收帳款、buy 進貨分析
+    BE: null, // 進貨分析的計算（js/buy.js，資料在 S.meta.buy）
+    bspan: Object.assign({ p: 'r12', from: 0, to: 0 }, store.get('bspan', {})), // 進貨分析各頁共用的期間
+    buyV: { q: '', all: false, sort: { key: 'net', dir: -1 } }, buyP: { q: '', all: false, sort: { key: 'net', dir: -1 } }, buyO: { q: '', kind: 'all' },
     ref: store.get('ref', null),
     pivot: store.get('pivot', { src: 'all', rows: ['region'], col: 'year', measures: ['sales', 'returns', 'net', 'margin'], filters: {}, from: 0, to: 0, mode: 'agg' }),
     pvSort: null,
@@ -72,22 +75,25 @@
   }
 
   // ---------- 導覽 ----------
-  const VIEWS = ['home', 'overview', 'board', 'dashboard', 'compare', 'reps', 'customers', 'products', 'recv', 'recvA', 'report', 'pivot', 'data'];
+  const VIEWS = ['home', 'overview', 'board', 'dashboard', 'compare', 'reps', 'customers', 'products', 'recv', 'recvA', 'buy', 'buyV', 'buyP', 'buyO', 'report', 'pivot', 'data'];
   // 兩個「應用」分開（2026-11-11 使用者要求，像 Odoo 的首頁）：銷售分析（藍）、應收實收帳款（黃）。
   // 首頁、資料與設定兩邊共用，沿用目前所在的應用；其他頁面決定是哪一個應用。左側選單只顯示目前應用的頁面。
   const AR_VIEWS = ['recv', 'recvA'];
+  const BUY_VIEWS = Buy.VIEWS; // 進貨分析（紅、工廠圖示，2026-11-17）
   function setApp(app) {
     S.app = app; store.set('app', app);
     document.body.dataset.app = app;
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta && app === 'ar') meta.content = '#b88a00';
+    else if (meta && app === 'buy') meta.content = '#a61e1e';
     else if (meta) meta.content = { indigo: '#26437A', night: '#0E1726', market: '#13805F' }[document.documentElement.dataset.theme] || '#26437A';
-    document.title = app === 'ar' ? '應收實收帳款' : '銷售分析';
+    document.title = app === 'ar' ? '應收實收帳款' : app === 'buy' ? '進貨分析' : '銷售分析';
   }
   function go(view) {
     if (!VIEWS.includes(view)) view = 'home';
     if (!S.E && view !== 'data') view = 'data'; // 還沒有資料：直接到資料與設定
     if (AR_VIEWS.includes(view)) setApp('ar');
+    else if (BUY_VIEWS.includes(view)) setApp('buy');
     else if (view !== 'home' && view !== 'data') setApp('sales');
     else setApp(S.app);
     S.view = view;
@@ -101,7 +107,8 @@
   function renderView() {
     if (S.view === 'home') { renderHome(); return; }
     if (!S.E) { renderData(); return; }
-    (({ overview: renderToday, board: renderBoard, dashboard: renderDashboard, compare: renderCompare, reps: renderReps, report: renderReport, pivot: renderPivot, customers: renderCustomers, products: renderProducts, recv: () => Recv.renderEntry(recvCtx()), recvA: () => Recv.renderAnalysis(recvCtx()), data: renderData })[S.view] || renderToday)();
+    (({ overview: renderToday, board: renderBoard, dashboard: renderDashboard, compare: renderCompare, reps: renderReps, report: renderReport, pivot: renderPivot, customers: renderCustomers, products: renderProducts, recv: () => Recv.renderEntry(recvCtx()), recvA: () => Recv.renderAnalysis(recvCtx()),
+      buy: () => Buy.renderHome(buyCtx()), buyV: () => Buy.renderVend(buyCtx()), buyP: () => Buy.renderProd(buyCtx()), buyO: () => Buy.renderOrders(buyCtx()), data: renderData })[S.view] || renderToday)();
   }
 
   // ---------- 表格元件 ----------
@@ -330,16 +337,46 @@
     const pend = has ? Recv.holdReminders(recvCtx(), Infinity).filter((h) => !h.done) : [];
     const R = S.meta && S.meta.recv ? S.meta.recv.rows : [];
     const lastYm = R.length ? Math.max(...R.map((r) => r.ym)) : 0;
-    $('#homeSub').textContent = has ? (S.demo ? '目前看的是示範資料（假的）' : `銷售資料到 ${ymLabel(S.E.maxYm)}${lastYm ? `，應收帳款登記到 ${ymLabel(lastYm)}` : ''}`) : '還沒有載入資料，先到「資料與設定」匯入。';
+    $('#homeSub').textContent = has ? (S.demo ? '目前看的是示範資料（假的）' : `銷售資料到 ${ymLabel(S.E.maxYm)}${lastYm ? `，應收帳款登記到 ${ymLabel(lastYm)}` : ''}${S.BE ? `，進貨資料到 ${ymLabel(S.BE.maxYm)}` : ''}`) : '還沒有載入資料，先到「資料與設定」匯入。';
     const SALES = '<svg viewBox="0 0 32 32" aria-hidden="true"><rect x="4" y="17" width="5" height="11" rx="1.5"/><rect x="11.5" y="10" width="5" height="18" rx="1.5"/><rect x="19" y="5" width="5" height="23" rx="1.5"/><path d="M26 21h3v7h-3z" opacity=".5"/></svg>';
     const AR = '<svg viewBox="0 0 32 32" aria-hidden="true"><text x="16" y="25" text-anchor="middle" font-size="26" font-weight="800" font-family="Arial, sans-serif">$</text></svg>';
     const GEAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3h-4l-.4 2.8a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.6 7.6 0 0 0 1.7 1L11 21h4l.4-2.8a7.6 7.6 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>';
     $('#homeApps').innerHTML = `
       <a class="app-tile sales" href="#overview" data-go="overview"><span class="app-ic">${SALES}</span><b>銷售分析</b><small>今月、比較、業務、客戶、商品、報告</small></a>
       <a class="app-tile ar" href="#recv" data-go="recv"><span class="app-ic">${AR}</span><b>應收實收帳款</b><small>收款登記、應收分析、支票到期</small>${pend.length ? `<span class="app-badge" title="上個月有「保留」，這個月要算">${pend.length} 筆保留要算</span>` : ''}</a>
+      <a class="app-tile buy" href="#buy" data-go="buy"><span class="app-ic">${Buy.FACTORY}</span><b>進貨分析</b><small>廠商進貨、退回廠商、進貨成本</small>${S.BE ? '' : '<span class="app-badge soft">還沒有資料</span>'}</a>
       <a class="app-tile set" href="#data" data-go="data"><span class="app-ic">${GEAR}</span><b>資料與設定</b><small>匯入、資料包、密碼、介面風格</small></a>`;
-    $('#homeApps').onclick = (e) => { const a = e.target.closest('[data-go]'); if (!a) return; e.preventDefault(); if (a.dataset.go === 'recv') setApp('ar'); else if (a.dataset.go !== 'data') setApp('sales'); go(a.dataset.go); };
+    $('#homeApps').onclick = (e) => { const a = e.target.closest('[data-go]'); if (!a) return; e.preventDefault(); if (a.dataset.go === 'recv') setApp('ar'); else if (a.dataset.go === 'buy') setApp('buy'); else if (a.dataset.go !== 'data') setApp('sales'); go(a.dataset.go); };
   }
+
+  // ---------- 進貨分析（js/buy.js）----------
+  function buildBE() {
+    const B = S.meta && S.meta.buy;
+    S.BE = B && B.n ? new Buy.BuyEngine(B, S.meta, { ymMode: S.ymMode }) : null;
+    if (S.BE && S.bspan.p === 'custom' && !(S.BE.ymIndex.has(S.bspan.from) && S.BE.ymIndex.has(S.bspan.to))) S.bspan.p = 'r12';
+  }
+  function buyColor(dim, label) {
+    if (dim !== 'vend') return colorOf(dim, label);
+    const BE = S.BE; if (!BE) return 'c1';
+    if (!BE._vlist) BE._vlist = [...BE.vname.keys()].sort((a, b) => String(a).localeCompare(String(b), 'zh-Hant', { numeric: true }));
+    return Charts.PAL[Math.max(0, BE._vlist.indexOf(label)) % Charts.PAL.length];
+  }
+  const soldCache = new Map();
+  const buyCtx = () => ({ S, $, $$, esc, fmt, nf0, Charts, table, sortRows, toggleSort, store, openDrawer, kpiHtml, downloadCsv, colorOf: buyColor, rerender: renderView,
+    // 同期淨賣出件數（銷售分析的資料），依款號
+    soldByStyle(R) {
+      if (!S.E) return null;
+      const k = S.E.ds.n + '|' + JSON.stringify(R.f);
+      if (!soldCache.has(k)) { soldCache.clear(); soldCache.set(k, new Map(S.E.pivot({ rows: ['style'], cols: null, measures: ['netQty'], filter: { ...R.f } }).rows.map((r) => [r.labels[0], r.vals[0][0]]))); }
+      return soldCache.get(k);
+    },
+    soldMonthly(style, months) {
+      if (!S.E) return null;
+      const code = S.E.dim('style').labels.indexOf(style); if (code < 0) return null;
+      const m = new Map(S.E.pivot({ rows: ['ym'], cols: null, measures: ['netQty'], filter: { dims: { style: new Set([code]) } } }).rows.map((r) => [r.labels[0], r.vals[0][0]]));
+      return months.map((v) => m.get(ymLabel(v)) || 0);
+    },
+  });
 
   const recvCtx = () => ({ S, E: S.E, $, $$, esc, fmt, nf0, ymLabel, Charts, table, go, downloadCsv, saveRecv, importRecv, custList, bkClick, bkCheck, bkPaint, custByCode: () => { custList(); return S.E ? S.E._custByCode : new Map(); } });
 
@@ -1237,7 +1274,7 @@
   }
   function exitDemo() { location.hash = '#data'; location.reload(); } // 重新整理：示範資料消失，真正的資料要輸入開啟密碼才會打開
 
-  async function importXlsx(fileOrFiles, { force } = {}) {
+  async function importXlsx(fileOrFiles, { force, quiet, noBackup } = {}) {
     if (demoBlock()) return;
     const files = (Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles]).filter(Boolean);
     if (!files.length) return;
@@ -1247,9 +1284,14 @@
     const bad = files.find((f) => !/\.(xls[xm]|dbf|dvr)$/i.test(f.name));
     if (!force && bad) { toast(`「${bad.name}」不是 Excel（.xlsx）或 DBF 檔`, 4000); return; }
     if (files.some((f) => /\.dvr$/i.test(f.name))) { restoreRawBackup(files.find((f) => /\.dvr$/i.test(f.name))); return; }
+    // 廠商進貨／退回廠商（JMSINC、JMSIBK）分開處理；和客戶出貨退貨一起選時，先匯客戶的、再匯廠商的
+    if (!force) {
+      const { buy, rest } = await splitBuy(files);
+      if (buy.length) { if (rest.length) await importXlsx(rest, { force: true, quiet: true, noBackup: true }); await importBuy(buy, { backupFiles: files.filter((f) => /\.dbf$/i.test(f.name)) }); return; }
+    }
     // 系統原始資料（.DBF）：第一次整份匯入，之後依單號加入／更新，最後問要不要加密備份
-    if (files.every((f) => /\.dbf$/i.test(f.name))) { addRawFiles(files); return; }
-    if (force) toast('這是 Excel 檔，直接匯入', 3000);
+    if (files.every((f) => /\.dbf$/i.test(f.name))) { await addRawFiles(files, { backup: !noBackup }); return; }
+    if (force && !quiet) toast('這是 Excel 檔，直接匯入', 3000);
     go('data');
     const names = files.map((f) => f.name).join('、');
     let encrypted = false; for (const f of files) if (await isCfbFile(f)) encrypted = true;
@@ -1289,6 +1331,57 @@
         showProgress(0, '讀取失敗：' + err.message);
         return;
       }
+    }
+  }
+
+  // ---------- 廠商進貨（JMSINC）／退回廠商（JMSIBK）----------
+  async function splitBuy(files) {
+    let kinds;
+    try { kinds = (await runWorker({ type: 'buySniff', files: files.map((f) => (f.bytes instanceof Uint8Array ? { name: f.name, bytes: f.bytes } : f)) }, [])).kinds; } catch (e) { worker && worker.terminate(); worker = null; kinds = files.map(() => 'sales'); }
+    return { buy: files.filter((f, i) => kinds[i] === 'buy'), rest: files.filter((f, i) => kinds[i] !== 'buy') };
+  }
+  async function importBuy(files, { backup = true, backupFiles = null } = {}) {
+    if (demoBlock()) return;
+    go('data');
+    const names = files.map((f) => f.name).join('、');
+    if (!S.raw || !S.vault) { showProgress(0, `「${names}」是廠商進貨資料。請先匯入銷售資料（JMSSAL／JMSSBK 或總表），進貨資料會跟它一起加密保存在這台裝置。`); return; }
+    let pw = null;
+    for (const f of files) if (!(f.bytes instanceof Uint8Array) && await isCfbFile(f)) { const r = await askImportPasswords(names, true, false, ''); if (!r) { showProgress(0, '已取消匯入'); return; } pw = r.xlsPw; break; }
+    showProgress(0, '讀取廠商進貨資料 ' + names);
+    let d;
+    for (;;) {
+      try { d = await runWorker({ type: 'buyRead', files: files.map((f) => (f.bytes instanceof Uint8Array ? { name: f.name, bytes: f.bytes } : f)), password: pw }, [], (s2) => showProgress(s2.pct || 0, s2.stage || '讀取中')); pw = null; break; } catch (err) {
+        worker && worker.terminate(); worker = null;
+        if (err.code === 'BAD_PASSWORD' || err.code === 'NEED_PASSWORD') { const r = await askImportPasswords(names, true, false, 'Excel 密碼不正確，請再試一次。'); if (!r) { showProgress(0, '已取消匯入'); return; } pw = r.xlsPw; continue; }
+        pw = null; showProgress(0, '讀取失敗：' + err.message); return;
+      }
+    }
+    const add = d.buy, base = S.meta && S.meta.buy && S.meta.buy.n ? S.meta.buy : null;
+    const P = Buy.plan(base, add);
+    const nNew = P.nNew[0] + P.nNew[1], nUpd = P.nUpd[0] + P.nUpd[1], miss = P.missing;
+    const ex = (arr, f) => arr.slice(0, 20).map(f).join('、') + (arr.length > 20 ? '…' : '');
+    const rt = (g) => (!g ? '' : g.by === 'date' ? ROC_RANGE(g.from, g.to) : `單號月份 ${g.from === g.to ? ymLabel(g.from) : ymLabel(g.from) + '～' + ymLabel(g.to)}`);
+    const rng = [P.range[0] && `進貨 ${rt(P.range[0])}`, P.range[1] && `退回 ${rt(P.range[1])}`].filter(Boolean).join('；');
+    const vends = new Set(add.cols.vend).size;
+    const desc = `<p>「${esc(names)}」：<strong>${nf0.format(add.nIn)}</strong> 筆進貨、<strong>${nf0.format(add.nBk)}</strong> 筆退回廠商，${nf0.format(vends)} 家廠商（${esc(rng)}）。</p><ul>` +
+      `<li>新的單：<strong>${nf0.format(nNew)}</strong> 張（進貨 ${nf0.format(P.nNew[0])}、退回 ${nf0.format(P.nNew[1])}），直接加入。</li>` +
+      (nUpd ? `<li>網站裡已經有的單：${nf0.format(nUpd)} 張，改用新資料${P.nChanged ? `（其中 ${nf0.format(P.nChanged)} 張內容有變動）` : '（內容都一樣）'}。</li>` : '') + '</ul>' +
+      (add.dated < add.n ? `<p class="hint">${nf0.format(add.n - add.dated)} 筆沒有打單日期，月份改用單號前 5 碼。</p>` : '') +
+      (add.warning ? `<p class="warn">${esc(add.warning)}</p>` : '') +
+      (miss.length ? `<p class="warn">這段期間內有 <strong>${nf0.format(miss.length)}</strong> 張單網站裡有、這次的檔案裡沒有，多半是系統裡已經作廢或刪除：${esc(ex(miss, (m) => (m.src ? '退回 ' : '') + m.ord))}</p><p class="hint">如果這次匯出的不是這段期間的全部資料，請不要勾選刪除。</p>` : '');
+    const v = await ask({ title: '確認加入廠商進貨資料', desc, fields: [], submit: '加入',
+      check: miss.length ? { name: 'del', label: `從網站刪除這 ${miss.length} 張系統裡已經沒有的單`, checked: false } : null });
+    if (!v) { showProgress(0, '已取消，進貨資料沒有改變'); return; }
+    showProgress(1, '合併並加密儲存到這台裝置…');
+    const buy = Buy.merge(base, add, P, { removeMissing: !!v.del, name: names });
+    await saveMeta({ buy });
+    showProgress(1, `完成：進貨資料新增 ${nf0.format(nNew)} 張、更新 ${nf0.format(nUpd)} 張` + (v.del && miss.length ? `、刪除 ${nf0.format(miss.length)} 張` : '') +
+      `，目前共 ${nf0.format(buy.src.filter((x) => !x).length)} 筆進貨、${nf0.format(buy.src.filter((x) => x).length)} 筆退回廠商（${ymLabel(S.BE.minYm)}～${ymLabel(S.BE.maxYm)}）` + (add.warning ? '。注意：' + add.warning : ''));
+    toast('廠商進貨資料已加入，已加密保存在這台裝置');
+    const bf = backupFiles || files.filter((f) => /\.dbf$/i.test(f.name));
+    if (backup && bf.length) {
+      let a = Infinity, b = 0; for (const x of add.cols.date) if (x) { if (x < a) a = x; if (x > b) b = x; }
+      await offerRawBackup(bf, b ? { from: a, to: b } : null);
     }
   }
 
@@ -1395,10 +1488,10 @@
     const v = await ask({
       title: '要把原始檔做成加密備份嗎？',
       desc: `<p>把「${esc(names)}」<strong>原封不動</strong>（包括 RECEIVE、PAY 這些網站沒用到的欄位）加密成一個備份檔，用<strong>目前的開啟密碼</strong>上鎖。沒有密碼打不開。</p>` +
-        '<p>之後到「資料與設定」→「原始檔備份」，輸入密碼就能還原。</p><p>存好之後，就可以把電腦上的 JMSSAL、JMSSBK 刪掉。</p>',
+        `<p>之後到「資料與設定」→「原始檔備份」，輸入密碼就能還原。</p><p>存好之後，就可以把電腦上的 ${esc(names)} 刪掉。</p>`,
       fields: [], submit: '存成加密備份', cancel: '不用',
     });
-    if (!v) { toast('沒有做備份。JMSSAL、JMSSBK 用完記得刪掉', 5000); return; }
+    if (!v) { toast(`沒有做備份。${names} 用完記得刪掉`, 5000); return; }
     try {
       const out = await Dataset.makeRawBackup(S.vault, files, { range: span });
       const now = new Date(), today = (now.getFullYear() - 1911) * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
@@ -1409,7 +1502,7 @@
       a.download = name; a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 4000);
       showProgress(1, `已存成加密備份「${name}」（${(out.length / 1e6).toFixed(1)} MB）。現在可以把 ${names} 刪掉了。`);
-      toast('加密備份已存好，現在可以刪掉 JMSSAL、JMSSBK', 6000);
+      toast(`加密備份已存好，現在可以刪掉 ${names}`, 6000);
     } catch (err) { toast('備份失敗：' + err.message, 6000); }
   }
 
@@ -1448,7 +1541,10 @@
         return;
       }
       if (!S.raw && !S.vault) S.vault = await Dataset.Vault.create(v.pw); // 這台裝置還沒有資料：開啟密碼沿用備份的密碼
-      await addRawFiles(res.files.map((f) => ({ name: f.name, bytes: f.bytes.slice() })), { backup: false });
+      const fs3 = res.files.map((f) => ({ name: f.name, bytes: f.bytes.slice() }));
+      const { buy, rest } = await splitBuy(fs3);
+      if (rest.length) await addRawFiles(rest, { backup: false });
+      if (buy.length) await importBuy(buy, { backup: false });
     } finally {
       v.pw = ''; res.files.forEach((f) => f.bytes.fill(0)); res = null;
     }
@@ -1466,6 +1562,7 @@
     }
     S.raw = buf;
     S.E = new Engine(Dataset.hydrate(raw, S.meta, { ymMode: S.ymMode }));
+    buildBE();
     if (S.ref && !S.E.ymIndex.has(S.ref)) S.ref = null;
     // 檢查樞紐設定中的期間仍有效
     if (S.pivot.from && !S.E.ymIndex.has(S.pivot.from)) S.pivot.from = 0;
@@ -1509,6 +1606,9 @@
       : '尚未匯入。匯入後，商品類別會顯示名稱，並可以看商品大類（男、女、童、配件）。';
     $('#classClear').hidden = !c;
     const m = S.meta || {};
+    const B = S.meta && S.meta.buy;
+    $('#buyState').innerHTML = B && B.n && S.BE ? `廠商進貨資料：${nf0.format(B.src.filter((x) => !x).length)} 筆進貨、${nf0.format(B.src.filter((x) => x).length)} 筆退回廠商，${nf0.format(S.BE.vname.size)} 家廠商（${ymLabel(S.BE.minYm)}～${ymLabel(S.BE.maxYm)}），在「進貨分析」看。` : '廠商進貨資料：還沒有。把 JMSINC、JMSIBK 丟進上面的「更新資料」。';
+    $('#buyClear').hidden = !(B && B.n);
     $('#metaState').textContent = `每月固定費用：${m.fixedCost ? fmt.money(m.fixedCost) + ' 元' : '未填'}；應收帳款餘額：${m.ar ? fmt.money(m.ar.amount) + ' 元（' + ymLabel(m.ar.ym) + ' 月底）' : '未填'}。在儀表板的「損益兩平」「應收帳款天數」填寫。`;
   }
 
@@ -1555,6 +1655,13 @@
     fc.addEventListener('change', () => { importClassification(fc.files[0]); fc.value = ''; });
     $('#classClear').addEventListener('click', async () => {
       if (demoBlock()) return; const m = { ...(S.meta || {}) }; delete m.cat; S.meta = m; if (S.raw) await loadBuffer(Dataset.withMeta(S.raw, m), { save: true }); renderData(); toast('已移除商品類別代碼表'); });
+    $('#buyClear').addEventListener('click', async () => {
+      if (demoBlock()) return;
+      const b = $('#buyClear');
+      if (!b.dataset.sure) { b.dataset.sure = '1'; b.textContent = '確定要移除？再按一次'; setTimeout(() => { delete b.dataset.sure; b.textContent = '移除廠商進貨資料'; }, 5000); return; }
+      delete b.dataset.sure; b.textContent = '移除廠商進貨資料';
+      const m = { ...(S.meta || {}) }; delete m.buy; S.meta = m; if (S.raw) await loadBuffer(Dataset.withMeta(S.raw, m), { save: true }); renderData(); toast('已移除廠商進貨資料');
+    });
     $('#dbPeriod').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.dash.period = b.dataset.v; store.set('dash', S.dash); renderDashboard(); });
     const fb = $('#fileBak');
     $('#pickBak').addEventListener('click', () => fb.click());
@@ -1642,7 +1749,7 @@
       if (sig === 'DVPK') { await openPackBuffer(await file.arrayBuffer(), $('#openPw').value); return; }
       if (sig === 'DVRB') { restoreRawBackup(file); return; } // 原始檔備份
       if (!file.size) throw new Error('這個檔案是空的（0 KB），可能還沒下載完成。請重新傳送一次資料包。');
-      if (/\.dbf$/i.test(file.name)) { importXlsx([file], { force: true }); return; } // 系統原始資料（DBF）
+      if (/\.dbf$/i.test(file.name)) { importXlsx([file]); return; } // 系統原始資料（DBF）
       if (head[0] === 0xd0 && head[1] === 0xcf) { importXlsx(file, { force: true }); return; } // 有密碼的 Excel
       if (sig.startsWith('PK')) {
         const zip = await XlsxStream.openZip(file);

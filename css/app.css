@@ -1048,3 +1048,47 @@ body[data-view="recv"] main { max-width: none; }
 .it-chip .icon-btn { cursor: pointer; }
 .it-chip.dragging { cursor: grabbing; opacity: .85; box-shadow: 0 6px 16px -6px rgba(0,0,0,.45); border-color: var(--ar-y-deep); background: var(--ar-y-soft); }
 .it-grip { color: var(--muted); font-size: .7rem; letter-spacing: -2px; margin-right: 5px; }
+
+/* ============ 進貨分析（2026-11-17）：紅色、工廠圖示 ============ */
+:root { --bu-r: #d63a3a; --bu-r-deep: #a61e1e; --bu-r-ink: #5c0f0f; --bu-r-soft: #fdeaea; }
+[data-theme="night"] { --bu-r-soft: #3a1414; --bu-r-ink: #ffb3b3; }
+body:not([data-app="buy"]) .tab-group.g6 { display: none !important; }
+body[data-app="buy"] .tab-group.g1, body[data-app="buy"] .tab-group.g2, body[data-app="buy"] .tab-group.g3, body[data-app="buy"] .tab-group.g5 { display: none !important; }
+.brand .mk-buy, .brand .nm-buy { display: none; }
+body[data-app="buy"] .brand .mk-buy, body[data-app="buy"] .brand .nm-buy { display: inline; }
+body[data-app="buy"] .brand .mk-sales, body[data-app="buy"] .brand .nm-sales { display: none; }
+.brand .mk-buy { fill: var(--bu-r); } .brand .mk-buy .win { fill: var(--surface); }
+[data-theme="indigo"] body[data-app="buy"] .nav { background: linear-gradient(180deg, #5c0f0f 0%, #8f1a1a 38%, #b52828 72%, #d63a3a 100%); }
+[data-theme="indigo"] body[data-app="buy"] .brand .mk-buy { fill: #fff; } [data-theme="indigo"] body[data-app="buy"] .brand .mk-buy .win { fill: #b52828; }
+[data-theme="indigo"] body[data-app="buy"] .tabs a.on { background: #fff; color: var(--bu-r-deep); }
+[data-theme="indigo"] body[data-app="buy"] .tab-group.g6 { background: rgba(0,0,0,.22); border-color: rgba(255,255,255,.12); }
+[data-theme="indigo"] body[data-app="buy"] .tab-group.g4 { background: rgba(255,255,255,.14); }
+[data-theme="indigo"] body[data-app="buy"] .tg-label { color: #ffd0d0; }
+@media (max-width: 1180px) { [data-theme="indigo"] body[data-app="buy"] .tg-label { background: rgba(255,255,255,.35); } }
+[data-theme="night"] body[data-app="buy"] .nav { border-bottom: 2px solid var(--bu-r); }
+[data-theme="market"] body[data-app="buy"] .nav { box-shadow: inset 0 0 0 2px var(--bu-r), var(--shadow); }
+[data-theme="market"] body[data-app="buy"] .tabs a.on, [data-theme="night"] body[data-app="buy"] .tabs a.on { color: var(--bu-r); border-bottom-color: var(--bu-r); }
+[data-theme="market"] body[data-app="buy"] .tabs a.on { background: var(--bu-r); color: #fff; }
+[data-theme="indigo"] body[data-app="buy"] main, [data-theme="market"] body[data-app="buy"] main { --primary: var(--bu-r-deep); --primary-soft: var(--bu-r-soft); }
+[data-theme="night"] body[data-app="buy"] main { --primary: #ff6b6b; }
+body[data-app="buy"] .view-head { border-left: 6px solid var(--bu-r); padding-left: 14px; }
+body[data-app="buy"] .panel { border-top: 3px solid var(--bu-r); }
+[data-theme="indigo"] body[data-app="buy"] .kpi:first-child { background: var(--bu-r-deep); border-color: var(--bu-r-deep); }
+[data-theme="indigo"] body[data-app="buy"] .kpi:first-child .k, [data-theme="indigo"] body[data-app="buy"] .kpi:first-child .d { color: #ffd6d6; }
+body[data-app="buy"] .kpi:first-child .gr { color: inherit; }
+.gr { font-weight: 800; white-space: nowrap; }
+.tag-bk { background: var(--bu-r-soft); color: var(--bu-r-ink); border-radius: 6px; padding: 1px 6px; font-size: .82em; font-weight: 700; }
+.tag-in { color: var(--ink-2); font-size: .9em; }
+.buy-empty { text-align: center; padding: 34px 20px; }
+.buy-empty-ic { width: 76px; height: 76px; margin: 0 auto 10px; border-radius: 20px; display: grid; place-items: center; background: linear-gradient(145deg, #ef6a6a, #a61e1e); fill: #fff; --bu-win: #b52828; }
+.buy-empty-ic svg { width: 44px; height: 44px; }
+.buy-empty p { max-width: 560px; margin: 8px auto; }
+/* 首頁的進貨分析方塊 */
+.app-tile.buy { border-top: 4px solid var(--bu-r); }
+.app-tile.buy .app-ic { background: linear-gradient(145deg, #ef6a6a, #a61e1e); fill: #fff; --bu-win: #b52828; }
+.app-badge.soft { background: var(--surface-2); color: var(--muted); font-weight: 500; }
+/* 首頁上面的 W 標誌 */
+.home-logo { display: block; width: 92px; height: 92px; margin: 0 auto 10px; border-radius: 22px; box-shadow: 0 8px 22px -14px rgba(0,0,0,.55); }
+@media (max-width: 760px) { .home-logo { width: 64px; height: 64px; border-radius: 16px; } }
+[data-theme="indigo"] body[data-app="buy"] .tabs a:not(.on) { color: #ffe3e3; }
+a.btn { text-decoration: none; }

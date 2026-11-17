@@ -325,6 +325,89 @@ def make_raw_add(fx):
     print(f"加入新資料用的 JMSSAL／JMSSBK: {len(add)} 筆出貨、{len(bk_add)} 筆退貨（作廢 {info['gone']}、改業務員 {info['rep_changed']}）")
 
 
+# ---- 廠商進貨 JMSINC／退回廠商 JMSIBK（假的）----
+# 欄位順序照使用者給的範本；DBF 裡成本、數量、品項總額、廠商的英文欄名還不知道，故意用網站不認得的名字（X…），測試「依位置對欄」
+INC_FIELDS = [('DELIVNO', 'C', 9, 0), ('DELIVORD', 'C', 2, 0), ('CODE', 'C', 2, 0), ('STYLE', 'C', 15, 0), ('COLO', 'C', 2, 0), ('UNIT_NM', 'C', 2, 0),
+              ('TRAN_RATE', 'N', 4, 0), ('PRICE', 'N', 10, 1), ('XCOST', 'N', 10, 1), ('XQTY', 'N', 8, 0), ('UNIT', 'C', 1, 0), ('XGET', 'N', 12, 0),
+              ('RECDATE', 'C', 7, 0), ('RECEIVE', 'N', 12, 0), ('TOTBKPAY', 'N', 12, 0), ('PAY', 'L', 1, 0), ('CNFLAG', 'C', 1, 0), ('NRCHKDATE', 'C', 7, 0),
+              ('NRRANGE', 'N', 4, 0), ('ALLOW', 'N', 4, 0), ('XID', 'C', 6, 0), ('XNAME', 'C', 20, 0), ('AMOUNT', 'N', 12, 0), ('DELIVDATE', 'C', 7, 0)]
+IBK_FIELDS = INC_FIELDS[:1] + [('SERIES', 'C', 4, 0)] + INC_FIELDS[1:]
+INC_HEAD = ['進貨日期', 'DELIVORD', '商品類別', '商品代號', '顏色代號', '單位', 'TRAN_RATE', '單價', '成本', '數量', '單位(數字)', '品項總額', 'RECDATE', 'RECEIVE',
+            'TOTBKPAY', 'PAY', 'CNFLAG', 'NRCHKDATE', 'NRRANGE', 'ALLOW', '廠商代號', '廠商名', '進貨總額', '實際打單日期']
+IBK_HEAD = INC_HEAD[:1] + ['SERIES'] + INC_HEAD[1:-1] + ['打單日期']
+VENDS = [('F01', '晨星織造'), ('F02', '和風針織'), ('F05', '巧手車縫')]
+
+
+def buy_rows(seed=21, months=(11409, 11410, 11411), start=0):
+    """回傳 (進貨列, 退回列)。每列 dict，鍵是 DBF 欄名。一半打（12 件）一半件。"""
+    random.seed(seed)
+    inc, bk = [], []
+    no = start
+    for ym in months:
+        for k in range(6):
+            no += 1
+            vid, vn = VENDS[k % 3]
+            date = ym * 100 + random.randint(1, 28)
+            ordno = f'{ym}{no:04d}'
+            lines = []
+            for ln in range(1, random.randint(2, 4) + 1):
+                cat, pat, sizes, price = random.choice(PRODUCTS[:5])
+                dozen = random.random() < 0.5
+                q = random.randint(5, 40)
+                cost = round(price * 0.45 * (12 if dozen else 1))
+                lines.append(dict(DELIVNO=ordno, DELIVORD=f'{ln:02d}', CODE=cat, STYLE=pat.format(random.choice(sizes)), COLO=random.choice(COLORS), UNIT_NM='打' if dozen else '件',
+                                  TRAN_RATE=12, PRICE=0, XCOST=cost, XQTY=q, UNIT='2' if dozen else '1', XGET=cost * q, RECDATE='', RECEIVE=0, TOTBKPAY=0, PAY=False,
+                                  CNFLAG='', NRCHKDATE='', NRRANGE=0, ALLOW=0, XID=vid, XNAME=vn, AMOUNT=0, DELIVDATE=str(date)))
+            lines[0]['AMOUNT'] = sum(x['XGET'] for x in lines)
+            inc += lines
+        vid, vn = VENDS[ym % 3]
+        bk.append(dict(inc[-1], DELIVNO=f'{ym}9{no:03d}', SERIES='', DELIVORD='01', XQTY=2, XGET=inc[-1]['XCOST'] * 2, AMOUNT=inc[-1]['XCOST'] * 2, XID=vid, XNAME=vn, DELIVDATE=str(ym * 100 + 25)))
+    return inc, bk
+
+
+def buy_expect(inc, bk):
+    pcs = lambda r: r['XQTY'] * 12 if r['UNIT'] == '2' else r['XQTY']
+    return dict(nIn=len(inc), nBk=len(bk), inA=sum(r['XGET'] for r in inc), bkA=sum(r['XGET'] for r in bk), inP=sum(pcs(r) for r in inc), orders=len({r['DELIVNO'] for r in inc}))
+
+
+def write_buy_template_xlsx(path, inc, bk_mode=False):
+    """像使用者給的範本：中文表頭、工作表1"""
+    wb = openpyxl.Workbook(); s = wb.active; s.title = '工作表1'
+    head = IBK_HEAD if bk_mode else INC_HEAD
+    keys = [f[0] for f in (IBK_FIELDS if bk_mode else INC_FIELDS)]
+    s.append(head)
+    for r in inc: s.append([r.get(k, '') if k != 'PAY' else bool(r[k]) for k in keys])
+    wb.save(path)
+
+
+def make_buy(fx):
+    inc, bk = buy_rows()
+    write_dbf(os.path.join(fx, 'JMSINC.DBF'), INC_FIELDS, inc)
+    write_dbf(os.path.join(fx, 'JMSIBK.DBF'), IBK_FIELDS, [dict(r, SERIES='') for r in bk])
+    # 第二次（範本格式的 Excel）：114/11 的單再出現一次但少一張（作廢）、其中一張數量改了；新增 114/12 的單
+    inc2, bk2 = buy_rows(seed=33, months=(11412,), start=100)
+    old = [dict(r) for r in inc if r['DELIVNO'].startswith('11411')]
+    gone = sorted({r['DELIVNO'] for r in old})[0]
+    old = [r for r in old if r['DELIVNO'] != gone]
+    old[0]['XQTY'] += 1; old[0]['XGET'] = old[0]['XCOST'] * old[0]['XQTY']
+    write_buy_template_xlsx(os.path.join(fx, 'add', 'buy_add.xlsx'), old + inc2)
+    print(f'JMSINC／JMSIBK: {len(inc)} 筆進貨、{len(bk)} 筆退回；第二次 {len(old) + len(inc2)} 筆（作廢 {gone}）')
+    return inc, bk
+
+
+def buy_final():
+    """兩次合併後（不刪作廢的單）的期望值"""
+    inc, bk = buy_rows()
+    inc2, _ = buy_rows(seed=33, months=(11412,), start=100)
+    old = [dict(r) for r in inc if r['DELIVNO'].startswith('11411')]
+    gone = sorted({r['DELIVNO'] for r in old})[0]
+    old = [r for r in old if r['DELIVNO'] != gone]
+    old[0]['XQTY'] += 1; old[0]['XGET'] = old[0]['XCOST'] * old[0]['XQTY']
+    keep_del = [r for r in inc if not (r['DELIVNO'].startswith('11411') and r['DELIVNO'] != gone)]
+    return dict(keep=buy_expect(keep_del + old + inc2, bk), drop=buy_expect([r for r in keep_del if r['DELIVNO'] != gone] + old + inc2, bk), gone=gone,
+                new=len({r['DELIVNO'] for r in inc2}), upd=len({r['DELIVNO'] for r in old}))
+
+
 def recv_expect():
     """應收帳款假資料的期望值：每位客戶每月 應收 = 那個月（依實際日期）的出貨金額，退貨 = 退貨金額，折讓 6%，實收 = 應收淨額去掉尾數（百位以下）。
     故意讓 3A11 在 114/10 的實收少 10 元（對不上），7K02 在 114/11 的應收多打 500（和銷售資料不同）。"""
@@ -397,6 +480,7 @@ if __name__ == '__main__':
     make_raw(FX)
     os.makedirs(os.path.join(FX, 'add'), exist_ok=True)
     make_raw_add(FX)
+    make_buy(FX)
     make_dated_master(p('master_dated.xlsx'))
     make_recv(FX)
     encrypt_agile(p('class.xlsx'), p('class_agile.xlsx'), AGILE_PW)

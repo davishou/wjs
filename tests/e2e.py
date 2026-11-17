@@ -222,6 +222,7 @@ async def main():
     await dashboard(b)
     await raw_import(b)
     await raw_add(b)
+    await buy_flow(b)
     await recv_flow(b)
     await recv_phone(b)
     await report_page(b)
@@ -677,6 +678,85 @@ async def raw_add(b):
         await c.close()
 
 
+async def buy_flow(b):
+    """廠商進貨：JMSINC／JMSIBK 和 JMSSAL／JMSSBK 一起選（DBF 欄名不認得 → 依範本位置對欄）、進貨分析四頁、範本格式的 Excel 加入／更新、重新開啟還在。"""
+    sys.path.insert(0, HERE)
+    import make_fixtures as mf
+    inc, bk = mf.buy_rows(); e1 = mf.buy_expect(inc, bk); fin = mf.buy_final()
+    c = await b.new_context(viewport={'width': 1366, 'height': 900}, accept_downloads=True)
+    pg = await c.new_page(); errs = []
+    pg.on('pageerror', lambda e: errs.append(str(e)))
+    await pg.goto(URL + '#data'); await pg.wait_for_timeout(300)
+    await pg.set_input_files('#fileXlsx', [FX + '/JMSSAL.DBF', FX + '/JMSSBK.DBF', FX + '/JMSINC.DBF', FX + '/JMSIBK.DBF'])
+    await dlg_fill(pg, {'app': 'buy123', 'app2': 'buy123'})
+    await pg.wait_for_selector('#dlg[open]', timeout=60000); t = await pg.text_content('#dlgForm')
+    ok(f"{e1['nIn']} 筆進貨" in t and f"{e1['nBk']} 筆退回廠商" in t and '3 家廠商' in t, '四個 DBF 一起選：先匯客戶出貨退貨，再問要不要加入廠商進貨：' + t[:80])
+    ok(await pg.evaluate('window.__app.E.ds.nSales') > 0, '客戶出貨資料已先匯入')
+    await pg.click('#dlgOk')
+    await pg.wait_for_selector('#dlg[open]'); t = await pg.text_content('#dlgForm')
+    ok('加密備份' in t and 'JMSINC' in t and 'JMSSAL' in t, '最後只問一次要不要做加密備份，四個檔案一起')
+    await pg.click('#dlgCancel'); await pg.wait_for_timeout(200)
+    st = await pg.text_content('#buyState')
+    ok(f"{e1['nIn']} 筆進貨" in st and '3 家廠商' in st, '資料與設定顯示廠商進貨資料：' + st)
+    # 首頁四個方塊
+    await pg.goto(URL + '#home'); await pg.wait_for_selector('#homeApps .app-tile.buy')
+    ok(await pg.locator('#homeApps .app-tile').count() == 4 and '進貨分析' in await pg.text_content('#homeApps .app-tile.buy') and await pg.locator('.home-logo').count() == 1, '首頁有進貨分析方塊（工廠圖示）和 W 標誌')
+    ok(await pg.is_hidden('.tab-group.g6'), '在銷售分析裡看不到進貨選單')
+    await pg.click('#homeApps .app-tile.buy'); await pg.wait_for_selector('#buyBody .kpis')
+    ok(await pg.evaluate('document.body.dataset.app') == 'buy' and await pg.is_visible('.tab-group.g6') and await pg.is_hidden('.tab-group.g1') and await pg.is_hidden('.tab-group.g5') and '進貨分析' in await pg.text_content('.brand'), '進到進貨分析：紅色側欄、只有進貨的頁面')
+    ok('rgb(92, 15, 15)' in await pg.evaluate("getComputedStyle(document.querySelector('.nav')).backgroundImage"), '側欄是紅色')
+    await pg.click('#buyPeriod button[data-v=all]'); await pg.wait_for_timeout(300)
+    w = await pg.evaluate('window.__buy')
+    ok(abs(w['inA'] - e1['inA']) < 0.5 and abs(w['bkA'] - e1['bkA']) < 0.5 and abs(w['inP'] - e1['inP']) < 0.5 and w['orders'] == e1['orders'] and abs(sum(w['trend']) - (e1['inA'] - e1['bkA'])) < 0.5,
+       f"全部期間：進貨 {w['inA']}、退回 {w['bkA']}、件數 {w['inP']}（打 × 12）、{w['orders']} 張單，和 Python 一樣（依位置對欄）")
+    await pg.screenshot(path=SH + '/50_buy_home.png', full_page=True)
+    await pg.click('a[data-view=buyV]'); await pg.wait_for_selector('#bvTable tbody tr')
+    v = await pg.evaluate('window.__buyV')
+    ok(len(v) == 3 and {x[1] for x in v} == {'晨星織造', '和風針織', '巧手車縫'} and abs(sum(x[2] for x in v) - (e1['inA'] - e1['bkA'])) < 0.5, f'廠商頁：3 家，中文名（Big5）正確，合計對：{v}')
+    await pg.click('#bvTable tbody tr'); await pg.wait_for_selector('#drawer.open #bdOrders tbody tr')
+    ok(await pg.locator('#bdStyles tbody tr').count() > 0, '點廠商打開明細：每月、款號、最近的進貨單')
+    await pg.click('#drawer [data-close].icon-btn')
+    await pg.click('a[data-view=buyP]'); await pg.wait_for_selector('#bpTable tbody tr')
+    pp = await pg.evaluate('window.__buyP')
+    ok(any(x[3] is not None for x in pp['list']) and '同期淨賣出' in await pg.text_content('#bpTable thead'), '商品頁：款號列表有同期淨賣出件數（銷售分析的資料）')
+    await pg.click('#bpTable tbody tr'); await pg.wait_for_selector('#drawer.open #bdCost tbody tr'); await pg.click('#drawer [data-close].icon-btn')
+    await pg.screenshot(path=SH + '/51_buy_prod.png', full_page=True)
+    await pg.click('a[data-view=buyO]'); await pg.wait_for_selector('#boTable tbody tr')
+    ok(await pg.evaluate('window.__buyO') == e1['orders'] + e1['nBk'], '進貨單頁：一張單一列（進貨＋退回）')
+    await pg.click('#boKind button[data-v=bk]'); await pg.wait_for_timeout(200)
+    ok(await pg.evaluate('window.__buyO') == e1['nBk'], '只看退回廠商')
+    await pg.click('#boTable tbody tr'); await pg.wait_for_selector('#drawer.open #bdLines tbody tr'); await pg.click('#drawer [data-close].icon-btn')
+    # 第二次：範本格式的 Excel（中文表頭），依單號更新；作廢的單勾選刪除
+    await pg.goto(URL + '#data'); await pg.wait_for_timeout(200)
+    await pg.set_input_files('#fileXlsx', FX + '/add/buy_add.xlsx')
+    await pg.wait_for_selector('#dlg[open]'); t = await pg.text_content('#dlgForm')
+    ok(f"新的單：{fin['new']} 張" in t and f"已經有的單：{fin['upd']} 張" in t and '1 張單網站裡有' in t and fin['gone'] in t, '範本格式的 Excel：列出新的、更新的、作廢的單：' + t[:120])
+    await dlg_fill(pg, {}, check=True)
+    await pg.wait_for_function("/完成：進貨資料/.test(document.querySelector('#importProgress p').textContent)")
+    await pg.goto(URL + '#buy'); await pg.wait_for_selector('#buyBody .kpis'); await pg.click('#buyPeriod button[data-v=all]'); await pg.wait_for_timeout(300)
+    w = await pg.evaluate('window.__buy'); E2 = fin['drop']
+    ok(abs(w['inA'] - E2['inA']) < 0.5 and w['orders'] == E2['orders'], f"更新後：進貨 {w['inA']}、{w['orders']} 張（Python {E2['inA']}、{E2['orders']}）")
+    # 重新開啟：進貨資料跟著加密存著
+    await pg.reload(); await pg.wait_for_selector('#lock:not([hidden])'); await pg.fill('#lockPw', 'buy123'); await pg.click('#lockGo')
+    await pg.wait_for_selector('#lock[hidden]', state='attached'); await pg.goto(URL + '#buy'); await pg.wait_for_selector('#buyBody .kpis')
+    ok(abs((await pg.evaluate('window.__buy'))['inA'] - E2['inA']) < 0.5, '重新開啟後進貨資料還在（加密保存）')
+    for th in ['night', 'market']:
+        await pg.evaluate(f"localStorage.setItem('dv.look','{th}')"); await pg.reload(); await pg.fill('#lockPw', 'buy123'); await pg.click('#lockGo')
+        await pg.wait_for_selector('#lock[hidden]', state='attached'); await pg.goto(URL + '#buyV'); await pg.wait_for_selector('#bvTable tbody tr'); await pg.screenshot(path=SH + f'/52_buyV_{th}.png', full_page=True)
+    await pg.evaluate("localStorage.setItem('dv.look','indigo')")
+    ok(not errs, '進貨分析沒有 JS 錯誤 ' + str(errs))
+    await c.close()
+    # 手機：每一頁都不能比螢幕寬
+    c = await b.new_context(viewport={'width': 390, 'height': 844}, is_mobile=True, has_touch=True)
+    pg = await c.new_page(); await pg.goto(URL + '#data'); await pg.wait_for_timeout(300); await pg.click('#demoStart'); await pg.wait_for_timeout(1500)
+    for v in ['buy', 'buyV', 'buyP', 'buyO']:
+        await pg.evaluate(f"location.hash='#{v}'"); await pg.wait_for_timeout(500)
+        sw = await pg.evaluate('document.documentElement.scrollWidth')
+        ok(sw <= 392, f'手機 {v}：寬度 {sw}')
+    await pg.evaluate("location.hash='#buy'"); await pg.wait_for_timeout(400); await pg.screenshot(path=SH + '/53_buy_phone.png')
+    await c.close()
+
+
 async def recv_flow(b):
     """應收帳款：匯入有密碼的應收帳款 Excel、自動檢查、修改、折率 %、備註、客戶歷史、加入客戶、存檔、應收分析。"""
     sys.path.insert(0, HERE)
@@ -693,7 +773,7 @@ async def recv_flow(b):
     await pg.wait_for_selector('#dlg[open]'); await pg.click('#dlgCancel'); await pg.wait_for_timeout(200)
     # 首頁：銷售分析（藍）、應收實收帳款（黃、$）分開
     await pg.goto(URL + '#home'); await pg.wait_for_selector('#homeApps .app-tile.ar')
-    ok(await pg.locator('#homeApps .app-tile').count() == 3 and '應收實收帳款' in await pg.text_content('#homeApps .app-tile.ar') and '$' in await pg.text_content('#homeApps .app-tile.ar .app-ic'), '首頁有三個方塊：銷售分析、應收實收帳款（$ 圖示）、資料與設定')
+    ok(await pg.locator('#homeApps .app-tile').count() == 4 and '應收實收帳款' in await pg.text_content('#homeApps .app-tile.ar') and '$' in await pg.text_content('#homeApps .app-tile.ar .app-ic'), '首頁有四個方塊：銷售分析、應收實收帳款（$ 圖示）、進貨分析、資料與設定')
     ok(await pg.is_hidden('.tab-group.g5') and await pg.is_visible('.tab-group.g1'), '在銷售分析裡，左側選單看不到應收帳款')
     await pg.screenshot(path=SH + '/39_home.png')
     await pg.click('#homeApps .app-tile.ar'); await pg.wait_for_selector('#rcImport')

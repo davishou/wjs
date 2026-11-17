@@ -109,12 +109,52 @@
       meta: {
         cat: { map: Object.fromEntries(CATS.filter((c) => c[1]).map((c) => [c[0], [c[1], c[2]]])), file: '示範用分類表', rows: CATS.length - 1, at: new Date().toISOString() },
         fixedCost: 300000, ar: { amount: 2600000, ym: 11509 },
+        buy: buildBuy(),
       },
       str: {}, num: {}, src: Uint8Array.from(src),
     };
     STR.forEach((k) => { raw.str[k] = { dict: dicts[k].list, codes: Int32Array.from(codes[k]) }; });
     Object.keys(num).forEach((k) => { raw.num[k] = Float64Array.from(num[k]); });
     return raw;
+  }
+
+  // 示範的廠商進貨（JMSINC）／退回廠商（JMSIBK）：6 家虛構的工廠，每家負責幾個類別；115 年起有幾款進貨成本變貴
+  const VENDS = [['F01', '晨星織造'], ['F02', '和風針織'], ['F03', '永綿紡織'], ['F05', '巧手車縫'], ['F08', '南光成衣'], ['F12', '大千貿易']];
+  function buildBuy() {
+    const rows = []; let seq = 0, bseq = 0;
+    const vendOf = (st) => VENDS[st.ci % VENDS.length];
+    const up = new Set(STYLES.filter((s, i) => i % 7 === 3).map((s) => s.base));
+    for (let y = 113; y <= 115; y++) {
+      for (let m = 1; m <= (y === 115 ? 9 : 12); m++) {
+        const ym = y * 100 + m;
+        for (const [vc, vn] of VENDS) {
+          const mine = STYLES.filter((s) => vendOf(s)[0] === vc);
+          if (!mine.length) continue;
+          const nOrd = R() < 0.25 ? 0 : ri(1, 3);
+          for (let o = 0; o < nOrd; o++) {
+            const ord = `${ym}${String(++seq).padStart(4, '0')}`, date = ym * 100 + ri(1, 28);
+            const lines = ri(2, 6);
+            for (let l = 0; l < lines; l++) {
+              const st = wpick(mine, mine.map((s) => s.pop));
+              const dozen = st.big !== '百貨' && R() < 0.7;
+              const per = Math.round(st.price * st.cost * 0.8 * (y === 115 && up.has(st.base) ? 1.08 : 1) * 10) / 10; // 每件成本
+              const qty = dozen ? ri(5, 60) : ri(20, 300);
+              const cost = dozen ? Math.round(per * 12) : per;
+              rows.push({ src: 0, ord, ln: String(l + 1).padStart(2, '0'), cat: st.cat, sku: skuOf(st), color: wpick(COLORS[0], COLORS[1]), unit: dozen ? '打' : '件', vend: vc, vname: vn,
+                tran: dozen ? 12 : 1, price: 0, cost, qty, unitn: dozen ? 2 : 1, amt: Math.round(cost * qty), tot: 0, pay: 0, date });
+              if (R() < 0.05) { // 退回廠商（瑕疵）
+                const q = Math.max(1, Math.round(qty * 0.1));
+                rows.push({ ...rows[rows.length - 1], src: 1, ord: `${ym}9${String(++bseq).padStart(3, '0')}`, ln: '01', qty: q, amt: Math.round(cost * q), date: Math.min(ym * 100 + 28, date + ri(3, 15)) });
+              }
+            }
+          }
+        }
+      }
+    }
+    rows.sort((a, b) => a.src - b.src || (a.ord < b.ord ? -1 : 1));
+    const K = ['ord', 'ln', 'cat', 'sku', 'color', 'unit', 'vend', 'vname', 'tran', 'price', 'cost', 'qty', 'unitn', 'amt', 'tot', 'pay', 'date'];
+    const cols = {}; K.forEach((k) => { cols[k] = rows.map((r) => r[k]); });
+    return { v: 1, n: rows.length, src: rows.map((r) => r.src), cols, added: [] };
   }
 
   root.Demo = { build };

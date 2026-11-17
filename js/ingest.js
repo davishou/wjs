@@ -375,5 +375,126 @@
     return { rows: out, months: [...months].sort((a, b) => a - b), blocks, backup };
   }
 
-  root.Ingest = { ingestXlsx, ingestFiles, readClassification, detectKind, parseDate, readRecvBook };
+  // ---- 廠商進貨（JMSINC）／退回廠商（JMSIBK）（2026-11-17）----
+  // 使用者給的範本（另存的 Excel）表頭：進貨日期（其實是單號）、DELIVORD、商品類別、商品代號、顏色代號、單位、TRAN_RATE、單價、成本、數量、單位(數字)、
+  //   品項總額、RECDATE、RECEIVE、TOTBKPAY、PAY、CNFLAG、NRCHKDATE、NRRANGE、ALLOW、廠商代號、廠商名、進貨總額（只在每張單第一列）、實際打單日期／打單日期。
+  //   JMSIBK 在單號後面多一欄 SERIES。
+  // 依表頭名稱對欄；DBF 的英文欄位名稱還沒看過，所以 DBF 的欄位順序和範本一樣（用 DELIVORD、TRAN_RATE、NRRANGE… 這些英文欄名確認）時，改依位置對。
+  const BUY_COLS = {
+    ord: ['進貨日期', '進貨單號', '退貨日期', '退貨單號', '單號', 'DELIVNO'], ln: ['DELIVORD'],
+    cat: ['商品類別', 'CODE'], sku: ['商品代號', 'STYLE'], color: ['顏色代號', '顏色', 'COLO'], unit: ['單位', 'UNIT_NM'],
+    tran: ['TRAN_RATE'], price: ['單價', 'PRICE'], cost: ['成本', 'COST', 'INPRICE'], qty: ['數量', 'INQTY', 'QTY', 'OUTQTY'], unitn: ['單位(數字)', 'UNIT'],
+    amt: ['品項總額', '品項金額', '退貨金額', 'INGET', 'SALEGET'], pay: ['PAY'],
+    vend: ['廠商代號', 'FACNO', 'VENDNO', 'ID'], vname: ['廠商名', '廠商名稱', 'FNAME', 'SNAME'], tot: ['進貨總額', '退貨總額', 'AMOUNT'],
+    date: ['實際打單日期', '打單日期', '實際進貨日期', '實際退貨日期', 'DELIVDATE'],
+  };
+  const BUY_NEED = ['ord', 'sku', 'qty', 'amt', 'vend'];
+  // 範本的欄位順序（JMSINC）；null = 網站不用的欄位
+  const BUY_ORDER = ['ord', 'ln', 'cat', 'sku', 'color', 'unit', 'tran', 'price', 'cost', 'qty', 'unitn', 'amt', null, null, null, 'pay', null, null, null, null, 'vend', 'vname', 'tot', 'date'];
+  const BUY_ANCHOR = { 1: 'DELIVORD', 6: 'TRAN_RATE', 12: 'RECDATE', 13: 'RECEIVE', 14: 'TOTBKPAY', 15: 'PAY', 16: 'CNFLAG', 17: 'NRCHKDATE', 18: 'NRRANGE', 19: 'ALLOW' };
+  const BUY_STR = ['ord', 'ln', 'cat', 'sku', 'color', 'unit', 'vend', 'vname'];
+  const up = (h) => h.map((x) => String(x == null ? '' : x).trim());
+  // 表頭是不是廠商進退貨：有「廠商代號／廠商名」，或有 NRRANGE、ALLOW、CNFLAG 這類只有進貨表才有的欄位（客戶出貨表 JMSSAL 有 EMPNO、OUTPRICE）
+  function isBuyHeader(header, name) {
+    const h = up(header), has = (n) => h.includes(n);
+    if (/JMSI(NC|BK)/i.test(name || '')) return true;
+    if (has('廠商代號') || has('廠商名')) return true;
+    if (has('EMPNO') || has('OUTPRICE') || has('客戶代號') || has('業務員')) return false;
+    return ['NRRANGE', 'ALLOW', 'CNFLAG', 'NRCHKDATE'].filter(has).length >= 3;
+  }
+  // 0 進貨、1 退回廠商
+  const buyKind = (header, name) => (/IBK/i.test(name || '') || up(header)[1] === 'SERIES' || up(header).includes('退貨單號') ? 1 : 0);
+  function buyIndex(header, dbf) {
+    const h = up(header);
+    const shift = h[1] === 'SERIES' ? 1 : 0; // JMSIBK 多一欄 SERIES
+    const anchors = Object.entries(BUY_ANCHOR).filter(([i, n]) => h[+i + (+i > 0 ? shift : 0)] === n).length;
+    const idx = {};
+    if (dbf && anchors >= 8) {
+      BUY_ORDER.forEach((k, i) => { if (k) idx[k] = i + (i > 0 ? shift : 0); });
+      const d = h.indexOf('DELIVDATE'); if (d >= 0) idx.date = d;
+      return { idx, by: 'pos' };
+    }
+    for (const k in BUY_COLS) { idx[k] = -1; for (const n of BUY_COLS[k]) { const i = h.indexOf(n); if (i >= 0) { idx[k] = i; break; } } }
+    return { idx, by: 'name' };
+  }
+  // 讀一張表：回傳 { rows: [{…}], kind, by }
+  async function readBuyTable(scan, sst, label, name, dbf) {
+    let header = null, idx = null, cur = [], kind = 0, by = 'name';
+    const rows = []; let empty = 0;
+    const h = {
+      maxCol: 60, stop: false,
+      onCell(c, k, v) { cur[c] = k === 1 ? sst[v] : v; },
+      onRowEnd() {
+        if (!header) {
+          header = up(cur); cur = [];
+          ({ idx, by } = buyIndex(header, dbf));
+          const miss = BUY_NEED.filter((k) => idx[k] == null || idx[k] < 0);
+          if (miss.length) throw new Error('「' + label + '」找不到欄位：' + miss.map((k) => BUY_COLS[k][0]).join('、') + '。欄位：' + header.filter(Boolean).join('、'));
+          kind = buyKind(header, name);
+          return;
+        }
+        const g = (k) => (idx[k] != null && idx[k] >= 0 ? cur[idx[k]] : undefined);
+        const ord = g('ord'), sku = g('sku');
+        if ((ord == null || String(ord).trim() === '') && (sku == null || String(sku).trim() === '')) { cur = []; if (++empty > 2000 && rows.length) h.stop = true; return; }
+        empty = 0;
+        const o = {};
+        for (const k of BUY_STR) { const v = g(k); o[k] = v == null ? '' : String(typeof v === 'number' && k === 'ord' ? Math.round(v) : v).trim(); }
+        for (const k of ['tran', 'price', 'cost', 'qty', 'unitn', 'amt', 'tot']) { const v = g(k); const x = typeof v === 'number' ? v : parseFloat(v); o[k] = Number.isFinite(x) ? x : 0; }
+        const p = g('pay'); o.pay = p === true || p === 1 || /^(T|Y|TRUE|1)$/i.test(String(p == null ? '' : p)) ? 1 : 0;
+        o.date = parseDate(g('date'));
+        rows.push(o); cur = [];
+      },
+    };
+    await scan(h);
+    return { rows, kind, by };
+  }
+  // 讀廠商進退貨檔（DBF 或 Excel，可以一次好幾個）。回傳 { src: [], cols: {…}, n, nIn, nBk, dated, by, warning }
+  async function readBuyFiles(sources, onStatus) {
+    const all = [[], []]; let bad = 0, text = 0; const by = new Set();
+    for (const f of sources) {
+      if (onStatus) onStatus({ stage: '讀取 ' + f.name, pct: 0 });
+      const tabs = [];
+      if (f.dbf) {
+        const H = await self.Dbf.readHeader(f.src);
+        const head = H.fields.map((x) => x.name);
+        if (!isBuyHeader(head, f.name)) throw new Error('「' + f.name + '」看起來不是廠商進貨（JMSINC）或退回廠商（JMSIBK）的資料。欄位：' + head.join('、'));
+        tabs.push({ label: f.name, sst: [], dbf: true, scan: async (h) => { const st = await self.Dbf.scanDbf(f.src, h); bad += st.bad; text += st.text; } });
+      } else {
+        const zip = await X.openZip(f.src);
+        const sheets = await X.listSheets(zip);
+        const sst = X.parseSharedStrings(zip.entries['xl/sharedStrings.xml'] ? await zip.text('xl/sharedStrings.xml') : '');
+        for (const sh of sheets) {
+          if (!zip.entries[sh.path]) continue;
+          const head = await headerOfSheet(zip, sst, sh.path);
+          if (isBuyHeader(head, f.name + ' ' + sh.name)) tabs.push({ label: (sources.length > 1 ? f.name + '：' : '') + sh.name, sst, dbf: false, scan: (h) => X.scanSheet(zip, sh.path, h) });
+        }
+        if (!tabs.length) throw new Error('「' + f.name + '」裡找不到廠商進退貨的表（要有「廠商代號」欄）');
+      }
+      for (const t of tabs) {
+        const r = await readBuyTable(t.scan, t.sst, t.label, f.name + ' ' + t.label, t.dbf);
+        by.add(r.by); for (const o of r.rows) all[r.kind].push(o);
+      }
+    }
+    const rows = all[0].concat(all[1]);
+    const out = { n: rows.length, nIn: all[0].length, nBk: all[1].length, src: rows.map((_, i) => (i < all[0].length ? 0 : 1)), by: [...by].join(','), dated: rows.filter((o) => o.date).length, cols: {} };
+    for (const k of BUY_STR) out.cols[k] = rows.map((o) => o[k]);
+    for (const k of ['tran', 'price', 'cost', 'qty', 'unitn', 'amt', 'tot', 'pay', 'date']) out.cols[k] = rows.map((o) => o[k]);
+    if (text && bad / text > 0.02) out.warning = 'DBF 裡的中文有一部分無法辨識，廠商名可能會有亂碼。';
+    if (!rows.length) throw new Error('檔案裡沒有任何進貨或退回廠商的資料');
+    return out;
+  }
+  // 分辨檔案：'buy' 廠商進退貨、'sales' 其他（客戶出貨退貨、總表、分類表…）。有開啟密碼的 Excel 看不到表頭，只看檔名
+  async function sniffBuy(f) {
+    if (/JMSI(NC|BK)/i.test(f.name || '')) return 'buy';
+    if (f.encrypted) return 'sales';
+    if (f.dbf) { const H = await self.Dbf.readHeader(f.src); return isBuyHeader(H.fields.map((x) => x.name), f.name) ? 'buy' : 'sales'; }
+    const zip = await X.openZip(f.src);
+    const sheets = await X.listSheets(zip);
+    if (sheets.some((s) => ['原始進貨表', '進貨表', '原始出貨表', '出貨表', '原始退貨表', '退貨表'].includes(s.name.trim()))) return 'sales';
+    const sst = X.parseSharedStrings(zip.entries['xl/sharedStrings.xml'] ? await zip.text('xl/sharedStrings.xml') : '');
+    for (const sh of sheets.slice(0, 6)) if (zip.entries[sh.path] && isBuyHeader(await headerOfSheet(zip, sst, sh.path), '')) return 'buy';
+    return 'sales';
+  }
+
+  root.Ingest = { ingestXlsx, ingestFiles, readClassification, detectKind, parseDate, readRecvBook, readBuyFiles, sniffBuy, isBuyHeader };
 })(typeof self !== 'undefined' ? self : globalThis);

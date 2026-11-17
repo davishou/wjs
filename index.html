@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#26437A">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="銷售分析">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -50,7 +50,8 @@
     <div class="brand">
       <svg class="brand-mark mk-sales" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="17" width="5" height="12" rx="1.5"/><rect x="11" y="10" width="5" height="19" rx="1.5"/><rect x="19" y="4" width="5" height="25" rx="1.5"/><path d="M26 22h3v7h-3z" opacity=".45"/></svg>
       <svg class="brand-mark mk-ar" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14"/><text x="16" y="22.5" text-anchor="middle" font-size="19" font-weight="800" font-family="Arial, sans-serif" fill="var(--ar-y-ink)">$</text></svg>
-      <div class="brand-text"><strong><span class="nm-sales">銷售分析</span><span class="nm-ar">應收實收帳款</span></strong><span id="brandSub">尚未載入資料</span></div>
+      <svg class="brand-mark mk-buy" viewBox="0 0 32 32" aria-hidden="true"><path d="M3 28V14l7 4v-4l7 4v-4l7 4V5h4v23z"/><rect x="7" y="21" width="3" height="3" rx=".5" class="win"/><rect x="13" y="21" width="3" height="3" rx=".5" class="win"/><rect x="19" y="21" width="3" height="3" rx=".5" class="win"/></svg>
+      <div class="brand-text"><strong><span class="nm-sales">銷售分析</span><span class="nm-ar">應收實收帳款</span><span class="nm-buy">進貨分析</span></strong><span id="brandSub">尚未載入資料</span></div>
     </div>
     <nav class="tabs">
       <div class="tab-group g0">
@@ -71,6 +72,12 @@
         <a href="#recv" data-view="recv"><svg viewBox="0 0 24 24"><path d="M3 4h18v4H3zm0 6h8v10H3zm10 0h8v4h-8zm0 6h8v4h-8z"/></svg><span class="t-long">收款登記</span><span class="t-short">收款</span></a>
         <a href="#recvA" data-view="recvA"><svg viewBox="0 0 24 24"><path d="M3 21V3h2v16h16v2zm4-4v-6h3v6zm5 0V7h3v10zm5 0v-3h3v3z"/></svg><span class="t-long">應收分析</span><span class="t-short">應收</span></a>
       </div>
+      <div class="tab-group g6"><span class="tg-label">進貨</span>
+        <a href="#buy" data-view="buy"><svg viewBox="0 0 24 24"><path d="M2 21V10l5 3v-3l5 3v-3l5 3V3h3v18z"/></svg><span>概況</span></a>
+        <a href="#buyV" data-view="buyV"><svg viewBox="0 0 24 24"><path d="M4 21V9l8-5 8 5v12h-5v-6H9v6z"/></svg><span>廠商</span></a>
+        <a href="#buyP" data-view="buyP"><svg viewBox="0 0 24 24"><path d="M3 6h18l-2 6c-3 .4-5 2.6-5.6 6h-2.8C10 14.6 8 12.4 5 12z"/></svg><span>商品</span></a>
+        <a href="#buyO" data-view="buyO"><svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6zm8 1.5V8h4.5zM8 12h8v2H8zm0 4h8v2H8z"/></svg><span class="t-long">進貨單</span><span class="t-short">單</span></a>
+      </div>
       <div class="tab-group g3"><span class="tg-label">報告與工具</span>
         <a href="#report" data-view="report"><svg viewBox="0 0 24 24"><path d="M4 20h16v2H2V2h2zm2-3V9h3v8zm5 0V4h3v13zm5 0v-6h3v6z"/></svg><span class="t-long">圖表報告</span><span class="t-short">報告</span></a>
         <a href="#pivot" data-view="pivot"><svg viewBox="0 0 24 24"><path d="M3 3h18v4H3zm0 6h5v12H3zm7 0h11v12H10z"/></svg><span class="t-long">樞紐分析</span><span class="t-short">樞紐</span></a>
@@ -86,7 +93,7 @@
     <!-- 首頁：像 Odoo 的應用程式選單，銷售分析（藍）和應收實收帳款（黃）分開 -->
     <section class="view" id="view-home" hidden>
       <div class="home">
-        <div class="home-head"><h1>要做什麼？</h1><p class="sub" id="homeSub"></p></div>
+        <div class="home-head"><img class="home-logo" src="icons/icon.svg" alt=""><h1>要做什麼？</h1><p class="sub" id="homeSub"></p></div>
         <div class="apps" id="homeApps"></div>
       </div>
     </section>
@@ -252,6 +259,28 @@
     </section>
 
     <!-- 資料與設定 -->
+    <!-- 進貨分析（紅色）：廠商進貨 JMSINC、退回廠商 JMSIBK -->
+    <section class="view" id="view-buy" hidden>
+      <div class="view-head"><div><h1>進貨概況</h1><p class="sub" id="buySub"></p></div></div>
+      <div class="period-bar" id="buyPeriod"></div>
+      <div id="buyBody"></div>
+    </section>
+    <section class="view" id="view-buyV" hidden>
+      <div class="view-head"><div><h1>廠商</h1><p class="sub" id="buyVSub"></p></div></div>
+      <div class="period-bar" id="buyVPeriod"></div>
+      <div id="buyVBody"></div>
+    </section>
+    <section class="view" id="view-buyP" hidden>
+      <div class="view-head"><div><h1>進貨商品</h1><p class="sub" id="buyPSub"></p></div></div>
+      <div class="period-bar" id="buyPPeriod"></div>
+      <div id="buyPBody"></div>
+    </section>
+    <section class="view" id="view-buyO" hidden>
+      <div class="view-head"><div><h1>進貨單</h1><p class="sub" id="buyOSub"></p></div></div>
+      <div class="period-bar" id="buyOPeriod"></div>
+      <div id="buyOBody"></div>
+    </section>
+
     <section class="view" id="view-data" hidden>
       <div class="view-head"><div><h1>資料與設定</h1><p class="sub">更新 Excel、切換介面風格、匯出手機用資料包。</p></div></div>
 
@@ -271,6 +300,7 @@
             <li><strong>第一次</strong>：選全部期間的 JMSSAL 和 JMSSBK（或總表），整份匯入。</li>
             <li><strong>之後每個月、每天</strong>：只要匯出新的期間，JMSSAL、JMSSBK 一起選。依單號加入或更新，<strong>業務員保留原本的</strong>；這段期間內網站有、系統沒有的單（多半是作廢）會先問你要不要刪。完成後問你要不要把原檔做成加密備份。</li>
             <li><strong>總表 Excel</strong>：已經有資料時，會問你要「只更新檔案裡的月份」還是「整份取代」。</li>
+            <li><strong>廠商進貨</strong>：JMSINC（進貨）、JMSIBK（退回廠商）也丟這裡，可以和 JMSSAL、JMSSBK 一起選，會自動分開。一樣依單號加入或更新，到「進貨分析」看。</li>
           </ul>
           <p class="hint">.DBF 直接選就好，不用先轉 Excel，中文才不會變亂碼。商品類別代碼表、原始檔備份（.dvr）也可以丟進來，會自動辨識。檔案只在這台裝置上處理，不會上傳；有開啟密碼的 Excel 會請你輸入密碼，在瀏覽器內解密。</p>
         </div>
@@ -292,6 +322,7 @@
         <input type="file" id="fileClass" accept=".xlsx,.xlsm" hidden>
         <div class="row"><button class="btn primary" id="pickClass">匯入代碼表</button><button class="btn danger" id="classClear" hidden>移除代碼表</button></div>
         <p class="hint" id="metaState" style="margin-top:12px"></p>
+        <p class="hint" id="buyState"></p><div class="row"><button class="btn danger" id="buyClear" hidden>移除廠商進貨資料</button></div>
       </div>
 
       <div class="panel">
@@ -363,6 +394,7 @@
 <script src="js/office-crypto.js"></script>
 <script src="js/recv-backup.js"></script>
 <script src="js/recv.js"></script>
+<script src="js/buy.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

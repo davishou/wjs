@@ -74,6 +74,31 @@ self.onmessage = async (e) => {
       const add = await readExcel(e.data.files, password, { allowNoSales: true });
       const buf = self.Dataset.serialize(add);
       self.postMessage({ type: 'done', buf, info: { dated: add.dated, nSales: add.nSales, nReturns: add.nReturns, warning: add.warning || '' } }, [buf]);
+    } else if (type === 'buySniff') {
+      // 每個檔案是不是廠商進退貨（JMSINC／JMSIBK）
+      const kinds = [];
+      for (const f of e.data.files) {
+        const bytes = f.bytes instanceof Uint8Array ? f.bytes : null;
+        const head = bytes ? bytes.subarray(0, 8) : new Uint8Array(await f.slice(0, 8).arrayBuffer());
+        const src = bytes || f;
+        try { kinds.push(await self.Ingest.sniffBuy({ src, name: f.name, dbf: self.Dbf.isDbf(head, f.name), encrypted: self.OfficeCrypto.isCfb(head) })); } catch (er) { kinds.push('sales'); }
+      }
+      self.postMessage({ type: 'done', kinds });
+    } else if (type === 'buyRead') {
+      // 讀廠商進退貨（可以有開啟密碼的 Excel；在記憶體內解密，讀完清空）
+      const sources = [], plains = [];
+      try {
+        for (const f of e.data.files) {
+          if (f.bytes instanceof Uint8Array) { sources.push({ src: f.bytes, name: f.name, dbf: self.Dbf.isDbf(f.bytes.subarray(0, 8), f.name) }); continue; }
+          const head = new Uint8Array(await f.slice(0, 8).arrayBuffer());
+          if (self.OfficeCrypto.isCfb(head)) {
+            const plain = await self.OfficeCrypto.decryptXlsx(new Uint8Array(await f.arrayBuffer()), password, report);
+            plains.push(plain); sources.push({ src: plain, name: f.name, dbf: false });
+          } else sources.push({ src: f, name: f.name, dbf: self.Dbf.isDbf(head, f.name) });
+        }
+        const buy = await self.Ingest.readBuyFiles(sources, report);
+        self.postMessage({ type: 'done', buy });
+      } finally { plains.forEach((p) => p.fill(0)); }
     } else if (type === 'pack') {
       const raw = self.Dataset.deserialize(e.data.buf);
       const pack = await self.Dataset.makePack(raw, password);
