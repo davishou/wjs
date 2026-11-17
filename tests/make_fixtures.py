@@ -332,9 +332,9 @@ INC_FIELDS = [('DELIVNO', 'C', 9, 0), ('DELIVORD', 'C', 2, 0), ('CODE', 'C', 2, 
               ('RECDATE', 'C', 7, 0), ('RECEIVE', 'N', 12, 0), ('TOTBKPAY', 'N', 12, 0), ('PAY', 'L', 1, 0), ('CNFLAG', 'C', 1, 0), ('NRCHKDATE', 'C', 7, 0),
               ('NRRANGE', 'N', 4, 0), ('ALLOW', 'N', 4, 0), ('XID', 'C', 6, 0), ('XNAME', 'C', 20, 0), ('AMOUNT', 'N', 12, 0), ('DELIVDATE', 'C', 7, 0)]
 IBK_FIELDS = INC_FIELDS[:1] + [('SERIES', 'C', 4, 0)] + INC_FIELDS[1:]
-INC_HEAD = ['進貨日期', 'DELIVORD', '商品類別', '商品代號', '顏色代號', '單位', 'TRAN_RATE', '單價', '成本', '數量', '單位(數字)', '品項總額', 'RECDATE', 'RECEIVE',
+INC_HEAD = ['進貨單號', 'DELIVORD', '商品類別', '商品代號', '顏色代號', '單位', 'TRAN_RATE', '單價', '成本', '數量', '單位(數字)', '品項總額', 'RECDATE', 'RECEIVE',
             'TOTBKPAY', 'PAY', 'CNFLAG', 'NRCHKDATE', 'NRRANGE', 'ALLOW', '廠商代號', '廠商名', '進貨總額', '實際打單日期']
-IBK_HEAD = INC_HEAD[:1] + ['SERIES'] + INC_HEAD[1:-1] + ['打單日期']
+IBK_HEAD = ['退貨單號', 'SERIES'] + INC_HEAD[1:-1] + ['打單日期']
 VENDS = [('F01', '晨星織造'), ('F02', '和風針織'), ('F05', '巧手車縫')]
 
 

@@ -1363,11 +1363,18 @@
     const rt = (g) => (!g ? '' : g.by === 'date' ? ROC_RANGE(g.from, g.to) : `單號月份 ${g.from === g.to ? ymLabel(g.from) : ymLabel(g.from) + '～' + ymLabel(g.to)}`);
     const rng = [P.range[0] && `進貨 ${rt(P.range[0])}`, P.range[1] && `退回 ${rt(P.range[1])}`].filter(Boolean).join('；');
     const vends = new Set(add.cols.vend).size;
+    // 同一張單的品項總額加起來，應該等於單上的進貨總額（只寫在第一列）
+    const sums = new Map();
+    add.src.forEach((sv, i) => { const k = sv + '|' + add.cols.ord[i]; const o = sums.get(k) || { s: 0, t: 0 }; o.s += add.cols.amt[i]; if (add.cols.tot[i]) o.t = add.cols.tot[i]; sums.set(k, o); });
+    const badTot = [...sums.entries()].filter(([, o]) => o.t && Math.abs(o.s - o.t) >= 1);
+    const withTot = [...sums.values()].filter((o) => o.t).length;
     const desc = `<p>「${esc(names)}」：<strong>${nf0.format(add.nIn)}</strong> 筆進貨、<strong>${nf0.format(add.nBk)}</strong> 筆退回廠商，${nf0.format(vends)} 家廠商（${esc(rng)}）。</p><ul>` +
       `<li>新的單：<strong>${nf0.format(nNew)}</strong> 張（進貨 ${nf0.format(P.nNew[0])}、退回 ${nf0.format(P.nNew[1])}），直接加入。</li>` +
       (nUpd ? `<li>網站裡已經有的單：${nf0.format(nUpd)} 張，改用新資料${P.nChanged ? `（其中 ${nf0.format(P.nChanged)} 張內容有變動）` : '（內容都一樣）'}。</li>` : '') + '</ul>' +
       (add.dated < add.n ? `<p class="hint">${nf0.format(add.n - add.dated)} 筆沒有打單日期，月份改用單號前 5 碼。</p>` : '') +
       (add.warning ? `<p class="warn">${esc(add.warning)}</p>` : '') +
+      (badTot.length ? `<p class="warn">有 <strong>${nf0.format(badTot.length)}</strong> 張單的品項總額加起來，和單上的「進貨總額」不一樣：${esc(ex(badTot, ([k, o]) => `${k.slice(2)}（品項合計 ${fmt.money(o.s)}、單上 ${fmt.money(o.t)}）`))}。網站用品項總額加總，請到系統確認這幾張單。</p>`
+        : withTot ? `<p class="hint">已核對：${nf0.format(withTot)} 張單的品項總額加起來，都等於單上的進貨總額。</p>` : '') +
       (miss.length ? `<p class="warn">這段期間內有 <strong>${nf0.format(miss.length)}</strong> 張單網站裡有、這次的檔案裡沒有，多半是系統裡已經作廢或刪除：${esc(ex(miss, (m) => (m.src ? '退回 ' : '') + m.ord))}</p><p class="hint">如果這次匯出的不是這段期間的全部資料，請不要勾選刪除。</p>` : '');
     const v = await ask({ title: '確認加入廠商進貨資料', desc, fields: [], submit: '加入',
       check: miss.length ? { name: 'del', label: `從網站刪除這 ${miss.length} 張系統裡已經沒有的單`, checked: false } : null });

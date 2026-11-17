@@ -691,6 +691,7 @@ async def buy_flow(b):
     await dlg_fill(pg, {'app': 'buy123', 'app2': 'buy123'})
     await pg.wait_for_selector('#dlg[open]', timeout=60000); t = await pg.text_content('#dlgForm')
     ok(f"{e1['nIn']} 筆進貨" in t and f"{e1['nBk']} 筆退回廠商" in t and '3 家廠商' in t, '四個 DBF 一起選：先匯客戶出貨退貨，再問要不要加入廠商進貨：' + t[:80])
+    ok(f"已核對：{e1['orders'] + e1['nBk']} 張單" in t, '核對每張單的品項總額加起來 = 單上的進貨總額')
     ok(await pg.evaluate('window.__app.E.ds.nSales') > 0, '客戶出貨資料已先匯入')
     await pg.click('#dlgOk')
     await pg.wait_for_selector('#dlg[open]'); t = await pg.text_content('#dlgForm')
