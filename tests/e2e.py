@@ -706,7 +706,7 @@ async def buy_flow(b):
     ok(f"{e1['nIn']} 筆進貨" in st and '3 家廠商' in st, '資料與設定顯示廠商進貨資料：' + st)
     # 首頁四個方塊
     await pg.goto(URL + '#home'); await pg.wait_for_selector('#homeApps .app-tile.buy')
-    ok(await pg.locator('#homeApps .app-tile').count() == 4 and '進貨分析' in await pg.text_content('#homeApps .app-tile.buy') and await pg.locator('.home-logo').count() == 1, '首頁有進貨分析方塊（工廠圖示）和 W 標誌')
+    ok(await pg.locator('#homeApps .app-tile').count() == 4 and '進貨分析' in await pg.text_content('#homeApps .app-tile.buy') and await pg.locator('.home-logo').count() == 1, '首頁有進貨分析方塊（工廠圖示）和 WJ 標誌')
     ok(await pg.is_hidden('.tab-group.g6'), '在銷售分析裡看不到進貨選單')
     await pg.click('#homeApps .app-tile.buy'); await pg.wait_for_selector('#buyBody .kpis')
     ok(await pg.evaluate('document.body.dataset.app') == 'buy' and await pg.is_visible('.tab-group.g6') and await pg.is_hidden('.tab-group.g1') and await pg.is_hidden('.tab-group.g5') and '進貨分析' in await pg.text_content('.brand'), '進到進貨分析：紅色側欄、只有進貨的頁面')

@@ -403,7 +403,8 @@
       { key: 'qty', label: '數量', n: 1, render: (r) => esc(fmt.int(r.qty) + ' ' + (r.unit || '')) }, { key: 'pcs', label: '件數', n: 1, fmt: 'int' }, { key: 'cost', label: '成本', n: 1, fmt: 'money2' }, { key: 'amt', label: '品項總額', n: 1, fmt: 'money' }], rows, { limit: 100 });
   }
 
-  const FACTORY = '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M3 28V14l7 4v-4l7 4v-4l7 4V5h4v23z"/><rect x="7" y="21" width="3" height="3" rx=".5" fill="var(--bu-win, #fff)"/><rect x="13" y="21" width="3" height="3" rx=".5" fill="var(--bu-win, #fff)"/><rect x="19" y="21" width="3" height="3" rx=".5" fill="var(--bu-win, #fff)"/></svg>';
+  // 工廠（和主畫面圖示同一個：廠房高、兩排窗、煙囪短）
+  const FACTORY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1.2 22.6V7.4l5.6 3.4V7.4l5.6 3.4V7.4l5.6 3.4V3.6h4.2v19z"/><rect x="3.4" y="13.2" width="3" height="2.8" fill="var(--bu-win, #fff)"/><rect x="9" y="13.2" width="3" height="2.8" fill="var(--bu-win, #fff)"/><rect x="14.6" y="13.2" width="3" height="2.8" fill="var(--bu-win, #fff)"/><rect x="3.4" y="18" width="3" height="2.8" fill="var(--bu-win, #fff)"/><rect x="9" y="18" width="3" height="2.8" fill="var(--bu-win, #fff)"/><rect x="14.6" y="18" width="3" height="2.8" fill="var(--bu-win, #fff)"/></svg>';
 
   root.Buy = { plan, merge, BuyEngine, renderHome, renderVend, renderProd, renderOrders, FACTORY, VIEWS: ['buy', 'buyV', 'buyP', 'buyO'] };
 })(window);

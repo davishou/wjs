@@ -1088,7 +1088,15 @@ body[data-app="buy"] .kpi:first-child .gr { color: inherit; }
 .app-tile.buy .app-ic { background: linear-gradient(145deg, #ef6a6a, #a61e1e); fill: #fff; --bu-win: #b52828; }
 .app-badge.soft { background: var(--surface-2); color: var(--muted); font-weight: 500; }
 /* 首頁上面的 W 標誌 */
-.home-logo { display: block; width: 92px; height: 92px; margin: 0 auto 10px; border-radius: 22px; box-shadow: 0 8px 22px -14px rgba(0,0,0,.55); }
-@media (max-width: 760px) { .home-logo { width: 64px; height: 64px; border-radius: 16px; } }
+/* 2026-11-17 使用者要求：首頁上方改成和銷售分析一樣的藍底，字只有正楷 WJ，白銀色、像鑽石一樣閃亮（光從左掃到右、星星閃） */
+.home-logo { display: block; width: 104px; height: 104px; margin: 0 auto 12px; border-radius: 25px; box-shadow: 0 10px 26px -14px rgba(19,40,79,.75); }
+.hl-txt { font-family: 'Noto Serif TC', 'Times New Roman', serif; font-weight: 700; font-size: 52px; letter-spacing: 1px; }
+.hl-sweep { animation: hlSweep 3.6s ease-in-out infinite; }
+@keyframes hlSweep { 0% { transform: skewX(-20deg) translateX(0); } 55%, 100% { transform: skewX(-20deg) translateX(220px); } }
+.hl-spark path { transform-box: fill-box; transform-origin: center; animation: hlTwinkle 3.6s ease-in-out infinite; }
+.hl-spark .s2 { animation-delay: 1.2s; } .hl-spark .s3 { animation-delay: 2.1s; }
+@keyframes hlTwinkle { 0%, 100% { opacity: .15; transform: scale(.5); } 45% { opacity: 1; transform: scale(1.15); } 60% { opacity: .3; transform: scale(.7); } }
+@media (prefers-reduced-motion: reduce) { .hl-sweep, .hl-spark path { animation: none; } }
+@media (max-width: 760px) { .home-logo { width: 72px; height: 72px; border-radius: 18px; } }
 [data-theme="indigo"] body[data-app="buy"] .tabs a:not(.on) { color: #ffe3e3; }
 a.btn { text-decoration: none; }
