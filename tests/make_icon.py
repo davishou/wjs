@@ -68,7 +68,8 @@ def svg(scale=1.0, round_bg=False):
 if __name__ == '__main__':
     import asyncio, os
     from playwright.async_api import async_playwright
-    out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'icons')
+    # 2026-11-17 起 App 圖示改用使用者給的藍寶石 WJ 圖（icons/ 裡的 PNG），這支只把舊的 W 圖示產生到 tests/fixtures/w-icon/ 留存，不會蓋掉
+    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures', 'w-icon'); os.makedirs(out, exist_ok=True)
     open(out + '/icon.svg', 'w').write(svg(round_bg=True))
     async def render():
         async with async_playwright() as p:
