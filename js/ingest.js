@@ -316,9 +316,16 @@
     const zip = await X.openZip(src);
     const sheets = await X.listSheets(zip);
     const sst = X.parseSharedStrings(zip.entries['xl/sharedStrings.xml'] ? await zip.text('xl/sharedStrings.xml') : '');
-    const out = [], months = new Set(); let blocks = 0;
+    const out = [], months = new Set(); let blocks = 0, backup = null;
     for (const sh of sheets) {
       if (!zip.entries[sh.path]) continue;
+      if (sh.name === '網站還原用') {
+        // 網站自動備份的完整資料（js/recv-backup.js）：A 欄第 2 列起接起來是 JSON
+        let txt = '', cur = '';
+        await X.scanSheet(zip, sh.path, { maxCol: 1, stop: false, onCell(col, kind, val) { cur = kind === 1 ? sst[val] : val; }, onRowEnd(rn) { if (rn >= 2 && cur != null) txt += String(cur); cur = ''; } });
+        try { const o = JSON.parse(txt); if (o && o.app === 'wjs-recv' && Array.isArray(o.rows)) backup = o; } catch (e) { /* 不是完整的備份，照一般的表讀 */ }
+        continue;
+      }
       const grid = new Map(); let cur = [];
       const h = { maxCol: 70, stop: false, onCell(col, kind, val) { cur[col] = kind === 1 ? sst[val] : val; }, onRowEnd(rn) { grid.set(rn, cur); cur = []; } };
       await X.scanSheet(zip, sh.path, h);
@@ -365,7 +372,7 @@
         });
       }
     }
-    return { rows: out, months: [...months].sort((a, b) => a - b), blocks };
+    return { rows: out, months: [...months].sort((a, b) => a - b), blocks, backup };
   }
 
   root.Ingest = { ingestXlsx, ingestFiles, readClassification, detectKind, parseDate, readRecvBook };

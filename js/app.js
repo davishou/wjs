@@ -173,6 +173,7 @@
       if (S.demo || !S.vault) return;
       recvSaving = Dataset.Vault.save(S.vault, S.raw); await recvSaving; recvSaving = null;
       const n = document.getElementById('recvSaved'); if (n) n.textContent = '已加密儲存 ' + new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+      await runBackup(false);
     };
     if (now) return run();
     recvTimer = setTimeout(() => { recvTimer = null; run(); }, 800);
@@ -180,6 +181,107 @@
   window.addEventListener('pagehide', () => { if (recvTimer) saveRecv(true); });
   document.addEventListener('visibilitychange', () => { if (document.hidden && recvTimer) saveRecv(true); });
   window.__saveRecvNow = () => saveRecv(true); // 測試用
+
+  // ---------- 應收帳款自動備份（js/recv-backup.js）----------
+  // 使用者在電腦的 Chrome／Edge 選一個檔案，之後每次存收款資料就自動寫一份「要開啟密碼的 Excel」進去。
+  // 金鑰組（S.meta.recvBk）跟著資料加密保存；檔案位置（FileSystemFileHandle）存在這台裝置的 IndexedDB，不含資料內容
+  const BK_HANDLE = 'recvBkHandle';
+  let bkHandle = null, bkNeed = false, bkBusy = null, bkAgain = false, bkErr = '';
+  const bkSupported = () => typeof window.showSaveFilePicker === 'function';
+  async function bkGetHandle() {
+    if (bkHandle) return bkHandle;
+    try { bkHandle = (await Dataset.idbGet(BK_HANDLE)) || null; } catch (e) { bkHandle = null; }
+    return bkHandle;
+  }
+  const bkAt = () => { try { return localStorage.getItem('dv.recvBkAt') || ''; } catch (e) { return ''; } };
+  function bkWhen(iso) {
+    if (!iso) return '';
+    const d = new Date(iso), now = new Date(), t = d.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+    return d.toDateString() === now.toDateString() ? '今天 ' + t : `${d.getMonth() + 1}/${d.getDate()} ${t}`;
+  }
+  function bkPaint() {
+    const b = document.getElementById('rcBackup'); if (!b) return;
+    const on = !!(S.meta && S.meta.recvBk);
+    let txt = '自動備份：未設定', warn = false;
+    if (on && !bkHandle) txt = '自動備份：這台電腦還沒設定';
+    else if (on && bkNeed) { txt = '⚠ 按這裡繼續自動備份'; warn = true; }
+    else if (on && bkErr) { txt = '⚠ 自動備份失敗'; warn = true; }
+    else if (on) txt = bkAt() ? '已自動備份 ' + bkWhen(bkAt()) : '自動備份：已設定';
+    b.textContent = txt; b.classList.toggle('warn', warn); b.classList.toggle('on', on && !warn && !!bkHandle);
+  }
+  // 頁面打開時：只查權限、不跳視窗（Chrome 要按一下才能再要權限）
+  async function bkCheck() {
+    const h = S.meta && S.meta.recvBk ? await bkGetHandle() : null;
+    if (h && h.queryPermission) { try { bkNeed = (await h.queryPermission({ mode: 'readwrite' })) !== 'granted'; } catch (e) { bkNeed = true; } }
+    bkPaint();
+  }
+  async function runBackup(interactive) {
+    if (S.demo || !S.meta || !S.meta.recvBk || !S.meta.recv) return false;
+    const h = await bkGetHandle(); if (!h) { bkPaint(); return false; }
+    if (bkBusy) { bkAgain = true; return bkBusy; }
+    bkBusy = (async () => {
+      try {
+        let p = h.queryPermission ? await h.queryPermission({ mode: 'readwrite' }) : 'granted';
+        if (p !== 'granted' && interactive && h.requestPermission) p = await h.requestPermission({ mode: 'readwrite' });
+        if (p !== 'granted') { bkNeed = true; return false; }
+        bkNeed = false;
+        const plain = RecvBackup.buildBook({ rows: S.meta.recv.rows, rates: S.meta.recvRates || {}, extra: { rv: S.meta.recv.v || 1, itemSets: S.meta.recvItemSets || null }, calc: Recv.calc, groupDiffs: Recv.groupDiffs, at: new Date() });
+        const out = await RecvBackup.encrypt(plain, S.meta.recvBk); plain.fill(0);
+        const w = await h.createWritable(); await w.write(out); await w.close();
+        try { localStorage.setItem('dv.recvBkAt', new Date().toISOString()); } catch (e) { /* 只是顯示用 */ }
+        bkErr = '';
+        return true;
+      } catch (e) { bkErr = (e && e.message) || String(e); return false; } finally { bkPaint(); }
+    })();
+    const r = await bkBusy; bkBusy = null;
+    if (bkAgain) { bkAgain = false; return runBackup(false); }
+    return r;
+  }
+  async function bkSetup() {
+    let h;
+    try {
+      h = await window.showSaveFilePicker({ suggestedName: '應收帳款備份.xlsx', types: [{ description: 'Excel 活頁簿', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }] });
+    } catch (e) { if (e && e.name !== 'AbortError') toast('沒辦法選檔案：' + e.message, 6000); return; }
+    let keys = null;
+    const v = await ask({
+      title: '設定自動備份', submit: '開始自動備份',
+      desc: `<p>備份檔：<strong>${esc(h.name)}</strong></p><p>之後每次改完收款資料，網站會自動把最新的資料寫進這個 Excel。</p>` +
+        '<p>這個 Excel 會加密，<strong>用 Excel 打開時要輸入網站的開啟密碼</strong>。請再輸入一次開啟密碼：</p>',
+      fields: [{ name: 'pw', label: '開啟密碼', autocomplete: 'current-password' }],
+      validate: async (x) => {
+        try { await Dataset.Vault.open(x.pw); } catch (er) { return er.code === 'BAD_PASSWORD' ? '開啟密碼不正確' : er.message; }
+        keys = await RecvBackup.makeKeys(x.pw);
+        return '';
+      },
+    });
+    if (!v || !keys) return;
+    S.meta = S.meta || {}; if (!S.meta.recv) S.meta.recv = { v: 1, rows: [] };
+    S.meta.recvBk = keys; bkHandle = h; bkNeed = false; bkErr = '';
+    try { await Dataset.idbSet(BK_HANDLE, h); } catch (e) { /* 存不了位置：這次開著的期間照樣備份 */ }
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { /* 不支援就算了 */ }
+    await saveRecv(true);
+    toast(bkErr ? '備份失敗：' + bkErr : `已設定自動備份，已存到「${h.name}」`, 6000);
+  }
+  async function bkClick() {
+    if (demoBlock()) return;
+    if (!S.vault) { toast('請先匯入資料、設定開啟密碼'); return; }
+    if (!bkSupported()) {
+      await ask({ title: '應收帳款自動備份', fields: [], submit: '知道了',
+        desc: '<p>這個瀏覽器不能自動寫檔（iPhone、Safari 都不行）。請用<strong>電腦上的 Chrome 或 Edge</strong> 打開網站再設定。</p><p>在這台裝置上，可以用「資料與設定」→「匯出資料包」備份。</p>' });
+      return;
+    }
+    const h = S.meta && S.meta.recvBk ? await bkGetHandle() : null;
+    if (h && bkNeed) { const ok = await runBackup(true); toast(ok ? '已繼續自動備份' : '沒有拿到寫入這個檔案的權限。可以再按一次，或「換一個檔案」', 6000); return; }
+    if (h) {
+      const v = await ask({ title: '應收帳款自動備份', fields: [], submit: '立刻備份一次', alt: '換一個檔案', cancel: '關閉',
+        desc: `<p>每次改完收款資料，會自動存到 <strong>${esc(h.name)}</strong>（加密，打開要輸入開啟密碼）。</p>` +
+          `<p>最後一次備份：${bkAt() ? esc(bkWhen(bkAt())) : '還沒有'}</p>` + (bkErr ? `<p class="warn">上次失敗：${esc(bkErr)}</p>` : '') +
+          '<p class="hint">要還原時：收款登記 →「匯入應收帳款 Excel」選這個檔案，輸入開啟密碼。</p>' });
+      if (!v) return;
+      if (!v.alt) { const ok = await runBackup(true); toast(ok ? '已備份' : '備份失敗：' + bkErr, 6000); return; }
+    }
+    await bkSetup();
+  }
   // 匯入原本的「客戶應收帳款明細表」Excel：檔案裡有的月份整月取代
   async function importRecv(file) {
     if (demoBlock()) return;
@@ -188,6 +290,7 @@
     let d;
     try { d = await runWorker({ type: 'recvBook', file, password: pw }, []); } catch (err) { worker && worker.terminate(); worker = null; toast('讀取失敗：' + err.message, 6000); return; }
     const res = d.recv;
+    if (res.backup) { await restoreRecvBackup(file, res.backup); return; }
     if (!res.rows.length) { toast('這個 Excel 裡找不到「客戶應收帳款明細表」的資料（要有「代號」「應收帳款」「實收金額」等表頭）', 7000); return; }
     S.meta = S.meta || {}; if (!S.meta.recv) S.meta.recv = { v: 2, rows: [] };
     res.rows.forEach(Recv.normRow); // Excel 的 7 個調整欄 → 一行一行的調整
@@ -202,6 +305,23 @@
     S.recvYm = res.months[res.months.length - 1];
     await saveRecv(true);
     toast(`已匯入 ${nf0.format(res.rows.length)} 筆應收帳款，已加密保存`);
+    go('recv');
+  }
+  // 自動備份的 Excel：用「網站還原用」那張的完整資料整份還原（含支票、折率、備註）
+  async function restoreRecvBackup(file, B) {
+    const ms = [...new Set(B.rows.map((r) => r.ym))].sort((a, b) => a - b);
+    const cur = S.meta && S.meta.recv ? S.meta.recv.rows.length : 0;
+    const v = await ask({ title: '從自動備份還原應收帳款', fields: [], submit: '整份還原',
+      desc: `<p>「${esc(file.name)}」是網站的自動備份，備份時間 ${esc(bkWhen(B.at))}：${nf0.format(B.rows.length)} 筆${ms.length ? '，月份 ' + ms.map(ymLabel).join('、') : ''}。</p>` +
+        (cur ? `<p>網站裡現在的 ${nf0.format(cur)} 筆收款資料會<strong>整份換成備份的內容</strong>。</p>` : '') });
+    if (!v) return;
+    S.meta = S.meta || {};
+    S.meta.recv = { v: B.rv || 1, rows: B.rows }; // 舊版（v1）的調整欄，打開收款登記時會自動轉成一行一行
+    S.meta.recvRates = B.rates || {};
+    if (B.itemSets) S.meta.recvItemSets = B.itemSets;
+    if (ms.length) S.recvYm = ms[ms.length - 1];
+    await saveRecv(true);
+    toast(`已還原 ${nf0.format(B.rows.length)} 筆應收帳款，已加密保存`);
     go('recv');
   }
   // ---------- 首頁（所有功能）----------
@@ -221,7 +341,7 @@
     $('#homeApps').onclick = (e) => { const a = e.target.closest('[data-go]'); if (!a) return; e.preventDefault(); if (a.dataset.go === 'recv') setApp('ar'); else if (a.dataset.go !== 'data') setApp('sales'); go(a.dataset.go); };
   }
 
-  const recvCtx = () => ({ S, E: S.E, $, $$, esc, fmt, nf0, ymLabel, Charts, table, go, downloadCsv, saveRecv, importRecv, custList, custByCode: () => { custList(); return S.E ? S.E._custByCode : new Map(); } });
+  const recvCtx = () => ({ S, E: S.E, $, $$, esc, fmt, nf0, ymLabel, Charts, table, go, downloadCsv, saveRecv, importRecv, custList, bkClick, bkCheck, bkPaint, custByCode: () => { custList(); return S.E ? S.E._custByCode : new Map(); } });
 
   function downloadCsv(name, header, rows) {
     const q = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
@@ -1468,7 +1588,7 @@
       const b = $('#clearData');
       if (!b.dataset.sure) { b.dataset.sure = '1'; b.textContent = '確定要清除？再按一次'; setTimeout(() => { delete b.dataset.sure; b.textContent = '清除這台裝置上的資料'; }, 5000); return; }
       delete b.dataset.sure; b.textContent = '清除這台裝置上的資料';
-      await Dataset.Vault.clear(); S.E = null; S.raw = null; S.vault = null; S.meta = null; $('#brandSub').textContent = '尚未載入資料'; renderData(); toast('已清除這台裝置上的資料');
+      await Dataset.Vault.clear(); Dataset.idbDel(BK_HANDLE).catch(() => {}); bkHandle = null; S.E = null; S.raw = null; S.vault = null; S.meta = null; $('#brandSub').textContent = '尚未載入資料'; renderData(); toast('已清除這台裝置上的資料');
     });
     $('#lockNow').addEventListener('click', () => location.reload()); // 金鑰只在記憶體中，重新載入就會上鎖
     $('#changePw').addEventListener('click', async () => {
@@ -1485,7 +1605,9 @@
       });
       if (!v) return;
       S.vault = await Dataset.Vault.create(v.pw);
+      if (S.meta && S.meta.recvBk) { S.meta.recvBk = await RecvBackup.makeKeys(v.pw); S.raw = Dataset.withMeta(S.raw, S.meta); } // 自動備份的 Excel 也改用新密碼
       await Dataset.Vault.save(S.vault, S.raw);
+      runBackup(false);
       toast('開啟密碼已更改');
     });
   }
@@ -1590,7 +1712,7 @@
       reset.onclick = async () => {
         if (!reset.dataset.sure) { reset.dataset.sure = '1'; reset.textContent = '確定要清除？再按一次'; setTimeout(() => { delete reset.dataset.sure; reset.textContent = '清除資料，重新開始'; }, 5000); return; }
         delete reset.dataset.sure;
-        await Dataset.Vault.clear();
+        await Dataset.Vault.clear(); Dataset.idbDel(BK_HANDLE).catch(() => {}); bkHandle = null;
         S.E = null; S.raw = null; S.vault = null; S.meta = null;
         done();
         toast('已清除。電腦請重新匯入 Excel；手機請重新開啟資料包', 6000);

@@ -144,6 +144,7 @@
         <input type="search" id="rcSearch" placeholder="搜尋客戶代號或名稱" value="${esc(f.q)}">
         <div class="seg" id="rcLayout" title="手機建議用卡片"><button data-v="table" class="${layout(S) === 'table' ? 'on' : ''}">表格</button><button data-v="cards" class="${layout(S) === 'cards' ? 'on' : ''}">卡片</button></div>
         <span class="grow"></span><span id="recvSaved" class="hint"></span>
+        <button class="btn bk-btn" id="rcBackup" title="每次改完自動存一份加密的 Excel 到電腦">自動備份</button>
         <button class="btn" id="rcImport">匯入應收帳款 Excel</button><input type="file" id="rcFile" accept=".xlsx,.xlsm" hidden>
         <button class="btn" id="rcExport">匯出 CSV</button>
       </div>
@@ -173,6 +174,8 @@
     $('#rcRegion').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; f.region = b.dataset.v; renderEntry(ctx); };
     $('#rcSearch').oninput = (e) => { f.q = e.target.value; clearTimeout(f._t); f._t = setTimeout(() => { renderEntry(ctx); const s = $('#rcSearch'); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }, 250); };
     $('#rcImport').onclick = () => $('#rcFile').click();
+    $('#rcBackup').onclick = () => ctx.bkClick();
+    ctx.bkCheck();
     $('#rcFile').onchange = (e) => { const file = e.target.files[0]; e.target.value = ''; if (file) ctx.importRecv(file); };
     $('#rcExport').onclick = () => exportCsv(ctx, ym);
     const pick = () => {

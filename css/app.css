@@ -783,6 +783,9 @@ small .up, small .down { font-size: 1.35em; }
 .recv-t td.auto input { background: var(--surface-2); color: var(--ink-2); }
 .pay-btn { display: block; margin: 3px 0 0 auto; border: 1px dashed var(--line-strong); background: transparent; color: var(--muted); font-size: .72rem; border-radius: 6px; padding: 1px 6px; cursor: pointer; }
 .pay-btn.on { border-style: solid; border-color: var(--ar-y-deep); color: var(--ar-y-ink); background: var(--ar-y-soft); }
+.bk-btn.on { border-color: var(--good); color: var(--good); }
+.bk-btn.on::before { content: "✓ "; }
+.bk-btn.warn { border-color: var(--bad); color: #fff; background: var(--bad); font-weight: 700; }
 .pay-t input, .pay-t select { width: 100%; min-width: 90px; font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
 .pay-t td.n input { text-align: right; }
 .pay-t .bad-in { border-color: var(--bad); }

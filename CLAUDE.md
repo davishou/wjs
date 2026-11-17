@@ -37,6 +37,7 @@ js/ingest.js          依表頭名稱讀總表的「原始進貨表」「原始�
 js/worker.js          背景執行緒：解密＋讀 Excel、打包／解開資料包
 js/period.js          靈活的期間選擇（業務、客戶、商品三頁共用 `S.span`，存 localStorage `span`）：近 30／90 天（有實際日期時，用 dFrom/dTo）、基準月、上個月、近 3／6／12 個月、今年累計、去年、全部、自訂月份；每種都配去年同期。`Period.trend` 期間內走勢：2 個月內或近 30 天每天、近 90 天每週、一般每月、超過 3 年每年
 js/recv.js            應收帳款（2026-11-10 新增，左側「應收帳款」區）：收款登記（照紅單／Excel「客戶應收帳款明細表」的欄位輸入、自動算、自動抓錯、客戶前幾個月明細、備註）與應收分析
+js/recv-backup.js     應收帳款自動備份（2026-11-17）：收款資料 → 加密的 .xlsx（自己寫 ZIP、CFB 容器、Agile 加密，目錄結構照 msoffcrypto-tool）
 js/chart.js           圖表：render（line、bar、stacked 堆疊、combo 長條＋折線）、donut 圓餅（最多 8 塊，其餘併成「其他」）、hbars 橫條排名（細線標去年同期）
 sw.js                 離線快取
 ```
@@ -106,6 +107,10 @@ BB/BC/BI 對照表整張改成和 AK/AT/BM 一樣，其他對照表只加進貨�
   A. 調整項目 ⊕（加的）、⊖（減的）分開兩份清單 `S.meta.recvItemSets = { plus, minus }`（取代 recvItems），預設照 Excel 正負號：加 = 前先入、前溢入、保留、不足、運金；減 = 溢入、多入。按 ⊕ 下拉只出現加的、按 ⊖ 只出現減的。使用者可以自己增刪：表頭／卡片的「⚙ 項目」或下拉最後的「⚙ 增刪…」打開 `#rcItems` 面板（`showItems`）；下拉「＋ 新項目…」加到那一邊。刪項目不改已登記的資料（那一行仍顯示原本的項目）。面板裡按住項目拖曳可排順序（pointer 事件，滑鼠、手指都可以；2026-11-12 使用者要求），下拉照這個順序。
   B. 表格縮窄（尾數最窄、應收淨額和檢查同一格 `.due-n`＋`.chk`、調整一行 = ⊕/⊖・項目・金額・✕，詳細在下面；收款登記頁 main 不限寬），1366 寬螢幕一次看到整排（測試有檢查）。
   C. 「詳細」（現金、支票）：不填沒關係；**填了，現金＋支票合計必須等於實收**（`payBad`；「有填」= 現金 ≠ 0 或有支票填了金額，只按「新增一張支票」不算，2026-11-11 修正誤判），不一樣 → 那列標紅、檢查寫「詳細≠實收」、按鈕「詳細 ≠」、上面對不上卡片多一行提醒。
+- **自動備份（2026-11-17，使用者在電腦的 Chrome 輸入收款）**：收款登記「自動備份」按鈕 → `showSaveFilePicker` 選檔案（只有電腦的 Chrome／Edge 有）→ 再輸入一次開啟密碼 →
+  之後每次 `saveRecv` 存完就 `runBackup` 寫一份**用開啟密碼加密的 Excel**（Excel 直接輸入密碼就能打開）。每月一張（和明細表同格式，網站讀得懂；`row.adj` 依項目一欄、減的是負數，自己加的項目接在 7 項後面，詳細寫在「調整說明」）、「支票」一張、隱藏的「網站還原用」（A 欄 JSON：rows、rates、rv、itemSets）。
+  密碼不存：設定時 `RecvBackup.makeKeys(密碼)` 產生金鑰組放 `S.meta.recvBk`（跟資料一起加密）；改開啟密碼時重新產生。檔案位置（FileSystemFileHandle）存在 IndexedDB `recvBkHandle`（這台裝置），
+  沒有寫入權限時按鈕變紅「按這裡繼續自動備份」，不會跳視窗。匯入時讀到「網站還原用」→ 問要不要整份還原（`restoreRecvBackup`）。測試用假的檔案物件，再用 msoffcrypto 解開、openpyxl 讀；LibreOffice 也打得開。
 - 待確認：運金誰付（使用者說交給他們自己判斷）。
 - 之後可做：應收帳款天數改用這裡的實際應收餘額（目前提醒頁的應收帳款天數還是用手動輸入的餘額）。
 
@@ -153,7 +158,7 @@ BB/BC/BI 對照表整張改成和 AK/AT/BM 一樣，其他對照表只加進貨�
 
 ## 測試（改完一定要跑）
 ```
-pip install openpyxl cryptography playwright
+pip install openpyxl cryptography playwright msoffcrypto-tool
 python -m playwright install chromium
 python tests/make_fixtures.py          # 產生假資料到 tests/fixtures/（加 --big 多測 18 萬筆大檔）
 python tests/e2e.py                    # 瀏覽器實測，最後印出「全部通過」
@@ -161,7 +166,8 @@ python tests/e2e.py                    # 瀏覽器實測，最後印出「全部
 `tests/fixtures/` 不會進 repo。截圖在 `tests/fixtures/shots/`，看介面有沒有跑掉。
 新功能請在 `tests/e2e.py` 加對應的檢查。
 
-## 目前進度與待辦（2026-11-11）
+## 目前進度與待辦（2026-11-17）
+2026-11-17：應收帳款自動備份成加密 Excel（見「應收帳款」一節）。
 2026-11-11：首頁分成兩個應用（銷售分析藍、應收實收帳款黃）、保留提醒（含備註）、手機用卡片輸入收款，見「應收帳款」一節。
 
 2026-11-10：新增「應收帳款」區（收款登記、應收分析），見上面「應收帳款」一節。

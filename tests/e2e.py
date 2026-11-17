@@ -2,7 +2,7 @@
 
 先執行 python tests/make_fixtures.py（加 --big 會多測大檔），再執行：
   python tests/e2e.py
-需要：pip install playwright && python -m playwright install chromium
+需要：pip install playwright msoffcrypto-tool && python -m playwright install chromium
 截圖存在 tests/fixtures/shots/。測試只用假資料，不要放真的總表。
 """
 import asyncio, os, sys, threading, functools, http.server, socketserver
@@ -885,6 +885,7 @@ async def recv_flow(b):
     ok('整月換成檔案裡的內容' in await pg.text_content('#dlgForm'), '再匯入同樣月份 → 說明會整月取代')
     await pg.click('#dlgOk'); await pg.wait_for_timeout(800)
     ok(await pg.evaluate('window.__app.meta.recv.rows.length') == len(exp), '整月取代後，筆數和檔案一樣（不會重複）')
+    await recv_backup(pg)
     ok(not errs, '應收帳款沒有 JS 錯誤 ' + str(errs))
     await c.close()
 
@@ -942,6 +943,82 @@ async def recv_phone(b):
         ok(await pg.evaluate("document.documentElement.scrollWidth") <= 392, f'手機寬度：{vw} 沒有超出螢幕')
     ok(not errs, '手機應收帳款沒有 JS 錯誤 ' + str(errs))
     await c.close()
+
+
+def bk_open(raw, pw):
+    """用 msoffcrypto（獨立的程式）解開網站寫的加密 Excel，並檢查資料完整性（HMAC）。"""
+    import io, msoffcrypto, openpyxl
+    f = msoffcrypto.OfficeFile(io.BytesIO(raw)); f.load_key(password=pw)
+    o = io.BytesIO(); f.decrypt(o, verify_integrity=True)
+    return openpyxl.load_workbook(o)
+
+
+async def recv_backup(pg):
+    """自動備份：選檔案（測試用假的檔案）、輸入開啟密碼、改資料就自動寫入加密 Excel、權限被收回時提醒、用備份整份還原、改密碼後用新密碼。"""
+    import base64
+    await pg.evaluate("""() => { window.__bk = []; window.__bkPerm = 'granted';
+      window.showSaveFilePicker = async () => ({ name: '應收帳款備份.xlsx', kind: 'file',
+        queryPermission: async () => window.__bkPerm, requestPermission: async () => (window.__bkPerm = 'granted'),
+        createWritable: async () => { let d = null; return { write: async (b) => { d = new Uint8Array(b); }, close: async () => { window.__bk.push(d); } }; } }); }""")
+    last = lambda: pg.evaluate("() => { const u = window.__bk[window.__bk.length - 1]; let s = ''; for (let i = 0; i < u.length; i += 8192) s += String.fromCharCode.apply(null, u.subarray(i, i + 8192)); return btoa(s); }")
+    nbk = lambda: pg.evaluate('window.__bk.length')
+    await pg.evaluate("() => { const r = window.__app.meta.recv.rows[0]; r.checks = [{ no: 'ZZ0001', acct: '123', bank: '測試銀行', kind: '客', due: 1151231, amt: 100 }]; r.adj = (r.adj || []).concat([{ s: -1, k: '自訂測試項', amt: 50, note: '原因X' }]); return window.__saveRecvNow(); }")
+    await pg.click('a[data-view=recv]'); await pg.wait_for_selector('#rcBackup')
+    ok('未設定' in await pg.text_content('#rcBackup'), '收款登記多了「自動備份」按鈕（未設定）')
+    await pg.click('#rcBackup'); await dlg_fill(pg, {'pw': 'wrong'})
+    await pg.wait_for_function("document.querySelector('#dlgErr').textContent.includes('不正確')")
+    ok(True, '設定自動備份：開啟密碼打錯會擋下')
+    await pg.fill('#dlg_pw', 'rc123'); await pg.click('#dlgOk')
+    await pg.wait_for_function('window.__bk.length >= 1', timeout=20000)
+    ok('已自動備份' in await pg.text_content('#rcBackup'), '設定完馬上備份一次，按鈕顯示「已自動備份 今天 …」')
+    raw = base64.b64decode(await last())
+    ok(raw[:8] == bytes.fromhex('d0cf11e0a1b11ae1'), '備份檔是加密的 Excel（沒有密碼打不開）')
+    wb = bk_open(raw, 'rc123')
+    names = [ws.title for ws in wb.worksheets]
+    rows = await pg.evaluate('window.__app.meta.recv.rows')
+    yms = sorted({r['ym'] for r in rows}, reverse=True)
+    want = [f"{y // 100}年{y % 100:02d}月" for y in yms] + ['支票', '網站還原用']
+    ok(names == want and wb['網站還原用'].sheet_state == 'hidden', f'用另外的程式（msoffcrypto）以開啟密碼解開，資料完整性檢查通過；每月一張＋支票＋隱藏的還原用：{names}')
+    ws = wb[want[0]]; vals = [[c for c in r if c is not None] for r in ws.iter_rows(values_only=True)]
+    ok('客戶應收帳款明細表' in str(vals[0][0]) and vals[1][0] == '代號' and any(v and v[0] == '總計' for v in vals), '每月那張的格式和原本的明細表一樣（標題、代號表頭、總計）')
+    ym0 = rows[0]['ym']; w0 = wb[f"{ym0 // 100}年{ym0 % 100:02d}月"]; cells = [c for r in w0.iter_rows(values_only=True) for c in r if c is not None]
+    ok('前先入' in cells and '自訂測試項' in cells and -50 in cells and any('原因X' in str(c) for c in cells), '一行一行的調整：每個項目一欄（自己加的項目也有，減的是負數），詳細寫在「調整說明」')
+    nchk = sum(len(r.get('checks') or []) for r in rows)
+    ok(wb['支票'].max_row - 2 == nchk and nchk == 1 and wb['支票'].cell(3, 7).value == '客票', f'「支票」那張列出 {nchk} 張支票')
+    # 改資料 → 自動備份
+    n0 = await nbk()
+    await pg.select_option('#rcYm', str(yms[0])); await pg.wait_for_timeout(200)
+    note = pg.locator('#recvBody tbody tr[data-id] input[data-k=note]').first
+    await note.fill('備份測試 A'); await note.press('Tab')
+    await pg.wait_for_function(f'window.__bk.length > {n0}', timeout=20000)
+    wb = bk_open(base64.b64decode(await last()), 'rc123')
+    ok(any('備份測試 A' in str(c) for r in wb[want[0]].iter_rows(values_only=True) for c in r), '改完資料約 1 秒內自動寫進備份 Excel（不用按任何按鈕）')
+    # 權限被收回（例如重新開瀏覽器時沒選「每次造訪都允許」）
+    await pg.evaluate("window.__bkPerm = 'prompt'"); n1 = await nbk()
+    await note.fill('備份測試 B'); await note.press('Tab'); await pg.wait_for_timeout(1500)
+    ok(await nbk() == n1 and '繼續自動備份' in await pg.text_content('#rcBackup') and 'warn' in (await pg.get_attribute('#rcBackup', 'class')), '沒有寫入權限時不會偷寫，按鈕變紅色「⚠ 按這裡繼續自動備份」')
+    await pg.click('#rcBackup'); await pg.wait_for_function(f'window.__bk.length > {n1}', timeout=20000)
+    ok('已自動備份' in await pg.text_content('#rcBackup'), '按一下（允許）就補寫最新的資料')
+    # 用備份整份還原
+    raw = base64.b64decode(await last()); open(FX + '/bk_out.xlsx', 'wb').write(raw)
+    before = await pg.evaluate('JSON.stringify([window.__app.meta.recv.rows, window.__app.meta.recvRates, window.__app.meta.recvItemSets])')
+    await pg.evaluate("window.__app.meta.recv.rows = window.__app.meta.recv.rows.slice(0, 2); window.__app.meta.recvRates = {}; window.__app.meta.recvItemSets = null")
+    await pg.set_input_files('#rcFile', FX + '/bk_out.xlsx'); await dlg_fill(pg, {'xls': 'rc123'})
+    await pg.wait_for_selector('#dlg[open]'); t = await pg.text_content('#dlgForm')
+    ok('自動備份' in t and '整份換成備份的內容' in t, '匯入自動備份的 Excel → 問要不要整份還原：' + t[:60])
+    await pg.click('#dlgOk'); await pg.wait_for_timeout(800)
+    after = await pg.evaluate('JSON.stringify([window.__app.meta.recv.rows, window.__app.meta.recvRates, window.__app.meta.recvItemSets])')
+    ok(after == before, '整份還原：每一筆、支票、調整、備註、每位客人的折率、調整項目清單都和備份前一模一樣')
+    # 改開啟密碼 → 備份檔也改用新密碼
+    n2 = await nbk()
+    await pg.click('a[data-view=data]'); await pg.click('#changePw'); await dlg_fill(pg, {'cur': 'rc123', 'pw': 'rc456', 'pw2': 'rc456'})
+    await pg.wait_for_function(f'window.__bk.length > {n2}', timeout=30000)
+    raw = base64.b64decode(await last())
+    try: bk_open(raw, 'rc123'); old_ok = True
+    except Exception: old_ok = False
+    ok(not old_ok and bk_open(raw, 'rc456') is not None, '改開啟密碼後，備份 Excel 改用新密碼（舊密碼打不開）')
+    await pg.click('a[data-view=recv]'); await pg.wait_for_selector('#rcBackup')
+    await pg.screenshot(path=SH + '/44_recv_backup.png')
 
 
 async def report_page(b):
