@@ -5,11 +5,11 @@
   --primary: #26437A; --primary-ink: #FFFFFF; --primary-soft: #E3E9F4;
   --accent: #B8473C; --accent-soft: #F6E3E0;
   --good: #2E7D4F; --warn: #A86A00; --bad: #B8473C;
-  --s1: #2D5AA0; --s2: #C0503F; --s3: #9AA7BD;
+  --s1: #13849a; --s2: #C0503F; --s3: #9AA7BD;
   /* 分類配色（區域、大類）：已用色盲檢查驗證，light／dark 各一組 */
-  --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100; --c5: #e87ba4; --c6: #008300; --c7: #6250d6; --c8: #e34948; --c-ink: #ffffff; --c4-ink: #0b0b0b;
-  --total: #9B2226;
-  --c9: #0f9fb5; --c10: #9c5a2b; --c11: #6cbcf5; --c12: #8ab31b; --c13: #b5338a; --c14: #5b6b80; --c15: #6b7a1a; --c16: #3a3a3a;
+  --c1: #0fa3b8; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100; --c5: #e87ba4; --c6: #008300; --c7: #6250d6; --c8: #e34948; --c-ink: #ffffff; --c4-ink: #0b0b0b;
+  --total: #1F56B8; --total-red: #9B2226;
+  --c9: #a77bd6; --c10: #9c5a2b; --c11: #c2b280; --c12: #8ab31b; --c13: #b5338a; --c14: #5b6b80; --c15: #6b7a1a; --c16: #3a3a3a;
   --heat-0: #EEF2F8; --heat-1: #C9D5EA; --heat-2: #8EA6CF; --heat-3: #4E6FA8; --heat-4: #26437A;
   --font: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
   --font-head: "Noto Serif TC", "Songti TC", "PMingLiU", serif;
@@ -25,9 +25,9 @@
   --accent: #F0705A; --accent-soft: #3A2427;
   --good: #3CC2A0; --warn: #F3B23C; --bad: #F0705A;
   --s1: #2FA898; --s2: #E0674E; --s3: #5B6F8F;
-  --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181; --c6: #008300; --c7: #9085e9; --c8: #e66767; --c-ink: #ffffff; --c4-ink: #ffffff;
-  --total: #d0454a;
-  --c9: #2ec4d9; --c10: #c98a5a; --c11: #9ad4ff; --c12: #a6cf3a; --c13: #e070bd; --c14: #9aa9bd; --c15: #a8b84a; --c16: #d9d9d9;
+  --c1: #2ec4d9; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181; --c6: #008300; --c7: #9085e9; --c8: #e66767; --c-ink: #ffffff; --c4-ink: #ffffff;
+  --total: #4d8ff0; --total-red: #d0454a;
+  --c9: #c4a3f0; --c10: #c98a5a; --c11: #d6c79a; --c12: #a6cf3a; --c13: #e070bd; --c14: #9aa9bd; --c15: #a8b84a; --c16: #d9d9d9;
   --heat-0: #1B2A44; --heat-1: #22445A; --heat-2: #24676E; --heat-3: #2A8B84; --heat-4: #3CB59E;
   --font: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
   --font-head: "Noto Sans TC", "PingFang TC", sans-serif;
@@ -43,9 +43,9 @@
   --accent: #C77D05; --accent-soft: #FBEFD6;
   --good: #13805F; --warn: #B56F00; --bad: #C2453A;
   --s1: #13805F; --s2: #C77D05; --s3: #9DB3A8;
-  --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100; --c5: #e87ba4; --c6: #008300; --c7: #6250d6; --c8: #e34948; --c-ink: #ffffff; --c4-ink: #0b0b0b;
-  --total: #9B2226;
-  --c9: #0f9fb5; --c10: #9c5a2b; --c11: #6cbcf5; --c12: #8ab31b; --c13: #b5338a; --c14: #5b6b80; --c15: #6b7a1a; --c16: #3a3a3a;
+  --c1: #0fa3b8; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100; --c5: #e87ba4; --c6: #008300; --c7: #6250d6; --c8: #e34948; --c-ink: #ffffff; --c4-ink: #0b0b0b;
+  --total: #1F56B8; --total-red: #9B2226;
+  --c9: #a77bd6; --c10: #9c5a2b; --c11: #c2b280; --c12: #8ab31b; --c13: #b5338a; --c14: #5b6b80; --c15: #6b7a1a; --c16: #3a3a3a;
   --heat-0: #EEF6F1; --heat-1: #CBE7D8; --heat-2: #8ACBAD; --heat-3: #3FA57D; --heat-4: #13805F;
   --font: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
   --font-head: "Huninn", "Noto Sans TC", sans-serif;

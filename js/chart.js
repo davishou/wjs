@@ -9,7 +9,7 @@
   const mk = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const col = (cls) => `var(--${cls || 's1'})`;
-  // 分類色（原本的順序）；合計／淨銷售總數用另外的 --total（深紅），不在這裡
+  // 分類色（原本的順序）；合計／淨銷售總數用另外的 --total（2026-11-17 起是藍色，c1 改青色），不在這裡；進貨分析、應收帳款的合計用 --total-red
   const PAL = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'c10', 'c11', 'c12', 'c13', 'c14', 'c15', 'c16'];
 
   // 讓格線落在整齊的數字上（1、2、5 的倍數）

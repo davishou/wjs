@@ -23,7 +23,7 @@
     { k: 'cat', label: '商品類別' }, { k: 'ck', label: '客戶' }, { k: 'style', label: '款號' },
   ];
   const FILTER_DIMS = ['region', 'rep', 'big', 'cat', 'ck', 'style'];
-  const COLORS = ['c1', 'c3', 'c4', 'c7', 'c5', 'c6']; // 不用橘、紅，免得和合計的深紅長條混在一起
+  const COLORS = ['c1', 'c3', 'c4', 'c7', 'c5', 'c6']; // 不用藍、橘、紅，免得和合計的藍色長條混在一起
 
   function render(ctx) {
     const { S, E, fmt, nf0, nf1, esc, $, $$, Charts, repName } = ctx;

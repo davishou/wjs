@@ -191,7 +191,7 @@
         <div class="panel"><div class="panel-head"><h2>每月進貨和退回廠商</h2></div><p class="hint">近 12 個月（到 ${esc(root.EngineMeta.ymLabel(R.F[1]))}），長條是進貨、退回分開看。</p><div class="chart" id="buyInBk"></div></div></div>`;
     const tr = trend(BE, R, null);
     $('#buyTrendHint').textContent = tr.hint + (tr.prev ? '，虛線是去年同期。' : '。') + ` 合計 ${fmt.big(tr.cur.reduce((t, v) => t + v, 0))}。`;
-    Charts.render($('#buyTrend'), { type: tr.prev ? 'combo' : 'bar', labels: tr.labels, series: [{ name: '淨進貨', kind: 'bar', cls: 'total', values: tr.cur }, ...(tr.prev ? [{ name: '去年同期', kind: 'line', dash: true, cls: 's3', values: tr.prev }] : [])], fmt: fmt.money, axisFmt: fmt.axis, title: '淨進貨走勢' });
+    Charts.render($('#buyTrend'), { type: tr.prev ? 'combo' : 'bar', labels: tr.labels, series: [{ name: '淨進貨', kind: 'bar', cls: 'total-red', values: tr.cur }, ...(tr.prev ? [{ name: '去年同期', kind: 'line', dash: true, cls: 's3', values: tr.prev }] : [])], fmt: fmt.money, axisFmt: fmt.axis, title: '淨進貨走勢' });
     const vl = [...vend.values()].filter((v) => v.net > 0).sort((a, b) => b.net - a.net);
     Charts.hbars($('#buyTopV'), { rows: vl.slice(0, 10).map((v) => ({ label: BE.vendLabel(v.key), value: v.net, prev: P ? (pv.get(v.key) || {}).net || 0 : null, v: v.key, cls: X.colorOf('vend', v.key) })), fmt: fmt.big, limit: 10, onClick: (x) => openVendor(X, x.v) });
     Charts.donut($('#buyMixV'), { items: vl.map((v) => ({ label: BE.vendLabel(v.key), value: v.net, cls: X.colorOf('vend', v.key), v: v.key })), fmt: fmt.big, title: '廠商', center: { value: fmt.big(T.net), label: '淨進貨' }, onClick: (x) => openVendor(X, x.v) });
