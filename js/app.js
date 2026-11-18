@@ -87,7 +87,7 @@
     if (meta && app === 'ar') meta.content = '#b88a00';
     else if (meta && app === 'buy') meta.content = '#a61e1e';
     else if (meta) meta.content = { indigo: '#26437A', night: '#0E1726', market: '#13805F' }[document.documentElement.dataset.theme] || '#26437A';
-    document.title = app === 'ar' ? '應收實收帳款' : app === 'buy' ? '進貨分析' : '銷售分析';
+    document.title = (app === 'ar' ? '應收實收帳款・' : app === 'buy' ? '進貨分析・' : '銷售分析・') + 'WJ商業系統'; // App 名稱（2026-11-18 使用者要求）
   }
   function go(view, { boot = false } = {}) {
     if (!VIEWS.includes(view)) view = 'home';
