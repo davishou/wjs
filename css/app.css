@@ -1107,7 +1107,7 @@ body[data-app="home"] .tab-group.g1, body[data-app="home"] .tab-group.g2, body[d
 .brand .mk-home, .brand .nm-home { display: none; }
 body[data-app="home"] .brand .mk-home, body[data-app="home"] .brand .nm-home { display: inline; }
 body[data-app="home"] .brand .mk-sales, body[data-app="home"] .brand .nm-sales { display: none; }
-.brand img.mk-home { width: 34px; height: 34px; border-radius: 8px; background: #fff; object-fit: contain; padding: 1px; }
+.brand img.mk-home { width: 34px; height: 34px; object-fit: contain; } /* 圖示是去背的八角寶石，不加底色 */
 [data-theme="indigo"] body[data-app="home"] .nav { background: linear-gradient(180deg, #0b0d10 0%, #16191e 40%, #232830 75%, #2f353e 100%); color: #e9edf2; }
 [data-theme="indigo"] body[data-app="home"] .tabs a { color: #dfe4ea; }
 [data-theme="indigo"] body[data-app="home"] .tabs a:hover { background: rgba(255,255,255,.08); }
