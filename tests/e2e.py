@@ -28,6 +28,13 @@ IDB_DUMP = """async () => { const db = await new Promise((r,j)=>{const q=indexed
  const keys = await new Promise(r=>{const q=db.transaction('kv').objectStore('kv').getAllKeys();q.onsuccess=()=>r(q.result)});
  const v = await new Promise(r=>{const q=db.transaction('kv').objectStore('kv').get('vault');q.onsuccess=()=>r(q.result)});
  return {keys, vault: v ? {iter:v.iter, ctLen:v.ct.byteLength, hasIv: v.iv.length, ctHead: Array.from(new Uint8Array(v.ct).slice(0,4))} : null}; }"""
+async def pick_ym(pg, ym):
+    """收款登記：年、月兩個下拉選單"""
+    ym = int(ym)
+    await pg.select_option('#rcY', str(ym // 100)); await pg.wait_for_timeout(150)
+    await pg.select_option('#rcM', str(ym % 100))
+
+
 async def dlg_fill(page, vals, check=None):
     await page.wait_for_selector('#dlg[open]')
     if check is not None:
@@ -794,11 +801,15 @@ async def recv_flow(b):
     r = await pg.evaluate('window.__recv')
     ok(r['ym'] == 11411 and len(r['rows']) == sum(1 for x in exp if x['ym'] == 11411) and all(abs(x['diff']) < 0.5 for x in r['rows']), f"打開最新的 114/11：{len(r['rows'])} 筆，全部對得上")
     ok(await pg.locator('#recvBody tr:has-text("7K02") .warn-cell').count() == 1 and await pg.locator('#recvBody .warn-cell').count() == 1, '7K02 的應收和銷售資料的出貨不同 → 標黃（只有這一格）')
-    await pg.select_option('#rcYm', '11409'); await pg.wait_for_timeout(300)
+    bar = await pg.text_content('#recvBody .recv-bar')
+    ok('月份' not in bar and await pg.locator('#rcY').count() == 1 and await pg.locator('#rcM option').count() == 12, '月份改成兩個下拉：「○○ 年」「○ 月」，沒有「月份」兩個字，月份 1～12 都能選')
+    await pick_ym(pg, '11412'); await pg.wait_for_timeout(300)
+    ok(await pg.locator('#recvBody tbody tr[data-id]').count() == 0 and 'rcY' in await pg.inner_html('#recvBody') and await pg.input_value('#rcM') == '12', '選還沒有資料的月份（114 年 12 月）也可以，畫面是空的、可以開始登記')
+    await pick_ym(pg, '11409'); await pg.wait_for_timeout(300)
     r = await pg.evaluate('window.__recv'); r5 = [x for x in r['rows'] if x['code'] == '5X03']
     ok(len(r5) == 2 and all(abs(x['diff']) >= 0.5 for x in r5) and abs(r5[0]['group']) < 0.5 and await pg.locator('#recvBody tr.bad-row').count() == 0 and await pg.locator('#recvBody tr.cont').count() == 1,
        f"Excel 裡代號「-------」的續行算同一位客戶：5X03 兩行各自不平、合起來對得上（{[x['diff'] for x in r5]}）")
-    await pg.select_option('#rcYm', '11410'); await pg.wait_for_timeout(300)
+    await pick_ym(pg, '11410'); await pg.wait_for_timeout(300)
     r = await pg.evaluate('window.__recv'); bad = [x for x in r['rows'] if abs(x['diff']) >= 0.5]
     ok(len(bad) == 1 and bad[0]['code'] == '3A11' and abs(bad[0]['diff'] - 10) < 0.01 and await pg.locator('#recvBody tr.bad-row').count() == 1, f'114/10：3A11 差 10 元 → 標紅：{bad}')
     await pg.screenshot(path=SH + '/40_recv_entry.png', full_page=True)
@@ -924,14 +935,14 @@ async def recv_flow(b):
     mig = await pg.evaluate("Recv.normRow({ hold: 300, more: -50, short: 0 }).adj")
     ok(mig == [{'s': 1, 'k': '保留', 'amt': 300, 'note': ''}, {'s': -1, 'k': '多入', 'amt': 50, 'note': ''}], f'舊資料（7 個調整欄）自動轉成一行一行，正負號照原本的 {mig}')
     await pg.screenshot(path=SH + '/47_recv_adj.png', full_page=True)
-    await pg.select_option('#rcYm', '11411'); await pg.wait_for_timeout(300)
+    await pick_ym(pg, '11411'); await pg.wait_for_timeout(300)
     t = await pg.text_content('#rcHold')
     ok('2T06' in t and '300' in t and '運費我們付' in t and '樣品錢下月一起' in t and '1 位客戶上次「保留」' in t and await pg.locator('#recvBody tr:has-text("2T06") .hold-tag').count() == 1, '下個月（114/11）出現保留提醒：客戶、金額、備註都顯示，表格客戶名下面也標出來')
     await pg.screenshot(path=SH + '/44_recv_hold.png', full_page=True)
     await pg.check('#rcHold [data-hold-done="2T06"]'); await pg.wait_for_timeout(300)
     ok('都算好了' in await pg.text_content('#rcHold') and await pg.evaluate("window.__app.meta.recv.rows.filter(r => r.code === '2T06' && r.ym === 11410).every(r => r.holdDone)"), '勾「算好了」→ 不再提醒（記在資料裡）')
     await pg.uncheck('#rcHold [data-hold-done="2T06"]'); await pg.wait_for_timeout(300)
-    await pg.select_option('#rcYm', '11410'); await pg.wait_for_timeout(300)
+    await pick_ym(pg, '11410'); await pg.wait_for_timeout(300)
     # 客戶歷史
     await pg.locator('#recvBody tr:has-text("2T06") input[data-k=paid]').focus(); await pg.wait_for_timeout(300)
     h = await pg.evaluate('window.__recvHist')
@@ -1073,7 +1084,7 @@ async def recv_backup(pg):
     ok(wb['支票'].max_row - 2 == nchk and nchk == 1 and wb['支票'].cell(3, 7).value == '客票', f'「支票」那張列出 {nchk} 張支票')
     # 改資料 → 自動備份
     n0 = await nbk()
-    await pg.select_option('#rcYm', str(yms[0])); await pg.wait_for_timeout(200)
+    await pick_ym(pg, str(yms[0])); await pg.wait_for_timeout(200)
     note = pg.locator('#recvBody tbody tr[data-id] input[data-k=note]').first
     await note.fill('備份測試 A'); await note.press('Tab')
     await pg.wait_for_function(f'window.__bk.length > {n0}', timeout=20000)

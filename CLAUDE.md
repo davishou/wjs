@@ -121,6 +121,7 @@ BB/BC/BI 對照表整張改成和 AK/AT/BM 一樣，其他對照表只加進貨�
   之後每次 `saveRecv` 存完就 `runBackup` 寫一份**用開啟密碼加密的 Excel**（Excel 直接輸入密碼就能打開）。每月一張（和明細表同格式，網站讀得懂；`row.adj` 依項目一欄、減的是負數，自己加的項目接在 7 項後面，詳細寫在「調整說明」）、「支票」一張、隱藏的「網站還原用」（A 欄 JSON：rows、rates、rv、itemSets）。
   密碼不存：設定時 `RecvBackup.makeKeys(密碼)` 產生金鑰組放 `S.meta.recvBk`（跟資料一起加密）；改開啟密碼時重新產生。檔案位置（FileSystemFileHandle）存在 IndexedDB `recvBkHandle`（這台裝置），
   沒有寫入權限時按鈕變紅「按這裡繼續自動備份」，不會跳視窗。匯入時讀到「網站還原用」→ 問要不要整份還原（`restoreRecvBackup`）。測試用假的檔案物件，再用 msoffcrypto 解開、openpyxl 讀；LibreOffice 也打得開。
+- **月份選擇（2026-11-18 使用者要求）**：收款登記的「月份」改成兩個下拉 `#rcY`「○○ 年」、`#rcM`「○ 月」（沒有「月份」兩個字）。年份 = 有登記或有銷售資料的年份＋今年；月份 1～12 都能選（還沒匯銷售資料的月份也能先登記）。一打開預設 = 登記過的最新月份，沒登記過 = 銷售資料最新月份，都沒有 = 這個月。
 - 待確認：運金誰付（使用者說交給他們自己判斷）。
 - 之後可做：應收帳款天數改用這裡的實際應收餘額（目前提醒頁的應收帳款天數還是用手動輸入的餘額）。
 
@@ -180,7 +181,7 @@ BB/BC/BI 對照表整張改成和 AK/AT/BM 一樣，其他對照表只加進貨�
 
 ## 測試（改完一定要跑）
 ```
-pip install openpyxl cryptography playwright msoffcrypto-tool
+pip install openpyxl cryptography playwright msoffcrypto-tool pillow
 python -m playwright install chromium
 python tests/make_fixtures.py          # 產生假資料到 tests/fixtures/（加 --big 多測 18 萬筆大檔）
 python tests/e2e.py                    # 瀏覽器實測，最後印出「全部通過」

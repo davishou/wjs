@@ -126,7 +126,10 @@
     const { S, $, $$, esc, fmt, nf0, ymLabel } = ctx;
     const R = store();
     const yms = [...new Set(R.rows.map((r) => r.ym).concat(ctx.E ? ctx.E.ymList : []))].sort((a, b) => b - a);
-    if (!S.recvYm || !yms.includes(S.recvYm)) S.recvYm = (R.rows.length ? Math.max(...R.rows.map((r) => r.ym)) : yms[0]) || 0;
+    // 年、月分開選（2026-11-18 使用者要求）：年份 = 有資料的年份＋今年；月份 1～12 都可以選（還沒有銷售資料的月份也能先登記）
+    const now = new Date(), nowYm = (now.getFullYear() - 1911) * 100 + now.getMonth() + 1;
+    if (!S.recvYm) S.recvYm = (R.rows.length ? Math.max(...R.rows.map((r) => r.ym)) : yms[0]) || nowYm;
+    const years = [...new Set(yms.map((m) => Math.floor(m / 100)).concat([Math.floor(nowYm / 100), Math.floor(S.recvYm / 100)]))].sort((a, b) => b - a);
     const ym = ymOf(S);
     const regions = [...new Set(R.rows.filter((r) => r.ym === ym).map((r) => r.region).filter(Boolean))];
     const f = S.recvF || (S.recvF = { region: '', q: '' });
@@ -139,7 +142,8 @@
     const el = $('#recvBody');
     el.innerHTML = `
       <div class="toolbar recv-bar">
-        <label class="inline">月份 <select id="rcYm">${yms.map((m) => `<option value="${m}" ${m === ym ? 'selected' : ''}>${ymLabel(m)}</option>`).join('')}</select></label>
+        <span class="inline rc-ym"><select id="rcY" aria-label="年">${years.map((y) => `<option value="${y}" ${y === Math.floor(ym / 100) ? 'selected' : ''}>${y}</option>`).join('')}</select> 年
+          <select id="rcM" aria-label="月">${Array.from({ length: 12 }, (_, i) => i + 1).map((m) => `<option value="${m}" ${m === ym % 100 ? 'selected' : ''}>${m}</option>`).join('')}</select> 月</span>
         <div class="seg" id="rcRegion"><button data-v="" class="${!f.region ? 'on' : ''}">全部地區</button>${regions.map((g) => `<button data-v="${esc(g)}" class="${f.region === g ? 'on' : ''}">${esc(g)}</button>`).join('')}</div>
         <input type="search" id="rcSearch" placeholder="搜尋客戶代號或名稱" value="${esc(f.q)}">
         <div class="seg" id="rcLayout" title="手機建議用卡片"><button data-v="table" class="${layout(S) === 'table' ? 'on' : ''}">表格</button><button data-v="cards" class="${layout(S) === 'cards' ? 'on' : ''}">卡片</button></div>
@@ -170,7 +174,8 @@
       `;
     drawSum(ctx, rows);
     const save = () => ctx.saveRecv();
-    $('#rcYm').onchange = (e) => { S.recvYm = +e.target.value; renderEntry(ctx); };
+    const setYm = () => { S.recvYm = +$('#rcY').value * 100 + +$('#rcM').value; renderEntry(ctx); };
+    $('#rcY').onchange = setYm; $('#rcM').onchange = setYm;
     $('#rcRegion').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; f.region = b.dataset.v; renderEntry(ctx); };
     $('#rcSearch').oninput = (e) => { f.q = e.target.value; clearTimeout(f._t); f._t = setTimeout(() => { renderEntry(ctx); const s = $('#rcSearch'); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }, 250); };
     $('#rcImport').onclick = () => $('#rcFile').click();
