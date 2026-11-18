@@ -1100,3 +1100,26 @@ body[data-app="buy"] .kpi:first-child .gr { color: inherit; }
 @media (max-width: 760px) { .home-logo { width: 72px; height: 72px; border-radius: 18px; } }
 [data-theme="indigo"] body[data-app="buy"] .tabs a:not(.on) { color: #ffe3e3; }
 a.btn { text-decoration: none; }
+
+/* ============ 主選單（2026-11-18）：自己的一個功能，黑色 ============ */
+:root { --hm-k: #16191e; --hm-k2: #2b3038; }
+body[data-app="home"] .tab-group.g1, body[data-app="home"] .tab-group.g2, body[data-app="home"] .tab-group.g3, body[data-app="home"] .tab-group.g5, body[data-app="home"] .tab-group.g6 { display: none !important; }
+.brand .mk-home, .brand .nm-home { display: none; }
+body[data-app="home"] .brand .mk-home, body[data-app="home"] .brand .nm-home { display: inline; }
+body[data-app="home"] .brand .mk-sales, body[data-app="home"] .brand .nm-sales { display: none; }
+.brand img.mk-home { width: 34px; height: 34px; border-radius: 8px; background: #fff; object-fit: contain; padding: 1px; }
+[data-theme="indigo"] body[data-app="home"] .nav { background: linear-gradient(180deg, #0b0d10 0%, #16191e 40%, #232830 75%, #2f353e 100%); color: #e9edf2; }
+[data-theme="indigo"] body[data-app="home"] .tabs a { color: #dfe4ea; }
+[data-theme="indigo"] body[data-app="home"] .tabs a:hover { background: rgba(255,255,255,.08); }
+[data-theme="indigo"] body[data-app="home"] .tabs a.on { background: #fff; color: var(--hm-k); }
+[data-theme="indigo"] body[data-app="home"] .tab-group { background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.1); }
+[data-theme="indigo"] body[data-app="home"] .tab-group.g0 { background: transparent; border-color: transparent; }
+[data-theme="indigo"] body[data-app="home"] .tg-label { color: #aab3bf; }
+[data-theme="night"] body[data-app="home"] .nav { border-bottom: 2px solid #9aa4b2; }
+[data-theme="market"] body[data-app="home"] .nav { box-shadow: inset 0 0 0 2px var(--hm-k), var(--shadow); }
+[data-theme="market"] body[data-app="home"] .tabs a.on { background: var(--hm-k); color: #fff; }
+[data-theme="indigo"] body[data-app="home"] main, [data-theme="market"] body[data-app="home"] main { --primary: var(--hm-k2); }
+@media (max-width: 760px) {
+  body[data-app="home"] .nav { border-top: 3px solid var(--hm-k) !important; }
+  body[data-app="home"] .tabs a.on { color: var(--hm-k) !important; background: #e9ecf0 !important; }
+}

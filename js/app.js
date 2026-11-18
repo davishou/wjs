@@ -49,7 +49,7 @@
     rep: Object.assign({ sel: null, q: '' }, store.get('rep', {})),
     span: Object.assign({ p: 'r12', from: 0, to: 0 }, store.get('span', {})), // 業務、客戶、商品共用的期間（js/period.js）
     board: Object.assign({ opt: 'A', period: 'ytd', metric: 'net' }, store.get('board', {})),
-    view: 'home', app: ['ar', 'buy'].includes(store.get('app', 'sales')) ? store.get('app', 'sales') : 'sales', // 目前在哪一個應用：sales 銷售分析、ar 應收實收帳款、buy 進貨分析
+    view: 'home', app: 'home', // 一打開在主選單（2026-11-18 使用者要求：主選單是自己的一個功能，黑色） // 目前在哪一個應用：sales 銷售分析、ar 應收實收帳款、buy 進貨分析
     BE: null, // 進貨分析的計算（js/buy.js，資料在 S.meta.buy）
     bspan: Object.assign({ p: 'r12', from: 0, to: 0 }, store.get('bspan', {})), // 進貨分析各頁共用的期間
     buyV: { q: '', all: false, sort: { key: 'net', dir: -1 } }, buyP: { q: '', all: false, sort: { key: 'net', dir: -1 } }, buyO: { q: '', kind: 'all' },
@@ -84,10 +84,11 @@
     S.app = app; store.set('app', app);
     document.body.dataset.app = app;
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta && app === 'ar') meta.content = '#b88a00';
+    if (meta && app === 'home') meta.content = '#16191e';
+    else if (meta && app === 'ar') meta.content = '#b88a00';
     else if (meta && app === 'buy') meta.content = '#a61e1e';
     else if (meta) meta.content = { indigo: '#26437A', night: '#0E1726', market: '#13805F' }[document.documentElement.dataset.theme] || '#26437A';
-    document.title = 'WJ商業系統・' + (app === 'ar' ? '應收實收帳款' : app === 'buy' ? '進貨分析' : '銷售分析'); // 分頁／程式視窗標題（2026-11-18 使用者要求：系統名稱在前）
+    document.title = app === 'home' ? 'WJ商業系統' : 'WJ商業系統・' + (app === 'ar' ? '應收實收帳款' : app === 'buy' ? '進貨分析' : '銷售分析'); // 分頁／程式視窗標題（2026-11-18 使用者要求：系統名稱在前）
   }
   function go(view, { boot = false } = {}) {
     if (!VIEWS.includes(view)) view = 'home';
@@ -98,8 +99,9 @@
     }
     if (AR_VIEWS.includes(view)) setApp('ar');
     else if (BUY_VIEWS.includes(view)) setApp('buy');
-    else if (view !== 'home' && view !== 'data') setApp('sales');
-    else setApp(S.app);
+    else if (view === 'home') setApp('home'); // 主選單是自己的一個功能（黑色側欄）
+    else if (view !== 'data') setApp('sales');
+    else setApp(S.app); // 資料與設定：沿用目前所在的功能
     S.view = view;
     document.body.dataset.view = view; // 每一頁有自己的顏色（繽紛風格）
     $$('.view').forEach((v) => { v.hidden = v.id !== 'view-' + view; });
@@ -1854,7 +1856,7 @@
       if (S.view === 'dashboard') renderDashboard();
       if (S.view === 'report' && S.reportRedraw) S.reportRedraw();
     }, 200); });
-    const start = (location.hash.slice(1) || 'home');
+    const start = 'home'; // 打開 App 一律先到主選單（2026-11-18 使用者要求；沒有資料時 go() 會改到資料與設定）
     try {
       if (await Dataset.Vault.exists()) await lockScreen('unlock');
       else {

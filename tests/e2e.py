@@ -28,6 +28,15 @@ IDB_DUMP = """async () => { const db = await new Promise((r,j)=>{const q=indexed
  const keys = await new Promise(r=>{const q=db.transaction('kv').objectStore('kv').getAllKeys();q.onsuccess=()=>r(q.result)});
  const v = await new Promise(r=>{const q=db.transaction('kv').objectStore('kv').get('vault');q.onsuccess=()=>r(q.result)});
  return {keys, vault: v ? {iter:v.iter, ctLen:v.ct.byteLength, hasIv: v.iv.length, ctHead: Array.from(new Uint8Array(v.ct).slice(0,4))} : null}; }"""
+async def nav(pg, view):
+    """切換頁面。2026-11-18 起開鎖後先到主選單（側欄只有主選單和設定），所以用網址切換，和點左側選單一樣走 go()"""
+    if await pg.is_visible(f'a[data-view={view}]'):
+        await pg.click(f'a[data-view={view}]')
+    else:
+        await pg.evaluate(f"location.hash = '#{view}'")
+        await pg.wait_for_timeout(150)
+
+
 async def pick_ym(pg, ym):
     """收款登記：年、月兩個下拉選單"""
     ym = int(ym)
@@ -81,14 +90,14 @@ async def add_month(page, app_pw):
     await dlg_fill(page, {'xls':'測試pw123'}); await page.wait_for_selector('#dlgOk:text("只更新這些月份")', timeout=60000)
     t = await add_month_done(page); ok('1,085 筆進貨' in t, '有密碼的 Excel 也能每月加入：'+t)
     # 新客戶、舊客戶都在客戶列表裡（合併後代碼對應正確）
-    await page.click('a[data-view=customers]'); await page.wait_for_selector('#view-customers:not([hidden])')
+    await nav(page, 'customers'); await page.wait_for_selector('#view-customers:not([hidden])')
     cu = await page.text_content('#cuTable')
     ok('戊新店' in cu and '甲商行' in cu and '115/01' in cu, '客戶列表有新加入的客戶，最近交易 115/01')
-    await page.click('a[data-view=data]')
+    await nav(page, 'data')
     # 重新開啟後資料還在
     await page.reload(); await page.wait_for_selector('#lock:not([hidden])')
     await page.fill('#lockPw', app_pw); await page.click('#lockGo'); await page.wait_for_selector('#lock[hidden]', state='attached')
-    await page.click('a[data-view=data]')
+    await nav(page, 'data')
     f = await facts(page); ok('1,085' in f and '115/01' in f, '重新開啟後，加入的資料仍在')
     for th in ['night', 'market']:
         await page.evaluate(f"document.documentElement.dataset.theme='{th}'")
@@ -142,7 +151,8 @@ async def main():
     ok(True, '開鎖：錯誤密碼顯示錯誤')
     await page.fill('#lockPw','測試pw123'); await page.click('#lockGo')
     await page.wait_for_selector('#lock[hidden]', state='attached')
-    await page.click('a[data-view=overview]'); await page.wait_for_selector('#view-overview:not([hidden])')
+    ok(await page.evaluate('document.body.dataset.view') == 'home', '開鎖後先到主選單')
+    await page.click('#homeApps .app-tile.sales'); await page.wait_for_selector('#view-overview:not([hidden])')
     ok('資料到' in await page.text_content('#brandSub'), '開鎖成功，總覽顯示：'+await page.text_content('#brandSub'))
     await page.screenshot(path=SH+'/4_unlocked.png')
     # 3. 更改開啟密碼
@@ -158,7 +168,7 @@ async def main():
     await page.fill('#lockPw','newpass1'); await page.click('#lockGo'); await page.wait_for_selector('#lock[hidden]', state='attached')
     ok(True, '更改開啟密碼：舊密碼失效、新密碼可開')
     # 4. 已有密碼時匯入 Excel 2007 格式加密檔：只問 Excel 密碼
-    await page.click('a[data-view=data]')
+    await nav(page, 'data')
     await page.set_input_files('#fileXlsx', FX+'/mid_standard.xlsx')
     await page.wait_for_selector('#dlg[open]')
     ok(await page.query_selector('#dlg_app') is None, '已設定開啟密碼 → 匯入時只問 Excel 密碼')
@@ -212,7 +222,7 @@ async def main():
             ok(w <= 392, f'手機寬度：{th} 風格的 {vw} 畫面沒有超出螢幕（{w}px）')
     await page.evaluate("document.documentElement.dataset.theme='indigo'")
     # 資料包是 mid（54,000 筆，114/12 有 1,500 筆）→ 54,000 − 1,500 + 35
-    await page.click('a[data-view=data]'); await add_month_open(page, 'month.xlsx')
+    await nav(page, 'data'); await add_month_open(page, 'month.xlsx')
     await page.screenshot(path=SH+'/11_phone_add_month.png')
     t = await add_month_done(page); ok('52,535 筆進貨' in t, '手機也能每月加入：'+t)
     ok(not errs, '手機端沒有 JS 錯誤 '+str(errs))
@@ -226,7 +236,7 @@ async def main():
     st = await page.evaluate(IDB_DUMP); ok(st['keys']==['vault'], '舊資料已加密，未加密副本已刪除')
     # 大檔效能
     if os.path.exists(FX+'/big_agile.xlsx'):
-        await page.click('a[data-view=data]'); await page.set_input_files('#fileXlsx', FX+'/big_agile.xlsx')
+        await nav(page, 'data'); await page.set_input_files('#fileXlsx', FX+'/big_agile.xlsx')
         await dlg_fill(page, {'xls':'測試pw123'}); t = await wait_done(page); ok('180,000' in t, '大檔（約 9MB、18 萬筆）加密 Excel：'+t)
     for th in ['night','market']:
         await page.evaluate(f"localStorage.setItem('dv.look','{th}')"); await page.reload(); await page.wait_for_selector('#lock:not([hidden])'); await page.screenshot(path=SH+f'/9_lock_{th}.png')
@@ -295,7 +305,7 @@ async def dashboard(b):
     await pg.set_input_files('#fileClass', FX + '/class_agile.xlsx'); await dlg_fill(pg, {'xls': '測試pw123'})
     await pg.wait_for_function("document.querySelector('#classState').textContent.includes('已匯入')")
     ok('7 個代碼' in await pg.text_content('#classState') and '1 個類別代碼' in await pg.text_content('#classState'), '匯入有密碼的商品類別代碼表：' + await pg.text_content('#classState'))
-    await pg.click('a[data-view=dashboard]'); await pg.wait_for_selector('#dbAlerts .alerts')
+    await nav(pg, 'dashboard'); await pg.wait_for_selector('#dbAlerts .alerts')
     d = await pg.evaluate('window.__dash')
     close = lambda a, b, tol=0.005: abs(a - b) <= tol * max(1, abs(b))
     e = exp['cur']
@@ -333,9 +343,9 @@ async def dashboard(b):
     await compare_page(pg, exp)
     await reps_page(pg, d)
     await cust_prod_pages(pg, d)
-    await pg.click('a[data-view=overview]'); await pg.wait_for_selector('#tdBody .notice')
+    await nav(pg, 'overview'); await pg.wait_for_selector('#tdBody .notice')
     ok('沒有實際出貨日期' in await pg.text_content('#tdBody') and (await pg.evaluate('window.__today'))['mode'] == 'month', '今日：總表沒有實際日期時，說明原因並改用月份')
-    await pg.click('a[data-view=dashboard]'); await pg.wait_for_selector('#dbAlerts .alerts')
+    await nav(pg, 'dashboard'); await pg.wait_for_selector('#dbAlerts .alerts')
     # 損益兩平與應收帳款天數
     ok('缺少：每月固定費用' in await pg.text_content('#dbBep'), '沒填固定費用時說明缺少什麼')
     await pg.fill('#dbFixed', '100,000'); await pg.click('#dbFixedForm button'); await pg.wait_for_selector('#dbBepChart svg')
@@ -351,15 +361,15 @@ async def dashboard(b):
     await pg.screenshot(path=SH + '/20_dashboard.png', full_page=True)
     # 重新開啟：分類表、固定費用、應收帳款都還在（加密保存）
     await pg.reload(); await pg.fill('#lockPw', 'dash1'); await pg.click('#lockGo'); await pg.wait_for_selector('#lock[hidden]', state='attached')
-    await pg.click('a[data-view=dashboard]'); await pg.wait_for_selector('#dbBepChart svg')
+    await nav(pg, 'dashboard'); await pg.wait_for_selector('#dbBepChart svg')
     ok('天' in await pg.text_content('#dbDso') and '7 個代碼' in await pg.evaluate("(() => { location.hash = 'data'; return document.querySelector('#classState').textContent; })()"), '重新開啟後分類表、固定費用、應收帳款都還在')
-    await pg.click('a[data-view=dashboard]'); await pg.wait_for_selector('#dbBepChart svg')
+    await nav(pg, 'dashboard'); await pg.wait_for_selector('#dbBepChart svg')
     st = await pg.evaluate(IDB_DUMP); ok(st['keys'] == ['vault'], 'IndexedDB 只有加密的資料')
     # 重新匯入整份總表 → 設定保留
-    await pg.click('a[data-view=data]'); await pg.set_input_files('#fileXlsx', FX + '/plain.xlsx'); await wait_done(pg)
+    await nav(pg, 'data'); await pg.set_input_files('#fileXlsx', FX + '/plain.xlsx'); await wait_done(pg)
     ok('7 個代碼' in await pg.text_content('#classState') and '100,000' in await pg.text_content('#metaState'), '重新匯入總表後，分類表與設定保留')
     # 商品：款號層級、尺寸與顏色
-    await pg.click('a[data-view=products]'); await pg.wait_for_selector('#prTable')
+    await nav(pg, 'products'); await pg.wait_for_selector('#prTable')
     ok(await pg.locator('#prLevel').count() == 0 and (await pg.text_content('#prTable thead th:first-child')).strip().startswith('款號'), '商品頁只用款號（沒有切換）')
     await pg.fill('#prSearch', 'AR9006'); await pg.wait_for_timeout(400)
     ok(await pg.locator('#prTable tbody tr').count() == 1, '商品頁搜尋款號 AR9006 → 一列')
@@ -372,7 +382,7 @@ async def dashboard(b):
     await pg.locator('#drawer .drawer-body').screenshot(path=SH + '/21_size_color.png')
     await pg.keyboard.press('Escape')
     # 資料包帶著分類表和設定到手機
-    await pg.click('a[data-view=data]'); await pg.fill('#packPw', 'packdash')
+    await nav(pg, 'data'); await pg.fill('#packPw', 'packdash')
     async with pg.expect_download() as dl: await pg.click('#packExport')
     await (await dl.value).save_as(FX + '/pack_dash.dvp')
     ok(not errs, '電腦端儀表板沒有 JS 錯誤 ' + str(errs))
@@ -381,7 +391,7 @@ async def dashboard(b):
     pm = await m.new_page(); errs = []; pm.on('pageerror', lambda e: errs.append(str(e)))
     await pm.goto(URL + '#data'); await pm.wait_for_timeout(300)
     await pm.fill('#openPw', 'packdash'); await pm.set_input_files('#filePack', FX + '/pack_dash.dvp'); await pm.wait_for_selector('#view-overview:not([hidden])')
-    await pm.click('a[data-view=dashboard]'); await pm.wait_for_selector('#dbBepChart svg')
+    await nav(pm, 'dashboard'); await pm.wait_for_selector('#dbBepChart svg')
     ok('天' in await pm.text_content('#dbDso') and '1 個商品類別代碼沒有分類' in await pm.text_content('#dbAlerts'), '手機開資料包：分類表、固定費用、應收帳款都帶過來了')
     ok(await pm.evaluate('document.documentElement.scrollWidth') <= 390, '手機儀表板沒有把畫面撐寬')
     await pm.screenshot(path=SH + '/22_dashboard_phone.png', full_page=True)
@@ -390,7 +400,7 @@ async def dashboard(b):
 
 async def board_page(pg, d, exp):
     """儀表板三個方案：數字和儀表板（提醒）、Python 一致；沒有實際日期時方案 B 說明。"""
-    await pg.click('a[data-view=board]'); await pg.wait_for_selector('#bdBody')
+    await nav(pg, 'board'); await pg.wait_for_selector('#bdBody')
     await pg.click('#bdOpt button[data-v=A]'); await pg.click('#bdPer button[data-v=ytd]'); await pg.wait_for_timeout(200)
     a = await pg.evaluate('window.__board')
     ok(abs(a['cur']['net'] - exp['cur']['net']) < 0.01 and abs(a['cur']['netProfit'] - exp['cur']['netProfit']) < 0.01, f"方案 A：今年淨銷售 {a['cur']['net']:.0f}、淨毛利 {a['cur']['netProfit']:.0f}（Python {exp['cur']['net']:.0f}、{exp['cur']['netProfit']:.0f}）")
@@ -416,7 +426,7 @@ async def compare_page(pg, exp):
         sel = [r for r in rows if a <= r['ym'] <= b]
         S = sum(r['amt'] for r in sel if r['src'] == 0); R = sum(r['amt'] for r in sel if r['src'] == 1); P = sum(r['profit'] for r in sel if r['src'] == 0)
         return dict(net=S - R, margin=P / S if S else None)
-    await pg.click('a[data-view=compare]'); await pg.wait_for_selector('#cmpMain table')
+    await nav(pg, 'compare'); await pg.wait_for_selector('#cmpMain table')
     await pg.click('#cmpGran button[data-v=month]'); await pg.click('#cmpMetric button[data-v=net]'); await pg.wait_for_timeout(200)
     c = await pg.evaluate('window.__cmp')
     bad = [k for k, v in c['cell'].items() if abs(v - tot(int(k.split('|')[0]) * 100 + int(k.split('|')[1]), int(k.split('|')[0]) * 100 + int(k.split('|')[1]))['net']) > 0.01]
@@ -442,7 +452,7 @@ async def compare_page(pg, exp):
 
 async def reps_page(pg, d):
     """業務頁：每位業務加起來等於全公司；搜尋一位業務看詳細情形。"""
-    await pg.click('a[data-view=reps]'); await pg.click('#rsPeriod button[data-v=ytd]'); await pg.wait_for_selector('#rsBars .hb-row')
+    await nav(pg, 'reps'); await pg.click('#rsPeriod button[data-v=ytd]'); await pg.wait_for_selector('#rsBars .hb-row')
     r = await pg.evaluate('window.__reps')
     cols = await pg.evaluate("[...new Set(window.__reps.rows.map(x => window.__colorOf('rep', x.rep)))].length + '/' + window.__reps.rows.length")
     ok(cols.split('/')[0] == cols.split('/')[1], f'每位業務一個不同的顏色（{cols}）')
@@ -471,7 +481,7 @@ async def reps_page(pg, d):
 
 async def cust_prod_pages(pg, d):
     """客戶、商品頁：圖和列表跟著期間、篩選、搜尋連動。"""
-    await pg.click('a[data-view=customers]'); await pg.wait_for_selector('#cuTrend svg')
+    await nav(pg, 'customers'); await pg.wait_for_selector('#cuTrend svg')
     ok((await pg.text_content('#cuPeriod .seg button.on')) == '今年累計', '期間在業務、客戶、商品三頁共用（業務頁選的今年累計，客戶頁也是）')
     c = await pg.evaluate('window.__cust')
     ok(abs(sum(c['trend']['cur']) - d['cur']['net']) < 0.01 and '期間淨銷售' in await pg.text_content('#cuTable thead'), f"客戶：這段期間的淨銷售加起來 {sum(c['trend']['cur']):.0f} = 全公司 {d['cur']['net']:.0f}，列表多了「期間淨銷售」")
@@ -483,7 +493,7 @@ async def cust_prod_pages(pg, d):
     ok(abs(sum(c2['trend']['cur']) - first[1]) < 0.01, f"搜尋「{first[0]}」後，圖只算這位客戶：{sum(c2['trend']['cur']):.0f}")
     await pg.fill('#cuSearch', ''); await pg.wait_for_timeout(400)
     await pg.screenshot(path=SH + '/26_customers.png', full_page=True)
-    await pg.click('a[data-view=products]'); await pg.wait_for_selector('#prTrend svg')
+    await nav(pg, 'products'); await pg.wait_for_selector('#prTrend svg')
     pr = await pg.evaluate('window.__prod')
     ok(abs(sum(pr['trend']['cur']) - d['cur']['net']) < 0.01 and '期間淨銷售' in await pg.text_content('#prTable thead'), f"商品：這段期間的淨銷售加起來 = 全公司 {d['cur']['net']:.0f}")
     await pg.click('#prMetric button[data-v=qty]'); await pg.wait_for_timeout(300)
@@ -555,7 +565,7 @@ async def raw_import(b):
     got = await pg.evaluate(NET_BY_YM)
     ok(same_months(got, exp['by_date']), f"預設依實際日期：每月淨銷售 {got}（Python {exp['by_date']}）")
     ok(exp['by_date'] != exp['by_ord'], '假資料裡依日期和依單號的月份確實不同')
-    await pg.click('a[data-view=customers]'); cu = await pg.text_content('#cuTable')
+    await nav(pg, 'customers'); cu = await pg.text_content('#cuTable')
     ok('甲商行' in cu and '乙公司' in cu and '�' not in cu, 'DBF 的中文客戶名（Big5）正確，沒有亂碼')
     # 購買頻率改用實際日期：相隔天數 ÷（購買天數 − 1），同一天多張單算一次
     got = await pg.evaluate("Object.fromEntries(window.__app.E.customers({}, 0).list.map(c => [c.name, [c.freq, c.buyDays, c.freqBy]]))")
@@ -563,7 +573,7 @@ async def raw_import(b):
        f"購買頻率依實際日期：{ {k: (round(v[0], 2) if v[0] else v[0], v[1]) for k, v in got.items()} }（Python { {k: (round(v[0], 2) if v[0] else v[0], v[1]) for k, v in exp['freq'].items()} }）")
     ok('相隔的天數' in await pg.text_content('#cuSub') and '購買天數' in await pg.text_content('#cuTable thead'), '客戶頁說明新的購買頻率算法，並多了「購買天數」')
     # 今日：最新有出貨的一天、本月累計
-    await pg.click('a[data-view=overview]'); await pg.wait_for_selector('#tdCumChart svg')
+    await nav(pg, 'overview'); await pg.wait_for_selector('#tdCumChart svg')
     td = await pg.evaluate('window.__today')
     ok(td['mode'] == 'day' and td['date'] == exp['lastDay'] and abs(td['T']['mtd']['net'] - exp['mtd']) < 0.01 and abs(td['T']['day']['net'] - exp['dayNet']) < 0.01 and abs(td['T']['pmtd']['net'] - exp['pmtd']) < 0.01,
        f"今日：最新一天 {td['date']}（Python {exp['lastDay']}）、當天 {td['T']['day']['net']:.0f}（{exp['dayNet']:.0f}）、本月累計 {td['T']['mtd']['net']:.0f}（{exp['mtd']:.0f}）、上月同期 {td['T']['pmtd']['net']:.0f}（{exp['pmtd']:.0f}）")
@@ -575,7 +585,7 @@ async def raw_import(b):
     await pg.click('#tdRepBars .hb-row:nth-child(2)'); await pg.wait_for_selector('#rsBack')
     ok((await pg.evaluate('window.__reps'))['mode'] == 'one', '今日：點業務的橫條 → 業務頁的詳細情形')
     # 有實際日期：近 30 天每天一根、近 90 天每週一根，加起來等於那段日期的淨銷售
-    await pg.click('a[data-view=customers]'); await pg.click('#cuPeriod button[data-v=d30]'); await pg.wait_for_timeout(400)
+    await nav(pg, 'customers'); await pg.click('#cuPeriod button[data-v=d30]'); await pg.wait_for_timeout(400)
     cw = await pg.evaluate('window.__cust')
     lo = int(cw['period'].split('～')[0].replace('/', '')); hi = int(cw['period'].split('～')[1].replace('/', ''))
     want = sum(r['SALEGET'] for r in mf_rows()[0] if lo <= int(r['DELIVDATE']) <= hi) - sum(r['SALEGET'] for r in mf_rows()[1] if lo <= int(r['DELIVDATE']) <= hi)
@@ -586,24 +596,24 @@ async def raw_import(b):
     await pg.screenshot(path=SH + '/28_customers_days.png', full_page=True)
     await pg.click('#cuPeriod button[data-v=r12]'); await pg.wait_for_timeout(300)
     # 切換成依單號
-    await pg.click('a[data-view=data]'); await pg.click('#ymMode button[data-v=ord]'); await pg.wait_for_timeout(500)
+    await nav(pg, 'data'); await pg.click('#ymMode button[data-v=ord]'); await pg.wait_for_timeout(500)
     got = await pg.evaluate(NET_BY_YM)
     ok(same_months(got, exp['by_ord']), f"切換成依單號：每月淨銷售 {got}（Python {exp['by_ord']}）")
     await pg.reload(); await pg.fill('#lockPw', 'raw12'); await pg.click('#lockGo'); await pg.wait_for_selector('#lock[hidden]', state='attached')
     ok(await pg.evaluate("window.__app.ymMode") == 'ord' and same_months(await pg.evaluate(NET_BY_YM), exp['by_ord']), '重新開啟後仍記得「依單號」')
-    await pg.click('a[data-view=data]'); await pg.click('#ymMode button[data-v=date]'); await pg.wait_for_timeout(500)
+    await nav(pg, 'data'); await pg.click('#ymMode button[data-v=date]'); await pg.wait_for_timeout(500)
     ok(same_months(await pg.evaluate(NET_BY_YM), exp['by_date']), '切回依實際日期')
     # 明細有實際日期
-    await pg.evaluate("window.__app.pivot = { ...window.__app.pivot, mode: 'detail', filters: {} }"); await pg.click('a[data-view=pivot]'); await pg.wait_for_timeout(500)
+    await pg.evaluate("window.__app.pivot = { ...window.__app.pivot, mode: 'detail', filters: {} }"); await nav(pg, 'pivot'); await pg.wait_for_timeout(500)
     ok('實際日期' in await pg.text_content('#pvTable') and '114/10/30' in await pg.text_content('#pvTable'), '明細有「實際日期」欄')
     await pg.screenshot(path=SH + '/30_raw_detail.png')
     # WPS 另存的 Excel（工作表叫 JMSSAL／JMSSBK、英文表頭）也可以
-    await pg.click('a[data-view=data]'); await pg.evaluate("document.querySelector('#importProgress p').textContent = ''"); await pg.set_input_files('#fileXlsx', [FX + '/JMSSAL.xlsx', FX + '/JMSSBK.xlsx']); t = await wait_done(pg)
+    await nav(pg, 'data'); await pg.evaluate("document.querySelector('#importProgress p').textContent = ''"); await pg.set_input_files('#fileXlsx', [FX + '/JMSSAL.xlsx', FX + '/JMSSBK.xlsx']); t = await wait_done(pg)
     ok(f"{exp['nSales']} 筆進貨" in t and same_months(await pg.evaluate(NET_BY_YM), exp['by_date']), '另存成 Excel 的 JMSSAL＋JMSSBK：' + t)
     # 總表更新工具加上「實際出貨日期」「實際退貨日期」欄之後的總表：網站也依實際日期
     await pg.evaluate("document.querySelector('#importProgress p').textContent = ''"); await pg.set_input_files('#fileXlsx', [FX + '/master_dated.xlsx']); t = await wait_done(pg)
     ok(f"其中 {exp['moved']} 筆" in t and same_months(await pg.evaluate(NET_BY_YM), exp['by_date']), '有「實際出貨日期」欄的總表也依實際日期：' + t)
-    await pg.click('a[data-view=dashboard]'); await pg.wait_for_selector('#dbAlerts')
+    await nav(pg, 'dashboard'); await pg.wait_for_selector('#dbAlerts')
     await pg.screenshot(path=SH + '/31_raw_dashboard.png', full_page=True)
     ok(not errs, '原始資料匯入沒有 JS 錯誤 ' + str(errs))
     await c.close()
@@ -724,18 +734,18 @@ async def buy_flow(b):
     ok(abs(w['inA'] - e1['inA']) < 0.5 and abs(w['bkA'] - e1['bkA']) < 0.5 and abs(w['inP'] - e1['inP']) < 0.5 and w['orders'] == e1['orders'] and abs(sum(w['trend']) - (e1['inA'] - e1['bkA'])) < 0.5,
        f"全部期間：進貨 {w['inA']}、退回 {w['bkA']}、件數 {w['inP']}（打 × 12）、{w['orders']} 張單，和 Python 一樣（依位置對欄）")
     await pg.screenshot(path=SH + '/50_buy_home.png', full_page=True)
-    await pg.click('a[data-view=buyV]'); await pg.wait_for_selector('#bvTable tbody tr')
+    await nav(pg, 'buyV'); await pg.wait_for_selector('#bvTable tbody tr')
     v = await pg.evaluate('window.__buyV')
     ok(len(v) == 3 and {x[1] for x in v} == {'晨星織造', '和風針織', '巧手車縫'} and abs(sum(x[2] for x in v) - (e1['inA'] - e1['bkA'])) < 0.5, f'廠商頁：3 家，中文名（Big5）正確，合計對：{v}')
     await pg.click('#bvTable tbody tr'); await pg.wait_for_selector('#drawer.open #bdOrders tbody tr')
     ok(await pg.locator('#bdStyles tbody tr').count() > 0, '點廠商打開明細：每月、款號、最近的進貨單')
     await pg.click('#drawer [data-close].icon-btn')
-    await pg.click('a[data-view=buyP]'); await pg.wait_for_selector('#bpTable tbody tr')
+    await nav(pg, 'buyP'); await pg.wait_for_selector('#bpTable tbody tr')
     pp = await pg.evaluate('window.__buyP')
     ok(any(x[3] is not None for x in pp['list']) and '同期淨賣出' in await pg.text_content('#bpTable thead'), '商品頁：款號列表有同期淨賣出件數（銷售分析的資料）')
     await pg.click('#bpTable tbody tr'); await pg.wait_for_selector('#drawer.open #bdCost tbody tr'); await pg.click('#drawer [data-close].icon-btn')
     await pg.screenshot(path=SH + '/51_buy_prod.png', full_page=True)
-    await pg.click('a[data-view=buyO]'); await pg.wait_for_selector('#boTable tbody tr')
+    await nav(pg, 'buyO'); await pg.wait_for_selector('#boTable tbody tr')
     ok(await pg.evaluate('window.__buyO') == e1['orders'] + e1['nBk'], '進貨單頁：一張單一列（進貨＋退回）')
     await pg.click('#boKind button[data-v=bk]'); await pg.wait_for_timeout(200)
     ok(await pg.evaluate('window.__buyO') == e1['nBk'], '只看退回廠商')
@@ -752,7 +762,10 @@ async def buy_flow(b):
     ok(abs(w['inA'] - E2['inA']) < 0.5 and w['orders'] == E2['orders'], f"更新後：進貨 {w['inA']}、{w['orders']} 張（Python {E2['inA']}、{E2['orders']}）")
     # 重新開啟：進貨資料跟著加密存著
     await pg.reload(); await pg.wait_for_selector('#lock:not([hidden])'); await pg.fill('#lockPw', 'buy123'); await pg.click('#lockGo')
-    await pg.wait_for_selector('#lock[hidden]', state='attached'); await pg.goto(URL + '#buy'); await pg.wait_for_selector('#buyBody .kpis')
+    await pg.wait_for_selector('#lock[hidden]', state='attached'); await pg.wait_for_timeout(200)
+    ok(await pg.evaluate('[document.body.dataset.view, document.body.dataset.app, document.title]') == ['home', 'home', 'WJ商業系統'], '打開 App（開鎖後）先到主選單，主選單是自己的功能（黑色）')
+    ok('rgb(11, 13, 16)' in await pg.evaluate("getComputedStyle(document.querySelector('.nav')).backgroundImage") and await pg.is_hidden('.tab-group.g1') and await pg.is_hidden('.tab-group.g6'), '主選單的側欄是黑色、只有主選單和設定')
+    await pg.goto(URL + '#buy'); await pg.wait_for_selector('#buyBody .kpis')
     ok(abs((await pg.evaluate('window.__buy'))['inA'] - E2['inA']) < 0.5, '重新開啟後進貨資料還在（加密保存）')
     for th in ['night', 'market']:
         await pg.evaluate(f"localStorage.setItem('dv.look','{th}')"); await pg.reload(); await pg.fill('#lockPw', 'buy123'); await pg.click('#lockGo')
@@ -788,7 +801,7 @@ async def recv_flow(b):
     # 首頁：銷售分析（藍）、應收實收帳款（黃、$）分開
     await pg.goto(URL + '#home'); await pg.wait_for_selector('#homeApps .app-tile.ar')
     ok(await pg.locator('#homeApps .app-tile').count() == 4 and '應收實收帳款' in await pg.text_content('#homeApps .app-tile.ar') and '$' in await pg.text_content('#homeApps .app-tile.ar .app-ic'), '首頁有四個方塊：銷售分析、應收實收帳款（$ 圖示）、進貨分析、資料與設定')
-    ok(await pg.is_hidden('.tab-group.g5') and await pg.is_visible('.tab-group.g1'), '在銷售分析裡，左側選單看不到應收帳款')
+    ok(await pg.is_hidden('.tab-group.g5') and await pg.is_hidden('.tab-group.g1') and await pg.is_visible('.tab-group.g0'), '在主選單：左側只有主選單和設定')
     await pg.screenshot(path=SH + '/39_home.png')
     await pg.click('#homeApps .app-tile.ar'); await pg.wait_for_selector('#rcImport')
     ok(await pg.locator('.tab-group.g5 a').count() == 2 and await pg.is_visible('.tab-group.g5') and await pg.is_hidden('.tab-group.g1') and await pg.is_hidden('.tab-group.g2'), '進到應收實收帳款：左側只有收款登記、應收分析（和設定），看不到銷售分析的頁面')
@@ -971,14 +984,14 @@ async def recv_flow(b):
     rows = await pg.evaluate("window.__app.meta.recv.rows.filter(r => r.ym === 11410).map(r => [r.code, r.note || '', r.disc])")
     ok(any(x[0] == '2T06' and '運費' in x[1] for x in rows), '重新開啟後，修改和備註都還在（有加密存檔）')
     # 應收分析
-    await pg.click('a[data-view=recvA]'); await pg.wait_for_selector('#raChart svg')
+    await nav(pg, 'recvA'); await pg.wait_for_selector('#raChart svg')
     a = await pg.evaluate('window.__recvA')
     want = await pg.evaluate("window.__app.meta.recv.rows.reduce((t, r) => t + (r.ar||0) - (r.ret||0) - (r.bu||0) - (r.disc||0) + (r.tax||0) - (r.other||0), 0)")
     ok(a['checks'] == 1 and a['soon'] == 1 and await pg.locator('#raChecks tbody tr').count() == 1 and '本人票' in await pg.text_content('#raChecks'), '應收分析：列出 30 天內到期的支票（本人票）')
     ok(a['year'] == 114 and abs(a['due'] - want) < 0.01 and a['bad'] == 1 and await pg.locator('#raBad tbody tr').count() == 1, f"應收分析：114 年應收淨額 {a['due']:.0f}，對不上 {a['bad']} 筆（剛加入、還沒填實收的 5X03）")
     await pg.screenshot(path=SH + '/42_recv_analysis.png', full_page=True)
     # 再匯入沒有密碼的同一份：整月取代
-    await pg.click('a[data-view=recv]'); await pg.wait_for_selector('#rcImport')
+    await nav(pg, 'recv'); await pg.wait_for_selector('#rcImport')
     await pg.set_input_files('#rcFile', FX + '/recv.xlsx'); await pg.wait_for_selector('#dlg[open]')
     ok('整月換成檔案裡的內容' in await pg.text_content('#dlgForm'), '再匯入同樣月份 → 說明會整月取代')
     await pg.click('#dlgOk'); await pg.wait_for_timeout(800)
@@ -1061,7 +1074,7 @@ async def recv_backup(pg):
     last = lambda: pg.evaluate("() => { const u = window.__bk[window.__bk.length - 1]; let s = ''; for (let i = 0; i < u.length; i += 8192) s += String.fromCharCode.apply(null, u.subarray(i, i + 8192)); return btoa(s); }")
     nbk = lambda: pg.evaluate('window.__bk.length')
     await pg.evaluate("() => { const r = window.__app.meta.recv.rows[0]; r.checks = [{ no: 'ZZ0001', acct: '123', bank: '測試銀行', kind: '客', due: 1151231, amt: 100 }]; r.adj = (r.adj || []).concat([{ s: -1, k: '自訂測試項', amt: 50, note: '原因X' }]); return window.__saveRecvNow(); }")
-    await pg.click('a[data-view=recv]'); await pg.wait_for_selector('#rcBackup')
+    await nav(pg, 'recv'); await pg.wait_for_selector('#rcBackup')
     ok('未設定' in await pg.text_content('#rcBackup'), '收款登記多了「自動備份」按鈕（未設定）')
     await pg.click('#rcBackup'); await dlg_fill(pg, {'pw': 'wrong'})
     await pg.wait_for_function("document.querySelector('#dlgErr').textContent.includes('不正確')")
@@ -1109,13 +1122,13 @@ async def recv_backup(pg):
     ok(after == before, '整份還原：每一筆、支票、調整、備註、每位客人的折率、調整項目清單都和備份前一模一樣')
     # 改開啟密碼 → 備份檔也改用新密碼
     n2 = await nbk()
-    await pg.click('a[data-view=data]'); await pg.click('#changePw'); await dlg_fill(pg, {'cur': 'rc123', 'pw': 'rc456', 'pw2': 'rc456'})
+    await nav(pg, 'data'); await pg.click('#changePw'); await dlg_fill(pg, {'cur': 'rc123', 'pw': 'rc456', 'pw2': 'rc456'})
     await pg.wait_for_function(f'window.__bk.length > {n2}', timeout=30000)
     raw = base64.b64decode(await last())
     try: bk_open(raw, 'rc123'); old_ok = True
     except Exception: old_ok = False
     ok(not old_ok and bk_open(raw, 'rc456') is not None, '改開啟密碼後，備份 Excel 改用新密碼（舊密碼打不開）')
-    await pg.click('a[data-view=recv]'); await pg.wait_for_selector('#rcBackup')
+    await nav(pg, 'recv'); await pg.wait_for_selector('#rcBackup')
     await pg.screenshot(path=SH + '/44_recv_backup.png')
 
 
@@ -1128,7 +1141,7 @@ async def report_page(b):
     await pg.goto(URL); await pg.wait_for_timeout(300)
     await pg.set_input_files('#fileXlsx', FX + '/plain.xlsx'); await dlg_fill(pg, {'app': 'rep12', 'app2': 'rep12'}); await wait_done(pg)
     await pg.set_input_files('#fileClass', FX + '/class.xlsx'); await pg.wait_for_function("document.querySelector('#classState').textContent.includes('已匯入')")
-    await pg.click('a[data-view=report]'); await pg.wait_for_selector('#rpBody .rp-card')
+    await nav(pg, 'report'); await pg.wait_for_selector('#rpBody .rp-card')
     r = await pg.evaluate("window.__report")
     ok(abs(r['cur']['net'] - exp['cur']['net']) < 0.01 and abs(r['cur']['netProfit'] - exp['cur']['netProfit']) < 0.01, f"報告 114 年淨營收 {r['cur']['net']:.0f}、淨毛利 {r['cur']['netProfit']:.0f}（Python {exp['cur']['net']:.0f}、{exp['cur']['netProfit']:.0f}）")
     ok(abs(r['top10Share'] - exp['top10']) < 0.001, f"TOP10 客戶合計佔比 {r['top10Share']:.4f}（Python {exp['top10']:.4f}）")
@@ -1177,7 +1190,7 @@ async def report_page(b):
     pm = await m.new_page(); errs = []; pm.on('pageerror', lambda e: errs.append(str(e)))
     await pm.goto(URL); await pm.wait_for_timeout(300)
     await pm.set_input_files('#fileXlsx', FX + '/plain.xlsx'); await dlg_fill(pm, {'app': 'rep12', 'app2': 'rep12'}); await wait_done(pm)
-    await pm.click('a[data-view=report]'); await pm.wait_for_selector('#rpBody .rp-card')
+    await nav(pm, 'report'); await pm.wait_for_selector('#rpBody .rp-card')
     ok(await pm.evaluate('document.documentElement.scrollWidth') <= 390 and not errs, '手機：圖表報告沒有把畫面撐寬、沒有錯誤')
     ok('需要先匯入商品類別代碼表' in await pm.text_content('#rpBig'), '沒有分類表時，男女童比例說明缺少什麼')
     await pm.screenshot(path=SH + '/42_report_phone.png', full_page=True)
@@ -1195,25 +1208,25 @@ async def demo_mode(b):
     await pg.click('#demoStart'); await pg.wait_for_selector('#view-overview:not([hidden])')
     ok(await pg.evaluate("document.documentElement.dataset.theme") == 'indigo', '預設是原本的「藍染」風格')
     ok(await pg.locator('#tdRepPie .donut svg path').count() >= 3 and await pg.locator('#tdCust .hb-row').count() >= 5, '今日：業務佔比用圓餅圖、前 10 大客戶用橫條圖')
-    await pg.click('a[data-view=board]')
+    await nav(pg, 'board')
     for o in 'ABC':
         await pg.click(f'#bdOpt button[data-v={o}]'); await pg.wait_for_timeout(300)
         ok((await pg.evaluate('window.__board'))['opt'] == o and (await pg.locator('#bdBody svg').count() >= 2 or await pg.locator('#bdHeat td').count() >= 12), f'儀表板方案 {o} 用示範資料可以打開，有圖')
-    await pg.click('#bdOpt button[data-v=A]'); await pg.click('a[data-view=overview]')
+    await pg.click('#bdOpt button[data-v=A]'); await nav(pg, 'overview')
     ok(await pg.is_visible('#demoBar') and '示範' in await pg.text_content('#brandSub') and await pg.evaluate(VAULT_CT) is None, '沒有資料也能看示範；畫面上有「示範資料」提示，裝置上沒有存任何東西')
     for v in ('board', 'dashboard', 'compare', 'reps', 'report', 'pivot', 'customers', 'products', 'data'):
         await pg.click(f'a[data-view={v}]'); await pg.wait_for_timeout(300)
-    ok(not errs and '示範資料' in await pg.text_content('#rpBody') if await pg.click('a[data-view=report]') is None else False, '每一頁都能用示範資料打開；圖表報告封面註明是示範資料')
+    ok(not errs and '示範資料' in await pg.text_content('#rpBody') if await nav(pg, 'report') is None else False, '每一頁都能用示範資料打開；圖表報告封面註明是示範資料')
     await pg.click('#demoExit'); await pg.wait_for_timeout(800)
     ok(await pg.is_hidden('#demoBar') and '尚未載入資料' in await pg.text_content('#brandSub'), '回到我的資料：沒有資料就回到空白狀態')
     # 有真正的資料時
     await pg.set_input_files('#fileXlsx', FX + '/plain.xlsx'); await dlg_fill(pg, {'app': 'demo12', 'app2': 'demo12'}); await wait_done(pg)
     before = await pg.evaluate(VAULT_CT)
-    await pg.click('a[data-view=data]'); await pg.click('#demoStart'); await pg.wait_for_selector('#demoBar:not([hidden])')
+    await nav(pg, 'data'); await pg.click('#demoStart'); await pg.wait_for_selector('#demoBar:not([hidden])')
     ok(await pg.evaluate('window.__app.E.ds.n') > 10000, '有真正的資料時切換到示範資料')
-    await pg.click('a[data-view=dashboard]'); await pg.fill('#dbFixed', '123456'); await pg.click('#dbFixedForm button'); await pg.wait_for_timeout(500)
+    await nav(pg, 'dashboard'); await pg.fill('#dbFixed', '123456'); await pg.click('#dbFixedForm button'); await pg.wait_for_timeout(500)
     ok('123,456' in await pg.input_value('#dbFixed') and await pg.evaluate(VAULT_CT) == before, '示範中改固定費用只改畫面，裝置上的資料沒有變')
-    await pg.click('a[data-view=data]'); await pg.set_input_files('#fileXlsx', FX + '/plain.xlsx'); await pg.wait_for_timeout(400)
+    await nav(pg, 'data'); await pg.set_input_files('#fileXlsx', FX + '/plain.xlsx'); await pg.wait_for_timeout(400)
     ok('回到我的資料' in await pg.text_content('#toast') and await pg.evaluate(VAULT_CT) == before, '示範中匯入 Excel 會被擋下，請先回到自己的資料')
     for sel in ('#packExport', '#changePw'):
         await pg.evaluate("document.querySelector('#toast').textContent = ''")
