@@ -87,7 +87,7 @@
     if (meta && app === 'ar') meta.content = '#b88a00';
     else if (meta && app === 'buy') meta.content = '#a61e1e';
     else if (meta) meta.content = { indigo: '#26437A', night: '#0E1726', market: '#13805F' }[document.documentElement.dataset.theme] || '#26437A';
-    document.title = (app === 'ar' ? '應收實收帳款・' : app === 'buy' ? '進貨分析・' : '銷售分析・') + 'WJ商業系統'; // App 名稱（2026-11-18 使用者要求）
+    document.title = 'WJ商業系統・' + (app === 'ar' ? '應收實收帳款' : app === 'buy' ? '進貨分析' : '銷售分析'); // 分頁／程式視窗標題（2026-11-18 使用者要求：系統名稱在前）
   }
   function go(view, { boot = false } = {}) {
     if (!VIEWS.includes(view)) view = 'home';
@@ -335,7 +335,7 @@
     toast(`已還原 ${nf0.format(B.rows.length)} 筆應收帳款，已加密保存`);
     go('recv');
   }
-  // ---------- 首頁（所有功能）----------
+  // ---------- 首頁（主選單，原本叫所有功能）----------
   function renderHome() {
     const has = !!S.E;
     const pend = has ? Recv.holdReminders(recvCtx(), Infinity).filter((h) => !h.done) : [];

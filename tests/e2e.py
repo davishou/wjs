@@ -113,7 +113,8 @@ async def main():
     ok(await page.is_hidden('#lock'), '首次開啟（無資料）不顯示開鎖畫面')
     ok(await page.evaluate('document.body.dataset.view') == 'data', '沒有資料時，剛打開網站到資料與設定')
     await page.click('a[data-view=home]'); await page.wait_for_timeout(200)
-    ok(await page.evaluate('document.body.dataset.view') == 'home' and await page.locator('#homeApps .app-tile').count() == 4, '沒有資料也能按「所有功能」打開首頁')
+    ok(await page.evaluate('document.body.dataset.view') == 'home' and await page.locator('#homeApps .app-tile').count() == 4, '沒有資料也能按「主選單」打開首頁')
+    ok('主選單' in await page.text_content('a[data-view=home]'), '左側選單第一個叫「主選單」')
     await page.click('#homeApps .app-tile.sales'); await page.wait_for_timeout(200)
     ok(await page.evaluate('document.body.dataset.view') == 'data' and '還沒有資料' in await page.text_content('#toast'), '沒有資料時按銷售分析：帶到資料與設定並說明原因')
     # 1. 加密 Excel，先輸入錯的
@@ -497,7 +498,7 @@ async def cust_prod_pages(pg, d):
     await pg.click('#prMetric button[data-v=net]'); await pg.wait_for_timeout(200)
     # 左側選單分區塊
     vis = await pg.evaluate("[...document.querySelectorAll('.tab-group')].filter(g => g.offsetParent).map(g => g.className.split(' ')[1])")
-    ok(vis == ['g0', 'g1', 'g2', 'g3', 'g4'] and await pg.is_visible('.tab-group.g1 .tg-label'), f'銷售分析的左側選單：所有功能、每月看、分析、報告與工具、設定（應收帳款不在這裡）{vis}')
+    ok(vis == ['g0', 'g1', 'g2', 'g3', 'g4'] and await pg.is_visible('.tab-group.g1 .tg-label'), f'銷售分析的左側選單：主選單、每月看、分析、報告與工具、設定（應收帳款不在這裡）{vis}')
 
 
 def mf_rows():
