@@ -1131,3 +1131,22 @@ body[data-app="home"] .brand .mk-sales, body[data-app="home"] .brand .nm-sales {
 .disc-note .dn-l { display: none; }
 .disc-note.open .dn-s { display: none; }
 .disc-note.open .dn-l { display: inline; word-break: break-all; }
+/* 上期結轉（2026-11-19）：調整欄上面，折讓前／折讓後 */
+.carry-h { font-size: .68rem; font-weight: 700; color: var(--ink-2); letter-spacing: .05em; margin-top: 2px; }
+.carry-line { display: grid; grid-template-columns: 22px 30px minmax(0, 1fr) 58px 18px; gap: 3px; align-items: center; background: color-mix(in srgb, var(--ar-y) 12%, var(--surface)); border-radius: 6px; padding: 2px; }
+.carry-line select, .carry-line input { height: 26px; font-size: .78rem; min-width: 0; width: 100%; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink); padding: 0 4px; font-family: inherit; }
+.carry-line input[data-c="amt"] { text-align: right; }
+.carry-line input[data-c="note"] { grid-column: 2 / 6; grid-row: 2; }
+.carry-line .icon-btn { grid-column: 5; grid-row: 1; padding: 0 3px; }
+.cpos { height: 22px; padding: 0; border-radius: 4px; font-size: .68rem; font-weight: 700; cursor: pointer; border: 1px solid; }
+.cpos.pre { color: #fff; background: var(--ar-y-deep); border-color: var(--ar-y-deep); }
+.cpos.post { color: var(--ar-y-ink); background: var(--surface); border-color: var(--ar-y-deep); }
+.sgn.carry { color: var(--ar-y-deep); }
+.rc-card .carry-line { grid-template-columns: 34px 46px minmax(0, 1fr) 90px 28px; padding: 8px; gap: 6px; border-radius: 10px; }
+.rc-card .carry-line select, .rc-card .carry-line input { height: 40px; font-size: 16px; border-color: var(--line-strong); border-radius: 8px; }
+.rc-card .cpos { height: 34px; font-size: .85rem; }
+.rc-card .carry-line .sgn { width: 34px; height: 34px; }
+.carry-panel .hi-act .btn { white-space: nowrap; }
+.recv-t .carry-line select { appearance: none; -webkit-appearance: none; padding: 0 2px; text-align: center; height: 26px; font-size: .76rem; }
+.recv-t .carry-line input { height: 26px; }
+.carry-line input[data-c="note"] { text-align: left !important; }

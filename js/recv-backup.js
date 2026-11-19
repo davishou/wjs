@@ -242,7 +242,8 @@
           const vals = { ar: n(r.ar), ret: n(r.ret), bu: n(r.bu), disc: n(r.disc), tax: n(r.tax), other: n(r.other), due: c.due, paid: n(r.paid), cash, chk };
           items.forEach((k) => { vals['a:' + k] = adjOf(r, k); });
           for (const key in vals) T[key] = (T[key] || 0) + vals[key];
-          const why = (r.adj || []).filter((a) => a.note).map((a) => `${a.k || ''}${a.s < 0 ? '−' : '+'}${n(a.amt)}：${a.note}`).join('；');
+          const why = (r.carry || []).map((c) => `上期結轉（${c.pos === 'pre' ? '折讓前' : '折讓後'}）${c.k}${c.s < 0 ? '−' : '+'}${n(c.amt)}${c.from ? `（${c.from}）` : ''}${c.note ? '：' + c.note : ''}`)
+            .concat((r.adj || []).filter((a) => a.note).map((a) => `${a.k || ''}${a.s < 0 ? '−' : '+'}${n(a.amt)}：${a.note}`)).join('；');
           const num = (v) => (v ? v : null);
           out.push([r.cont ? '-------' : r.code, r.name || '', num(vals.ar), num(vals.ret), num(vals.bu), r.pct || r.discPct || null, num(vals.disc), num(vals.tax), num(vals.other),
             vals.due, num(vals.paid), num(cash), num(chk), ...items.map((k) => num(vals['a:' + k])),

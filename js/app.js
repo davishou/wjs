@@ -340,7 +340,7 @@
   // ---------- 首頁（主選單，原本叫所有功能）----------
   function renderHome() {
     const has = !!S.E;
-    const pend = has ? Recv.holdReminders(recvCtx(), Infinity).filter((h) => !h.done) : [];
+    const pend = has ? Recv.carryPending(recvCtx(), Infinity).filter((h) => !h.done) : []; // 上期未結清（不足、保留、溢入）還沒帶進下個月的
     const R = S.meta && S.meta.recv ? S.meta.recv.rows : [];
     const lastYm = R.length ? Math.max(...R.map((r) => r.ym)) : 0;
     $('#homeSub').textContent = has ? (S.demo ? '目前看的是示範資料（假的）' : `銷售資料到 ${ymLabel(S.E.maxYm)}${lastYm ? `，應收帳款登記到 ${ymLabel(lastYm)}` : ''}${S.BE ? `，進貨資料到 ${ymLabel(S.BE.maxYm)}` : ''}`) : '還沒有載入資料，先到「資料與設定」匯入。';
@@ -349,7 +349,7 @@
     const GEAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3h-4l-.4 2.8a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.6 7.6 0 0 0 1.7 1L11 21h4l.4-2.8a7.6 7.6 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>';
     $('#homeApps').innerHTML = `
       <a class="app-tile sales" href="#overview" data-go="overview"><span class="app-ic">${SALES}</span><b>銷售分析</b><small>今月、比較、業務、客戶、商品、報告</small></a>
-      <a class="app-tile ar" href="#recv" data-go="recv"><span class="app-ic">${AR}</span><b>應收實收帳款</b><small>收款登記、應收分析、支票到期</small>${pend.length ? `<span class="app-badge" title="上個月有「保留」，這個月要算">${pend.length} 筆保留要算</span>` : ''}</a>
+      <a class="app-tile ar" href="#recv" data-go="recv"><span class="app-ic">${AR}</span><b>應收實收帳款</b><small>收款登記、應收分析、支票到期</small>${pend.length ? `<span class="app-badge" title="上次登記的不足、保留、溢入，還沒帶進下個月">${pend.length} 筆未結清</span>` : ''}</a>
       <a class="app-tile buy" href="#buy" data-go="buy"><span class="app-ic">${Buy.FACTORY}</span><b>進貨分析</b><small>廠商進貨、退回廠商、進貨成本</small>${S.BE ? '' : '<span class="app-badge soft">還沒有資料</span>'}</a>
       <a class="app-tile set" href="#data" data-go="data"><span class="app-ic">${GEAR}</span><b>資料與設定</b><small>匯入、資料包、密碼、介面風格</small></a>`;
     $('#homeApps').onclick = (e) => { const a = e.target.closest('[data-go]'); if (!a) return; e.preventDefault(); if (a.dataset.go === 'recv') setApp('ar'); else if (a.dataset.go === 'buy') setApp('buy'); else if (a.dataset.go !== 'data') setApp('sales'); go(a.dataset.go); };

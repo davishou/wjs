@@ -950,12 +950,44 @@ async def recv_flow(b):
     ok(mig == [{'s': 1, 'k': '保留', 'amt': 300, 'note': ''}, {'s': -1, 'k': '多入', 'amt': 50, 'note': ''}], f'舊資料（7 個調整欄）自動轉成一行一行，正負號照原本的 {mig}')
     await pg.screenshot(path=SH + '/47_recv_adj.png', full_page=True)
     await pick_ym(pg, '11411'); await pg.wait_for_timeout(300)
-    t = await pg.text_content('#rcHold')
-    ok('2T06' in t and '300' in t and '運費我們付' in t and '樣品錢下月一起' in t and '1 位客戶上次「保留」' in t and await pg.locator('#recvBody tr:has-text("2T06") .hold-tag').count() == 1, '下個月（114/11）出現保留提醒：客戶、金額、備註都顯示，表格客戶名下面也標出來')
+    t = await pg.text_content('#rcCarry')
+    ok('2T06' in t and '保留' in t and '+300' in t and '樣品錢下月一起' in t and '上期未結清' in t and await pg.locator('#recvBody tr:has-text("2T06") .hold-tag').count() == 1, '下個月（114/11）出現「上期未結清」：客戶、保留 +300、詳細都顯示，表格客戶名下面也標出來')
     await pg.screenshot(path=SH + '/44_recv_hold.png', full_page=True)
-    await pg.check('#rcHold [data-hold-done="2T06"]'); await pg.wait_for_timeout(300)
-    ok('都算好了' in await pg.text_content('#rcHold') and await pg.evaluate("window.__app.meta.recv.rows.filter(r => r.code === '2T06' && r.ym === 11410).every(r => r.holdDone)"), '勾「算好了」→ 不再提醒（記在資料裡）')
-    await pg.uncheck('#rcHold [data-hold-done="2T06"]'); await pg.wait_for_timeout(300)
+    # 帶入・折讓前：加進折讓基數一起算折讓
+    T = '#recvBody tr:has-text("2T06")'
+    st0 = await pg.evaluate("(() => { const r = window.__app.meta.recv.rows.find(r => r.code === '2T06' && r.ym === 11411 && !r.cont); return { disc: r.disc || 0, pct: r.pct || '', ar: r.ar || 0, ret: r.ret || 0, bu: r.bu || 0, due: Recv.calc(r).due }; })()")
+    await pg.click('#rcCarry .hold-item:has-text("2T06") [data-cin="pre"]'); await pg.wait_for_timeout(300)
+    c1 = await pg.evaluate("(() => { const r = window.__app.meta.recv.rows.find(r => r.code === '2T06' && r.ym === 11411 && !r.cont); return { carry: r.carry, due: Recv.calc(r).due, src: window.__app.meta.recv.rows.find(x => x.code === '2T06' && x.ym === 11410).adj.find(a => a.k === '保留').carried }; })()")
+    ok(len(c1['carry']) == 1 and c1['carry'][0]['k'] == '前保留' and c1['carry'][0]['pos'] == 'pre' and c1['carry'][0]['amt'] == 300 and c1['carry'][0]['from'] == 11410 and c1['src'] == 11411
+       and abs(c1['due'] - (st0['due'] + 300)) < 0.01 and '已帶入' in await pg.text_content('#rcCarry') and '上期結轉' in await pg.text_content(T + ' .adj-box'),
+       f"按「帶入・折讓前」→ 這個月多一筆上期結轉「前保留 +300（折前）」，應收淨額 {st0['due']} → {c1['due']}，上個月那筆標成已帶入")
+    await pg.locator(T + ' input[data-k=pct]').fill('6'); await pg.locator(T + ' input[data-k=pct]').press('Tab'); await pg.wait_for_timeout(300)
+    import math as _m
+    base = st0['ar'] - st0['ret'] - st0['bu']
+    d_pre = await pg.evaluate("window.__app.meta.recv.rows.find(r => r.code === '2T06' && r.ym === 11411 && !r.cont).disc")
+    ok(d_pre == _m.floor((base + 300) * 0.06 + 0.5), f'折讓前結轉：折讓 =（應收 − 退貨 − 補價 + 300）× 6% = {d_pre}')
+    await pg.click(T + ' .carry-line [data-cpos]'); await pg.wait_for_timeout(300)
+    c2 = await pg.evaluate("(() => { const r = window.__app.meta.recv.rows.find(r => r.code === '2T06' && r.ym === 11411 && !r.cont); return { disc: r.disc, pos: r.carry[0].pos, due: Recv.calc(r).due, tax: r.tax || 0, other: r.other || 0 }; })()")
+    ok(c2['pos'] == 'post' and c2['disc'] == _m.floor(base * 0.06 + 0.5) and abs(c2['due'] - (base - c2['disc'] + 300 + c2['tax'] - c2['other'])) < 0.01 and '折後' in await pg.text_content(T + ' .carry-line'),
+       f"切成「折後」→ 折讓只算原本的 {c2['disc']}，300 在折讓後才加：應收淨額 {c2['due']}")
+    await pg.screenshot(path=SH + '/49_recv_carry.png', full_page=True)
+    # 刪掉這筆結轉 → 上個月那筆又回到「上期未結清」；還原折率、折讓
+    await pg.click(T + ' [data-cdel]'); await pg.wait_for_timeout(300)
+    ok(await pg.locator(T + ' .carry-line').count() == 0 and '帶入・折讓前' in await pg.text_content('#rcCarry .hold-item:has-text("2T06")'), '刪掉結轉 → 上個月的保留又出現在「上期未結清」，可以重新帶入')
+    await pg.locator(T + ' input[data-k=pct]').fill(st0['pct']); await pg.locator(T + ' input[data-k=pct]').press('Tab'); await pg.wait_for_timeout(200)
+    await pg.locator(T + ' input[data-k=disc]').fill(str(st0['disc']) if st0['disc'] else ''); await pg.locator(T + ' input[data-k=disc]').press('Tab'); await pg.wait_for_timeout(200)
+    # 不用結轉／復原
+    await pg.click('#rcCarry .hold-item:has-text("2T06") [data-cskip]'); await pg.wait_for_timeout(300)
+    ok('不結轉' in await pg.text_content('#rcCarry .hold-item:has-text("2T06")') and await pg.locator('#recvBody tr:has-text("2T06") .hold-tag.done').count() == 1, '按「不用結轉」→ 這筆不再提醒（保留標籤也變成已算）')
+    await pg.click('#rcCarry .hold-item:has-text("2T06") [data-cundo]'); await pg.wait_for_timeout(300)
+    ok('帶入・折讓前' in await pg.text_content('#rcCarry .hold-item:has-text("2T06")'), '按「復原」→ 又回到要帶入')
+    # 手動加一筆上期結轉（↪）
+    await pg.click(T + ' [data-cadd]'); await pg.wait_for_timeout(200)
+    await pg.locator(T + ' .carry-line input[data-c=amt]').fill('100'); await pg.locator(T + ' .carry-line input[data-c=amt]').press('Tab'); await pg.wait_for_timeout(250)
+    c3 = await pg.evaluate("(() => { const r = window.__app.meta.recv.rows.find(r => r.code === '2T06' && r.ym === 11411 && !r.cont); return { carry: r.carry, due: Recv.calc(r).due }; })()")
+    ok(len(c3['carry']) == 1 and c3['carry'][0]['k'] == '前未收' and c3['carry'][0]['amt'] == 100 and abs(c3['due'] - (st0['due'] + 100)) < 0.01, f"按 ↪ 自己加一筆上期結轉（前未收 100）→ 應收淨額 +100：{c3['due']}")
+    await pg.click(T + ' [data-cdel]'); await pg.wait_for_timeout(300)
+    ok(abs(await pg.evaluate("Recv.calc(window.__app.meta.recv.rows.find(r => r.code === '2T06' && r.ym === 11411 && !r.cont)).due") - st0['due']) < 0.01, '刪掉 → 回到原本的應收淨額')
     await pick_ym(pg, '11410'); await pg.wait_for_timeout(300)
     # 客戶歷史
     await pg.locator('#recvBody tr:has-text("2T06") input[data-k=paid]').focus(); await pg.wait_for_timeout(300)

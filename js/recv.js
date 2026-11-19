@@ -31,10 +31,17 @@
     if (r.disc && r.pct && !r.discParts) r.discManual = true; // 舊資料：折讓金額照原本的，不自動改
     return r;
   }
+  // 上期結轉（2026-11-19 使用者要求）：上個月沒結清的錢（前不足、前保留、前溢入、前未收…）帶進這個月，每一筆選
+  //   pre 折讓前加入（還沒折讓過：加進折讓基數，一起算折讓）或 post 折讓後加入（已經折讓過：折讓後直接加）。
+  //   row.carry = [{ id, s: 1|-1, k, amt, pos: 'pre'|'post', from: ym, note, src: 來源調整行的 id }]
+  //   折讓基數 = 應收 − 退貨 − 補價 + 折讓前結轉；應收淨額 = 折讓基數 − 折讓 + 折讓後結轉 + 稅金 − 尾數（稅金照舊自己填）
+  const carryOf = (r, pos) => (r.carry || []).filter((c) => (pos === 'pre') === (c.pos === 'pre')).reduce((t, c) => t + (c.s < 0 ? -1 : 1) * (+c.amt || 0), 0);
+  const discBase = (r) => v(r, 'ar') - v(r, 'ret') - v(r, 'bu') + carryOf(r, 'pre');
   function calc(r) {
-    const due = v(r, 'ar') - v(r, 'ret') - v(r, 'bu') - v(r, 'disc') + v(r, 'tax') - v(r, 'other');
+    const pre = carryOf(r, 'pre'), post = carryOf(r, 'post');
+    const due = v(r, 'ar') - v(r, 'ret') - v(r, 'bu') + pre - v(r, 'disc') + post + v(r, 'tax') - v(r, 'other');
     const adj = adjSum(r);
-    return { due: r2(due), adj: r2(adj), diff: r2(due - v(r, 'paid') - adj) };
+    return { due: r2(due), adj: r2(adj), diff: r2(due - v(r, 'paid') - adj), pre: r2(pre), post: r2(post) };
   }
   // 同一位客戶同一個月可能有好幾行（Excel 裡代號寫「-------」的續行），合起來對得上就算對（使用者的 Excel 也是這樣記）
   const gkey = (r) => r.ym + '|' + r.code;
@@ -51,7 +58,7 @@
   const fl = (x) => Math.floor(x + 1e-9), ce = (x) => Math.ceil(x - 1e-9), rd = (x) => Math.round(x + 1e-9);
   function discExact(r) {
     const p = parsePct(r.pct); if (!p.length) return null;
-    const base = v(r, 'ar') - v(r, 'ret') - v(r, 'bu');
+    const base = discBase(r); // 含折讓前結轉
     const e1 = base * p[0] / 100;
     if (!p[1]) return { total: e1, parts: null, lo: fl(e1), hi: ce(e1), auto: rd(e1) };
     const e2 = (base - rd(e1)) * p[1] / 100;
@@ -107,11 +114,32 @@
       if (Math.abs(hold) < 0.5) return;
       const f = g.rows[0];
       out.push({ code, name: f.name, region: f.region || '', rep: f.rep || '', ym: g.ym, hold, note: g.rows.flatMap((r) => (r.adj || []).filter((a) => a.k === '保留' && a.note).map((a) => a.note).concat(r.note ? [r.note] : [])).join('；'),
-        done: g.rows.every((r) => r.holdDone), ids: g.rows.map((r) => r.id), here: Number.isFinite(M) && store().rows.some((r) => r.ym === M && r.code === code) });
+        done: g.rows.every((r) => r.holdDone) || g.rows.every((r) => (r.adj || []).filter((a) => a.k === '保留' && +a.amt).every((a) => a.carried)), ids: g.rows.map((r) => r.id), here: Number.isFinite(M) && store().rows.some((r) => r.ym === M && r.code === code) });
     });
     return out.sort((a, b) => a.done - b.done || a.region.localeCompare(b.region) || a.code.localeCompare(b.code));
   }
   let curHolds = new Map(); // 目前這個月：代號 → 上次的保留提醒（表格、卡片上標示用）
+  // 上期未結清：每位客戶 M 月以前最近一次登記那個月，調整裡的「不足、保留、溢入」（帶正負號）→ 這個月要結轉。
+  // 帶進來後來源那一行記 carried = 帶到的月份；按「不用結轉」記 carried = 'skip'。預設位置：欠的（正）折讓前、多付的（負）折讓後，
+  // 使用者改過就記住那個項目上次選的（S.meta.recvCarryPos）。
+  const CARRY_SRC = ['不足', '保留', '溢入'];
+  const CARRY_NAMES = ['前不足', '前保留', '前溢入', '前未收'];
+  const carryPosPref = () => { const S = root.__app; S.meta = S.meta || {}; return S.meta.recvCarryPos || (S.meta.recvCarryPos = {}); };
+  function carryPending(ctx, M) {
+    const last = new Map();
+    store().rows.forEach((r) => { if (r.ym >= M) return; const c = last.get(r.code); if (!c || r.ym > c.ym) last.set(r.code, { ym: r.ym, rows: [r] }); else if (r.ym === c.ym) c.rows.push(r); });
+    const out = [];
+    last.forEach((g, code) => g.rows.forEach((r) => (r.adj || []).forEach((a) => {
+      if (!CARRY_SRC.includes(a.k) || !(+a.amt)) return;
+      if (!a.id) a.id = uid();
+      const val = (a.s < 0 ? -1 : 1) * (+a.amt || 0);
+      const done = a.carried ? a.carried : (a.k === '保留' && r.holdDone ? 'hold' : '');
+      out.push({ code, name: r.name, region: r.region || '', rep: r.rep || '', ym: g.ym, k: a.k, val, note: a.note || '', line: a, row: r, done,
+        pos: carryPosPref()['前' + a.k] || (val < 0 ? 'post' : 'pre'), here: Number.isFinite(M) && store().rows.some((x) => x.ym === M && x.code === code) });
+    })));
+    return out.sort((a, b) => !!a.done - !!b.done || a.region.localeCompare(b.region) || a.code.localeCompare(b.code));
+  }
+  let curCarry = [];
   // 版面：手機預設「卡片」（一位客戶一張，點開一格一格填），電腦預設「表格」；可以自己切換
   const layout = (S) => {
     if (S.recvLayout == null) { try { S.recvLayout = JSON.parse(localStorage.getItem('dv.recvLayout')) || ''; } catch (e) { S.recvLayout = ''; } }
@@ -143,6 +171,7 @@
     const custs = ctx.custList();
     let gd = groupDiffs(R.rows.filter((r) => r.ym === ym));
     curHolds = new Map(holdReminders(ctx, ym).map((h) => [h.code, h]));
+    curCarry = carryPending(ctx, ym);
     const cards = layout(S) === 'cards';
     const el = $('#recvBody');
     el.innerHTML = `
@@ -163,15 +192,15 @@
         <button class="btn primary" id="rcAdd">加入 ${ymLabel(ym)}</button>
         <span class="hint">輸入客戶時，下面會出現這位客戶前幾個月的明細。</span></div></div>
       <div id="rcSum"></div>
-      ${holdPanel(ctx, ym)}
+      ${carryPanel(ctx, ym)}
       ${cards ? `<div class="panel rc-cards-panel"><div class="rc-cards" id="rcList">${rows.map((r) => cardHtml(r, ctx, gd, r.id === S.recvOpen)).join('') || `<p class="empty">${ymLabel(ym)} 還沒有登記。上面輸入客戶加入，或匯入原本的應收帳款 Excel。</p>`}</div>
-        <p class="hint">點一位客戶打開來填。應收淨額 = 應收 − 退貨 − 補價 − 折讓 + 稅金 − 尾數；要等於 實收 + 調整（⊕ 加、⊖ 減）。黃色 = 和銷售資料的出貨、退貨不一樣。</p></div>` :
+        <p class="hint">點一位客戶打開來填。應收淨額 = 應收 − 退貨 − 補價（＋折讓前結轉）− 折讓（＋折讓後結轉）+ 稅金 − 尾數；要等於 實收 + 調整（⊕ 加、⊖ 減）。黃色 = 和銷售資料的出貨、退貨不一樣。</p></div>` :
       `<div class="panel"><div class="table-wrap recv-wrap" id="rcList"><table class="dt recv-t"><thead><tr>
         <th class="stick">代號</th><th class="stick2">客戶</th>${MAIN.map(([k, l]) => (k === 'disc' ? '<th class="n pct">折率%</th>' : '') + `<th class="n c-${k}">${l}</th>` + (k === 'paid' ? '<th class="det">詳細</th>' : '')).join('')}
         <th class="adj-h">調整 <button type="button" class="it-btn" data-items title="增刪 ⊕／⊖ 的項目">⚙ 項目</button></th>
         <th class="n due">應收淨額</th><th class="note">備註</th><th></th></tr></thead>
         <tbody>${rows.map((r) => rowHtml(r, ctx, gd)).join('') || `<tr><td colspan="24" class="empty">${ymLabel(ym)} 還沒有登記。上面輸入客戶加入，或匯入原本的應收帳款 Excel。</td></tr>`}</tbody></table></div>
-        <p class="hint">應收淨額 = 應收 − 退貨 − 補價 − 折讓 + 稅金 − 尾數；對得上 = 應收淨額 等於 實收 + 調整（⊕ 加、⊖ 減）。「折率%」填 6 或 6+1，折讓會自動算，也可以自己打：下面小字是實際金額（算到小數第二位），去掉小數或進位都算對。「詳細」記現金、支票：不填沒關係，填了現金＋支票的合計就要和實收一樣。黃色的格子 = 和銷售資料的出貨、退貨不一樣。代號「↳ 同上」= 同一位客戶的第二行，幾行加起來對得上就算對。</p></div>`}
+        <p class="hint">應收淨額 = 應收 − 退貨 − 補價（＋折讓前結轉）− 折讓（＋折讓後結轉）+ 稅金 − 尾數；上個月沒結清的錢在「調整」欄上面的「上期結轉」，折讓前結轉會一起算折讓；對得上 = 應收淨額 等於 實收 + 調整（⊕ 加、⊖ 減）。「折率%」填 6 或 6+1，折讓會自動算，也可以自己打：下面小字是實際金額（算到小數第二位），去掉小數或進位都算對。「詳細」記現金、支票：不填沒關係，填了現金＋支票的合計就要和實收一樣。黃色的格子 = 和銷售資料的出貨、退貨不一樣。代號「↳ 同上」= 同一位客戶的第二行，幾行加起來對得上就算對。</p></div>`}
       <div id="rcPanels">
       <div class="panel" id="rcItems" hidden></div>
       <div class="panel" id="rcPay" hidden></div>
@@ -219,19 +248,33 @@
     $('#rcAdd').onclick = add;
     $('#rcNew').onkeydown = (e) => { if (e.key === 'Enter') add(); };
     $('#rcLayout').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; S.recvLayout = b.dataset.v; try { localStorage.setItem('dv.recvLayout', JSON.stringify(b.dataset.v)); } catch (er) { /* */ } renderEntry(ctx); };
-    // 保留提醒：加入這個月、算好了
-    const hp = $('#rcHold');
-    if (hp) hp.addEventListener('click', (e) => {
-      const ab = e.target.closest('[data-hold-add]');
-      if (ab) { const code = ab.dataset.holdAdd; const h = curHolds.get(code); addCust(custs.find((c) => c.code === code) || { code, name: h ? h.name : '', region: h ? h.region : '', rep: h ? h.rep : '' }); return; }
-      const gb = e.target.closest('[data-hold-go]');
-      if (gb) { const x = R.rows.find((r) => r.ym === ym && r.code === gb.dataset.holdGo); if (!x) return; if (layout(S) === 'cards') openCard(x.id); else { const t = el.querySelector(`tr[data-id="${x.id}"]`); if (t) { t.scrollIntoView({ block: 'center', behavior: 'smooth' }); const i = t.querySelector('input[data-k="paid"]'); if (i) i.focus({ preventScroll: true }); } } }
-    });
-    if (hp) hp.addEventListener('change', (e) => {
-      const cb = e.target.closest('[data-hold-done]'); if (!cb) return;
-      const h = curHolds.get(cb.dataset.holdDone); if (!h) return;
-      R.rows.filter((r) => h.ids.includes(r.id)).forEach((r) => { if (cb.checked) r.holdDone = true; else delete r.holdDone; });
-      save(); renderEntry(ctx);
+    // 上期未結清：帶入這個月（折讓前／後）、不用結轉、復原
+    const rowFor = (it) => {
+      let x = R.rows.find((r) => r.ym === ym && r.code === it.code && !r.cont) || R.rows.find((r) => r.ym === ym && r.code === it.code);
+      if (x) return x;
+      const c = custs.find((y) => y.code === it.code) || { code: it.code, name: it.name, region: it.region, rep: it.rep };
+      const s = salesOf(ctx, c.code, ym);
+      x = { id: uid(), ym, code: c.code, name: c.name, region: c.region || '', rep: c.rep || '', note: '', adj: [], ar: s ? Math.round(s.sales) : 0, ret: s ? Math.round(s.returns) : 0 };
+      NUMK.forEach((k) => { if (x[k] == null) x[k] = 0; });
+      if (rates()[c.code]) x.pct = rates()[c.code];
+      R.rows.push(x); return x;
+    };
+    const carryIn = (it, pos) => {
+      const x = rowFor(it);
+      (x.carry || (x.carry = [])).push({ id: uid(), s: it.val < 0 ? -1 : 1, k: '前' + it.k, amt: Math.abs(it.val), pos, from: it.ym, note: it.note, src: it.line.id });
+      it.line.carried = ym; carryPosPref()['前' + it.k] = pos;
+      if (x.pct && !x.discManual) applyPct(x);
+      x.updatedAt = new Date().toISOString();
+    };
+    const cp = $('#rcCarry');
+    if (cp) cp.addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.cAll != null) { curCarry.filter((it) => !it.done).forEach((it) => carryIn(it, it.pos)); save(); renderEntry(ctx); return; }
+      const it = curCarry[+b.dataset.i]; if (!it) return;
+      if (b.dataset.cin) { carryIn(it, b.dataset.cin); save(); renderEntry(ctx); return; }
+      if (b.dataset.cskip != null) { it.line.carried = 'skip'; save(); renderEntry(ctx); return; }
+      if (b.dataset.cundo != null) { delete it.line.carried; if (it.k === '保留') delete it.row.holdDone; save(); renderEntry(ctx); return; }
+      if (b.dataset.cgo != null) { const x = R.rows.find((r) => r.ym === ym && r.code === it.code); if (!x) return; if (layout(S) === 'cards') openCard(x.id); else { const t = el.querySelector(`tr[data-id="${x.id}"]`); if (t) t.scrollIntoView({ block: 'center', behavior: 'smooth' }); } }
     });
     // 改了一列：重算同一位客戶這個月的幾行、上面的合計，再存檔。
     // 只更新算出來的地方（應收淨額、檢查、折讓小字、合計），正在打的那一格不動，按 Tab 到下一格不會跳掉。
@@ -277,6 +320,14 @@
     list.addEventListener('focusin', (e) => { if (layout(S) !== 'table') return; const r = rowOf(e.target); if (r) showHist(ctx, r.code, r.name, r.id); });
     list.addEventListener('change', (e) => {
       const r = rowOf(e.target); if (!r) return;
+      // 上期結轉的一行：項目、金額、詳細
+      const ci = e.target.closest('[data-c]');
+      if (ci) {
+        const line = (r.carry || [])[+ci.closest('.carry-line').dataset.ci]; if (!line) return;
+        if (ci.dataset.c === 'k') line.k = ci.value; else if (ci.dataset.c === 'amt') line.amt = num(ci.value); else line.note = ci.value.trim();
+        if (r.pct && !r.discManual) applyPct(r);
+        refresh(r, ci.dataset.c === 'k'); return;
+      }
       // 調整的一行
       const ai = e.target.closest('[data-a]');
       if (ai) {
@@ -328,6 +379,26 @@
         if (sel && sel.length) sel[sel.length - 1].focus();
         return;
       }
+      // 上期結轉：↪ 加一筆、切換 + −、切換折讓前／後、刪掉（從上個月帶進來的，刪掉後上個月那筆會再出現在「上期未結清」）
+      const cb = e.target.closest('[data-cadd],[data-csg],[data-cpos],[data-cdel]');
+      if (cb) {
+        const r = rowOf(cb); if (!r) return; r.carry = r.carry || [];
+        if (cb.dataset.cadd != null) r.carry.push({ id: uid(), s: 1, k: '前未收', amt: 0, pos: 'pre', from: 0, note: '' });
+        else {
+          const i = +cb.closest('.carry-line').dataset.ci, line = r.carry[i]; if (!line) return;
+          if (cb.dataset.csg != null) line.s = line.s < 0 ? 1 : -1;
+          else if (cb.dataset.cpos != null) { line.pos = line.pos === 'pre' ? 'post' : 'pre'; carryPosPref()[line.k] = line.pos; }
+          else {
+            r.carry.splice(i, 1);
+            if (line.src) R.rows.forEach((x) => (x.adj || []).forEach((a) => { if (a.id === line.src) delete a.carried; }));
+          }
+        }
+        if (r.pct && !r.discManual) applyPct(r);
+        refresh(r, true);
+        if (cb.dataset.cadd != null) { const box = el.querySelector(`[data-id="${r.id}"] .adj-box`); const am = box && box.querySelectorAll('.carry-line input[data-c="amt"]'); if (am && am.length) am[am.length - 1].focus(); }
+        if (cb.dataset.cdel != null) renderEntry(ctx); // 上面的「上期未結清」清單要跟著更新
+        return;
+      }
       const sg = e.target.closest('[data-sg]');
       if (sg) { const r = rowOf(sg); const line = r && r.adj[+sg.closest('.adj-line').dataset.i]; if (!line) return; line.s = line.s < 0 ? 1 : -1; refresh(r, true); return; }
       const ad = e.target.closest('[data-adel]');
@@ -361,6 +432,7 @@
     return (Math.abs(c.diff) < 0.5 ? '<span class="ok">✓ 對得上</span>' : Math.abs(gdiff) < 0.5 ? '<span class="ok" title="這位客戶這個月的幾行加起來對得上">✓ 合計對得上</span>' : `<span class="bad">差 ${ctx.fmt.money(gdiff)}</span>`) +
       (payBad(r) ? `<span class="bad pay-bad" title="現金＋支票 ${ctx.fmt.money(payTotal(r))}，實收 ${ctx.fmt.money(v(r, 'paid'))}">詳細≠實收</span>` : '');
   };
+  const carryTxt = (r, ctx) => (r.carry || []).map((c) => `↪ ${c.pos === 'pre' ? '折前' : '折後'} ${c.s < 0 ? '−' : '+'} ${ctx.esc(c.k)} ${ctx.fmt.money(+c.amt || 0)}${c.from ? `（${ctx.ymLabel(c.from)}）` : ''}`);
   const adjTxt = (a, ctx) => `${a.s < 0 ? '−' : '+'} ${ctx.esc(a.k || '（沒選項目）')} ${ctx.fmt.money(+a.amt || 0)}${a.note ? `（${ctx.esc(a.note)}）` : ''}`;
   // 調整：一行一行（⊕／⊖、項目、金額、詳細），下面 ⊕ ⊖ 加一行、合計
   function adjBox(r, ctx) {
@@ -368,14 +440,22 @@
     const list = r.adj || [];
     const opts = (sg, k) => { const l = itemsOf(sg); return `<option value="" ${!k ? 'selected' : ''} disabled>選項目</option>` + l.concat(k && !l.includes(k) ? [k] : []).map((x) => `<option ${x === k ? 'selected' : ''}>${esc(x)}</option>`).join('') + `<option value="__new">＋ 新項目…</option><option value="__edit">⚙ 增刪${sg < 0 ? '減' : '加'}的項目…</option>`; };
     const tot = adjSum(r);
-    return list.map((a, i) => `<div class="adj-line ${a.s < 0 ? 'neg' : 'pos'}" data-i="${i}">
+    const cl = r.carry || [];
+    const carryHtml = cl.length ? `<div class="carry-h">上期結轉</div>` + cl.map((c, i) => `<div class="carry-line ${c.s < 0 ? 'neg' : 'pos'}" data-ci="${i}">
+        <button type="button" class="sgn ${c.s < 0 ? 'minus' : 'plus'}" data-csg title="按一下切換 加／減（客人欠的是 +，多付的是 −）">${c.s < 0 ? '−' : '+'}</button>
+        <button type="button" class="cpos ${c.pos === 'pre' ? 'pre' : 'post'}" data-cpos title="按一下切換：折讓前加入（還沒折讓過，要一起算折讓）／折讓後加入（已經折讓過）">${c.pos === 'pre' ? '折前' : '折後'}</button>
+        <select data-c="k">${CARRY_NAMES.concat(c.k && !CARRY_NAMES.includes(c.k) ? [c.k] : []).map((x) => `<option ${x === c.k ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+        <input data-c="amt" inputmode="decimal" value="${c.amt ? c.amt : ''}" placeholder="金額" autocomplete="off">
+        <button type="button" class="icon-btn" data-cdel title="刪掉這筆結轉">✕</button>
+        <input data-c="note" value="${esc(c.note || '')}" placeholder="${c.from ? `從 ${ctx.ymLabel(c.from)} 帶來` : '詳細（哪個月的、原因）'}" autocomplete="off"></div>`).join('') + `<div class="carry-h">本月調整</div>` : '';
+    return carryHtml + list.map((a, i) => `<div class="adj-line ${a.s < 0 ? 'neg' : 'pos'}" data-i="${i}">
         <button type="button" class="sgn ${a.s < 0 ? 'minus' : 'plus'}" data-sg title="按一下切換 加／減">${a.s < 0 ? '−' : '+'}</button>
         <select data-a="k">${opts(a.s, a.k)}</select>
         <input data-a="amt" inputmode="decimal" value="${a.amt ? a.amt : ''}" placeholder="金額" autocomplete="off">
         <input data-a="note" value="${esc(a.note || '')}" placeholder="${a.k === '保留' ? '原因（下個月會提醒）' : '詳細'}" autocomplete="off">
         <button type="button" class="icon-btn" data-adel title="刪掉這一行">✕</button></div>`).join('') +
-      `<div class="adj-foot"><button type="button" class="sgn plus" data-aadd="1" title="加一行（加）">+</button><button type="button" class="sgn minus" data-aadd="-1" title="加一行（減）">−</button>
-        <span class="adj-tot">${list.length ? `調整合計 <b>${tot > 0 ? '+' : ''}${fmt.money(tot)}</b>` : '<span class="muted">沒有調整就不用加</span>'}</span>${adjOf(r, '保留') ? '<small class="hold-next">保留：下個月要算</small>' : ''}</div>`;
+      `<div class="adj-foot"><button type="button" class="sgn plus" data-aadd="1" title="加一行（加）">+</button><button type="button" class="sgn minus" data-aadd="-1" title="加一行（減）">−</button><button type="button" class="sgn carry" data-cadd title="加一筆上期結轉（上個月沒結清的錢）">↪</button>
+        <span class="adj-tot">${list.length ? `調整合計 <b>${tot > 0 ? '+' : ''}${fmt.money(tot)}</b>` : cl.length ? '' : '<span class="muted">沒有調整就不用加</span>'}${cl.length ? `${list.length ? '<br>' : ''}結轉 折前 <b>${fmt.money(carryOf(r, 'pre'))}</b>・折後 <b>${fmt.money(carryOf(r, 'post'))}</b>` : ''}</span>${adjOf(r, '保留') ? '<small class="hold-next">保留：下個月要算</small>' : ''}</div>`;
   }
 
   function rowHtml(r, ctx, gd) {
@@ -405,6 +485,25 @@
   function holdTag(r, ctx) {
     const h = curHolds.get(r.code); if (!h || h.ym >= r.ym) return '';
     return `<span class="hold-tag ${h.done ? 'done' : ''}" title="${ctx.esc(h.note ? '備註：' + h.note : '沒有備註')}">${h.done ? '✓ ' : ''}${ctx.ymLabel(h.ym)} 保留 ${ctx.fmt.money(h.hold)}${h.done ? ' 已算' : ' 要算'}</span>`;
+  }
+  function carryPanel(ctx, ym) {
+    const { esc, fmt, ymLabel } = ctx;
+    const list = curCarry;
+    if (!list.length) return '';
+    const todo = list.filter((it) => !it.done);
+    const posTxt = (p) => (p === 'pre' ? '折讓前' : '折讓後');
+    return `<div class="panel hold-panel carry-panel ${todo.length ? '' : 'all-done'}" id="rcCarry">
+      <div class="panel-head"><h2>${todo.length ? `<span class="hold-ic">!</span> 上期未結清：${todo.length} 筆要帶進 ${ymLabel(ym)}` : '上期未結清的都處理好了'}</h2>
+        ${todo.length > 1 ? '<button class="btn small" data-c-all>全部照建議帶入</button>' : ''}</div>
+      <p class="hint">上次登記的「不足、保留、溢入」。還沒折讓過的（例如客人少付、當時沒給折讓）選「折讓前」，會一起算折讓；已經折讓過的、客人多付的選「折讓後」。帶入後在這位客戶「調整」欄上面的「上期結轉」，可以再改。</p>
+      <div class="hold-list">${list.map((it, i) => `<div class="hold-item ${it.done ? 'done' : ''}">
+        <div class="hi-who"><b>${esc(it.code)}</b> ${esc(it.name || '')}<small>${esc([it.region, it.rep && '業務 ' + it.rep].filter(Boolean).join('・'))}</small></div>
+        <div class="hi-amt">${ymLabel(it.ym)} ${esc(it.k)} <b>${it.val > 0 ? '+' : ''}${fmt.money(it.val)}</b></div>
+        <div class="hi-note">${it.note ? `詳細：${esc(it.note)}` : '<span class="muted">（沒有寫詳細）</span>'}</div>
+        <div class="hi-act">${it.done === 'skip' ? `<span class="muted">不結轉</span> <button class="btn small" data-i="${i}" data-cundo>復原</button>`
+          : it.done === 'hold' ? `<span class="muted">已勾「算好了」</span> <button class="btn small" data-i="${i}" data-cundo>復原</button>`
+          : it.done ? `<span class="ok">✓ 已帶入 ${ymLabel(+it.done)}</span>${+it.done === ym ? ` <button class="btn small" data-i="${i}" data-cgo>去看</button>` : ''}`
+          : `<button class="btn small ${it.pos === 'pre' ? 'primary' : ''}" data-i="${i}" data-cin="pre" title="還沒折讓過：加進折讓基數一起算折讓">帶入・折讓前</button><button class="btn small ${it.pos === 'post' ? 'primary' : ''}" data-i="${i}" data-cin="post" title="已經折讓過：折讓後直接加">帶入・折讓後</button><button class="btn small" data-i="${i}" data-cskip title="這筆已經用別的方式處理了">不用結轉</button>`}</div></div>`).join('')}</div></div>`;
   }
   function holdPanel(ctx, ym) {
     const { esc, fmt, ymLabel } = ctx;
@@ -457,7 +556,7 @@
     return `<div class="rc-card open ${bad ? 'bad' : ''}" data-id="${r.id}">${head}<div class="rc-body">
       <div class="rc-sec"><h4>應收</h4><div class="rc-grid">${CARD_MAIN.map(([k, l]) => field(k, l)).join('')}</div></div>
       <div class="rc-sec"><h4>實收</h4><div class="rc-grid">${field('paid', '實收金額')}<div class="rc-f"><span>現金、支票</span><button type="button" class="btn pay-btn2 ${hasPay(r) ? 'on' : ''}" data-pay>${payLabel(r)}</button><small>不填沒關係；填了合計要等於實收</small></div></div></div>
-      <div class="rc-sec"><h4>調整 <small class="muted">${nAdj ? '' : '沒有就不用加'}</small> <button type="button" class="it-btn" data-items>⚙ 項目</button></h4><div class="adj-box">${adjBox(r, ctx)}</div></div>
+      <div class="rc-sec"><h4>上期結轉／調整 <small class="muted">${nAdj || (r.carry || []).length ? '' : '沒有就不用加（↪ = 上期結轉）'}</small> <button type="button" class="it-btn" data-items>⚙ 項目</button></h4><div class="adj-box">${adjBox(r, ctx)}</div></div>
       <div class="rc-sec"><label class="rc-f wide"><span>備註</span><textarea data-k="note" rows="2" placeholder="${adjOf(r, '保留') ? '寫保留的原因，下個月會提醒' : '特殊狀況寫這裡'}">${esc(r.note || '')}</textarea></label></div>
       <div class="rc-live">${cardLive(r, ctx, gd)}</div>
       <div class="rc-acts"><button type="button" class="btn" data-hist>前幾個月</button><button type="button" class="btn danger" data-del>刪除</button><span class="grow"></span><button type="button" class="btn primary" data-close>填好了，收起</button></div>
@@ -596,7 +695,7 @@
     el.innerHTML = `<div class="panel-head"><h2>${esc(code)} ${esc(name || '')} 前幾個月的明細</h2><button class="icon-btn" id="rcHistX" title="關閉">✕</button></div>
       <p class="hint">${s ? `銷售資料 ${ymLabel(ym)}：出貨 <b>${fmt.money(s.sales)}</b>、退貨 <b>${fmt.money(s.returns)}</b>。` : ''}${last ? `上一次登記（${ymLabel(last.ym)}）留下：${carry.length ? carry.join('、') : '沒有調整'}${last.note ? `；備註「${esc(last.note)}」` : ''}。` : '這位客戶之前沒有登記過。'}</p>
       ${prev.length ? `<div class="table-wrap"><table class="dt hist-t"><thead><tr><th>月份</th>${MAIN.map(([, l]) => `<th class="n">${l}</th>`).join('')}<th>調整</th><th class="n">應收淨額</th><th>檢查</th><th>備註</th></tr></thead><tbody>
-        ${prev.map((r) => { const c = calc(r); return `<tr><td>${ymLabel(r.ym)}</td>${MAIN.map(([k]) => `<td class="n">${r[k] ? fmt.money(r[k]) : ''}</td>`).join('')}<td class="lbl">${(r.adj || []).map((a) => adjTxt(a, ctx)).join('<br>')}</td><td class="n">${fmt.money(c.due)}</td><td>${!isBad(r, hgd) ? '<span class="ok">✓</span>' : `<span class="bad">差 ${fmt.money(hgd.get(gkey(r)))}</span>`}</td><td class="lbl">${esc(r.note || '')}</td></tr>`; }).join('')}</tbody></table></div>` : ''}`;
+        ${prev.map((r) => { const c = calc(r); return `<tr><td>${ymLabel(r.ym)}</td>${MAIN.map(([k]) => `<td class="n">${r[k] ? fmt.money(r[k]) : ''}</td>`).join('')}<td class="lbl">${carryTxt(r, ctx).concat((r.adj || []).map((a) => adjTxt(a, ctx))).join('<br>')}</td><td class="n">${fmt.money(c.due)}</td><td>${!isBad(r, hgd) ? '<span class="ok">✓</span>' : `<span class="bad">差 ${fmt.money(hgd.get(gkey(r)))}</span>`}</td><td class="lbl">${esc(r.note || '')}</td></tr>`; }).join('')}</tbody></table></div>` : ''}`;
     $('#rcHistX').onclick = () => { el.hidden = true; };
     window.__recvHist = { code, months: prevYms }; // 測試用
   }
@@ -605,8 +704,8 @@
     const rows = store().rows.filter((r) => r.ym === ym);
     const used = [...new Set(rows.flatMap((r) => (r.adj || []).map((a) => a.k).filter(Boolean)))];
     const names = allItems().filter((k) => used.includes(k)).concat(used.filter((k) => !allItems().includes(k)));
-    const head = ['月份', '地區', '業務員', '代號', '客戶名稱', '折率%'].concat(MAIN.map((x) => x[1]), names, ['調整合計', '調整明細', '應收淨額', '差額', '備註', '現金', '支票張數', '支票明細']);
-    ctx.downloadCsv(`應收帳款_${ym}`, head, rows.map((r) => { const c = calc(r); return [ctx.ymLabel(r.ym), r.region, r.rep, r.code, r.name, r.pct || ''].concat(NUMK.map((k) => v(r, k)), names.map((k) => adjOf(r, k)), [c.adj, (r.adj || []).map((a) => `${a.s < 0 ? '-' : '+'}${a.k} ${a.amt}${a.note ? ' ' + a.note : ''}`).join('；'), c.due, c.diff, r.note || '', +r.cash || 0, (r.checks || []).length,
+    const head = ['月份', '地區', '業務員', '代號', '客戶名稱', '折率%'].concat(MAIN.map((x) => x[1]), names, ['結轉（折讓前）', '結轉（折讓後）', '結轉明細', '調整合計', '調整明細', '應收淨額', '差額', '備註', '現金', '支票張數', '支票明細']);
+    ctx.downloadCsv(`應收帳款_${ym}`, head, rows.map((r) => { const c = calc(r); return [ctx.ymLabel(r.ym), r.region, r.rep, r.code, r.name, r.pct || ''].concat(NUMK.map((k) => v(r, k)), names.map((k) => adjOf(r, k)), [c.pre, c.post, (r.carry || []).map((x) => `${x.pos === 'pre' ? '折前' : '折後'}${x.s < 0 ? '-' : '+'}${x.k} ${x.amt}${x.from ? ' ' + x.from : ''}`).join('；'), c.adj, (r.adj || []).map((a) => `${a.s < 0 ? '-' : '+'}${a.k} ${a.amt}${a.note ? ' ' + a.note : ''}`).join('；'), c.due, c.diff, r.note || '', +r.cash || 0, (r.checks || []).length,
       (r.checks || []).map((x) => [x.no, x.bank, x.kind === '本' ? '本人票' : '客票', x.due ? EM().dayLabel(x.due) : '', x.amt].join(' ')).join('；')]); }));
   }
 
@@ -672,5 +771,5 @@
     window.__recvA = { checks: chks.length, soon: soon.length, year: Y, due: T.due, paid: T.paid || 0, bad: T.bad, open: open.length }; // 測試用
   }
 
-  root.Recv = { renderEntry, renderAnalysis, calc, groupDiffs, holdReminders, normRow, ADJ, MAIN };
+  root.Recv = { renderEntry, renderAnalysis, calc, groupDiffs, holdReminders, carryPending, normRow, ADJ, MAIN };
 })(window);
