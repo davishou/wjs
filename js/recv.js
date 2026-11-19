@@ -347,7 +347,10 @@
     const f2 = (n) => NF2.format(n);
     const ok = discOk(r);
     const can = x.lo === x.hi ? `${x.lo}` : x.parts && x.hi - x.lo > 1 ? `${x.lo}～${x.hi}` : `${x.lo} 或 ${x.hi}`;
-    return `<small class="disc-note ${ok ? '' : 'bad'}" title="${x.parts ? `第一次 ${f2(x.parts[0])}＋第二次 ${f2(x.parts[1])}；兩次都去掉小數 = ${x.lo}，都進位 = ${x.hi}` : ''}">實際 ${x.parts ? `${f2(x.parts[0])}<wbr>+${f2(x.parts[1])}<wbr>=${f2(r2(x.parts[0]) + r2(x.parts[1]))}` : f2(x.total)}${ok ? '' : `，可填 ${can}`}</small>`;
+    // 6+1：小字只寫相加結果（實際 1626.97），滑鼠指著才顯示兩次的算式（實際 183.25+1443.72=1626.97）（2026-11-19 使用者要求）
+    const sum = x.parts ? f2(r2(x.parts[0]) + r2(x.parts[1])) : f2(x.total);
+    const tip = x.parts ? `實際 ${f2(x.parts[0])}+${f2(x.parts[1])}=${sum}` : '';
+    return `<small class="disc-note ${ok ? '' : 'bad'}" ${tip ? `title="${tip}" data-tip="${tip}"` : ''}>實際 ${sum}${ok ? '' : `，可填 ${can}`}</small>`;
   }
   const chkHtml = (r, gd, ctx) => {
     const c = calc(r), gdiff = gd ? gd.get(gkey(r)) || 0 : c.diff;

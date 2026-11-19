@@ -1125,3 +1125,4 @@ body[data-app="home"] .brand .mk-sales, body[data-app="home"] .brand .nm-sales {
 }
 /* 6+1 的實際金額兩段：放不下時在「+」前面換行 */
 .recv-t .disc-note { white-space: normal; max-width: 66px; margin-left: auto; word-break: keep-all; }
+.disc-note[title] { cursor: help; }

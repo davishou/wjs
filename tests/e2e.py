@@ -968,11 +968,13 @@ async def recv_flow(b):
     base = x5[0] - x5[1] - x5[2]; d1 = base * 0.06; d2 = (base - math.floor(d1 + 0.5)) * 0.01
     auto = math.floor(d1 + 0.5) + math.floor(d2 + 0.5)
     ok(x5[3] == auto and x5[4] == '6+1' and x5[5] == '6+1', f"折率打「6+1」→ 第一次 {d1:.2f}、第二次 {d2:.2f}，各自四捨五入後相加 = {x5[3]}；記住這位客人的折率")
-    note5 = (await pg.text_content('#recvBody tr:has-text("5X03") .disc-note')).replace('\u200b', '')
+    shown5 = await pg.text_content('#recvBody tr:has-text("5X03") .disc-note')
+    note5 = await pg.get_attribute('#recvBody tr:has-text("5X03") .disc-note', 'title')
+    ok('+' not in shown5 and '=' not in shown5 and shown5.startswith('實際 ') and shown5.replace('實際 ', '') == note5.split('=')[1], f'小字只寫相加結果「{shown5}」，滑鼠指著才看到算式「{note5}」')
     import re as _re
     m5 = _re.search(r'實際 ([\d,.]+)\+([\d,.]+)=([\d,.]+)', note5)
     nums = [float(x.replace(',', '')) for x in m5.groups()] if m5 else [0, 0, -1]
-    ok(m5 and abs(nums[0] - d1) < 0.006 and abs(nums[1] - d2) < 0.006 and abs(nums[0] + nums[1] - nums[2]) < 0.001, f'折讓下面兩次都寫出來，再寫相加結果：{note5}')
+    ok(m5 and abs(nums[0] - d1) < 0.006 and abs(nums[1] - d2) < 0.006 and abs(nums[0] + nums[1] - nums[2]) < 0.001, f'滑鼠指著的算式：兩次都寫出來，再寫相加結果：{note5}')
     lo, hi = math.floor(d1) + math.floor(d2), math.ceil(d1) + math.ceil(d2)
     for val, good in ((lo, True), (hi, True), (hi + 1, False), (lo - 1, False)):
         r5 = pg.locator('#recvBody tr:has-text("5X03")')
