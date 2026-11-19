@@ -341,13 +341,13 @@
     window.__recv = { ym, rows: rows.map((r) => ({ code: r.code, ...calc(r), group: gd.get(gkey(r)) })) }; // 測試用
   }
 
-  // 折讓下面的小字：實際金額（小數第二位，6+1 兩次都寫出來）；自己打的不在可以的範圍就標紅
+  // 折讓下面的小字：實際金額（小數第二位，6+1 兩次都寫出來再寫相加結果：實際 183.25+1443.72=1626.97，2026-11-19 使用者要求）；自己打的不在可以的範圍就標紅
   function discNote(r, ctx) {
     const x = discExact(r); if (!x) return '';
     const f2 = (n) => NF2.format(n);
     const ok = discOk(r);
     const can = x.lo === x.hi ? `${x.lo}` : x.parts && x.hi - x.lo > 1 ? `${x.lo}～${x.hi}` : `${x.lo} 或 ${x.hi}`;
-    return `<small class="disc-note ${ok ? '' : 'bad'}" title="${x.parts ? `第一次 ${f2(x.parts[0])}＋第二次 ${f2(x.parts[1])}；兩次都去掉小數 = ${x.lo}，都進位 = ${x.hi}` : ''}">實際 ${x.parts ? `${f2(x.parts[0])}<wbr>+${f2(x.parts[1])}` : f2(x.total)}${ok ? '' : `，可填 ${can}`}</small>`;
+    return `<small class="disc-note ${ok ? '' : 'bad'}" title="${x.parts ? `第一次 ${f2(x.parts[0])}＋第二次 ${f2(x.parts[1])}；兩次都去掉小數 = ${x.lo}，都進位 = ${x.hi}` : ''}">實際 ${x.parts ? `${f2(x.parts[0])}<wbr>+${f2(x.parts[1])}<wbr>=${f2(r2(x.parts[0]) + r2(x.parts[1]))}` : f2(x.total)}${ok ? '' : `，可填 ${can}`}</small>`;
   }
   const chkHtml = (r, gd, ctx) => {
     const c = calc(r), gdiff = gd ? gd.get(gkey(r)) || 0 : c.diff;
