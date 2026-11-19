@@ -968,9 +968,14 @@ async def recv_flow(b):
     base = x5[0] - x5[1] - x5[2]; d1 = base * 0.06; d2 = (base - math.floor(d1 + 0.5)) * 0.01
     auto = math.floor(d1 + 0.5) + math.floor(d2 + 0.5)
     ok(x5[3] == auto and x5[4] == '6+1' and x5[5] == '6+1', f"折率打「6+1」→ 第一次 {d1:.2f}、第二次 {d2:.2f}，各自四捨五入後相加 = {x5[3]}；記住這位客人的折率")
-    shown5 = await pg.text_content('#recvBody tr:has-text("5X03") .disc-note')
-    note5 = await pg.get_attribute('#recvBody tr:has-text("5X03") .disc-note', 'title')
+    dn5 = '#recvBody tr:has-text("5X03") .disc-note'
+    shown5 = await pg.inner_text(dn5)
+    note5 = (await pg.get_attribute(dn5, 'title')).replace('（點一下展開）', '')
     ok('+' not in shown5 and '=' not in shown5 and shown5.startswith('實際 ') and shown5.replace('實際 ', '') == note5.split('=')[1], f'小字只寫相加結果「{shown5}」，滑鼠指著才看到算式「{note5}」')
+    await pg.click(dn5); await pg.wait_for_timeout(150)
+    ok(await pg.inner_text(dn5) == note5 and not await pg.evaluate("document.activeElement && document.activeElement.dataset && document.activeElement.dataset.k === 'disc'"), f'點一下小字 → 展開成算式「{await pg.inner_text(dn5)}」（手機也看得到）')
+    await pg.click(dn5); await pg.wait_for_timeout(150)
+    ok(await pg.inner_text(dn5) == shown5, '再點一下 → 收起來')
     import re as _re
     m5 = _re.search(r'實際 ([\d,.]+)\+([\d,.]+)=([\d,.]+)', note5)
     nums = [float(x.replace(',', '')) for x in m5.groups()] if m5 else [0, 0, -1]
@@ -1058,6 +1063,12 @@ async def recv_phone(b):
     ok(r[0] == p0 - 50 and r[1] == 50 and r[2] == '少 50 下次補' and '✓' in await op.locator('.rc-live').text_content(), f'填不足 50、備註 → 對得上、存進資料 {r}')
     await op.locator('[data-pay]').click(); await pg.wait_for_selector('.rc-card.open #rcPay:not([hidden])')
     ok(True, '按「詳細」→ 現金、支票明細就開在這張卡片裡（不用捲到最下面）')
+    await op.locator('input[data-k=pct]').fill('6+1'); await op.locator('input[data-k=pct]').press('Tab'); await pg.wait_for_timeout(300)
+    dn = pg.locator('#recvBody .rc-card.open .disc-note')
+    s0 = await dn.inner_text()
+    await dn.tap(); await pg.wait_for_timeout(200)
+    s1 = await dn.inner_text()
+    ok('+' not in s0 and '+' in s1 and '=' in s1 and await pg.evaluate("document.activeElement.dataset.k") != 'disc', f'手機卡片：點一下折讓下面的小字 → 展開算式「{s1}」，不會跳到輸入格')
     ok(await pg.evaluate("document.documentElement.scrollWidth") <= 392, '手機卡片版面沒有超出螢幕')
     await pg.screenshot(path=SH + '/46_phone_recv_cards.png', full_page=True)
     await op.locator('[data-close]').click(); await pg.wait_for_timeout(300)

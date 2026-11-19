@@ -248,8 +248,9 @@
         const di = n.querySelector('input[data-k="disc"]');
         if (di) {
           const box = n.tagName === 'TR' ? di.closest('td') : di.closest('.rc-f');
-          const old = box.querySelector('.disc-note'); if (old) old.remove();
+          const old = box.querySelector('.disc-note'); const wasOpen = old && old.classList.contains('open'); if (old) old.remove();
           di.insertAdjacentHTML('afterend', discNote(x, ctx));
+          if (wasOpen) { const nn = box.querySelector('.disc-note[data-tip]'); if (nn) nn.classList.add('open'); } // 展開的算式改完數字後保持展開
           box.classList.toggle(n.tagName === 'TR' ? 'bad-cell' : 'bad', !discOk(x));
         }
         const ab = n.querySelector('.adj-box');
@@ -312,6 +313,8 @@
       refresh(r);
     });
     list.addEventListener('click', (e) => {
+      const dn = e.target.closest('.disc-note[data-tip]');
+      if (dn) { e.preventDefault(); dn.classList.toggle('open'); return; } // 卡片裡小字在 label 裡面，擋掉才不會跳到輸入格
       if (e.target.closest('[data-open]')) { const n = e.target.closest('.rc-card'); openCard(n.classList.contains('open') ? null : n.dataset.id); return; }
       if (e.target.closest('[data-close]')) { openCard(null); return; }
       const ib = e.target.closest('[data-items]'); if (ib) { openItems(ib); return; }
@@ -350,7 +353,8 @@
     // 6+1：小字只寫相加結果（實際 1626.97），滑鼠指著才顯示兩次的算式（實際 183.25+1443.72=1626.97）（2026-11-19 使用者要求）
     const sum = x.parts ? f2(r2(x.parts[0]) + r2(x.parts[1])) : f2(x.total);
     const tip = x.parts ? `實際 ${f2(x.parts[0])}+${f2(x.parts[1])}=${sum}` : '';
-    return `<small class="disc-note ${ok ? '' : 'bad'}" ${tip ? `title="${tip}" data-tip="${tip}"` : ''}>實際 ${sum}${ok ? '' : `，可填 ${can}`}</small>`;
+    // 點一下小字就展開／收起算式（手機沒有滑鼠，2026-11-19 使用者要求）
+    return `<small class="disc-note ${ok ? '' : 'bad'} ${tip ? 'has-tip' : ''}" ${tip ? `title="${tip}（點一下展開）" data-tip role="button" tabindex="0"` : ''}>${tip ? `<span class="dn-s">實際 ${sum}</span><span class="dn-l">${tip}</span>` : `實際 ${sum}`}${ok ? '' : `，可填 ${can}`}</small>`;
   }
   const chkHtml = (r, gd, ctx) => {
     const c = calc(r), gdiff = gd ? gd.get(gkey(r)) || 0 : c.diff;

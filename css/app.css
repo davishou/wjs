@@ -1126,3 +1126,8 @@ body[data-app="home"] .brand .mk-sales, body[data-app="home"] .brand .nm-sales {
 /* 6+1 的實際金額兩段：放不下時在「+」前面換行 */
 .recv-t .disc-note { white-space: normal; max-width: 66px; margin-left: auto; word-break: keep-all; }
 .disc-note[title] { cursor: help; }
+/* 6+1 的小字：點一下展開算式 */
+.disc-note.has-tip { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+.disc-note .dn-l { display: none; }
+.disc-note.open .dn-s { display: none; }
+.disc-note.open .dn-l { display: inline; word-break: break-all; }
