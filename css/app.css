@@ -1123,3 +1123,5 @@ body[data-app="home"] .brand .mk-sales, body[data-app="home"] .brand .nm-sales {
   body[data-app="home"] .nav { border-top: 3px solid var(--hm-k) !important; }
   body[data-app="home"] .tabs a.on { color: var(--hm-k) !important; background: #e9ecf0 !important; }
 }
+/* 6+1 的實際金額兩段：放不下時在「+」前面換行 */
+.recv-t .disc-note { white-space: normal; max-width: 66px; margin-left: auto; word-break: keep-all; }

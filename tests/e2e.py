@@ -965,8 +965,19 @@ async def recv_flow(b):
     row5 = pg.locator('#recvBody tr:has-text("5X03")')
     await row5.locator('input[data-k=pct]').fill('6+1'); await row5.locator('input[data-k=pct]').press('Tab'); await pg.wait_for_timeout(300)
     x5 = await pg.evaluate("(() => { const r = window.__app.meta.recv.rows.find(r => r.code === '5X03' && r.ym === 11410); return [r.ar, r.ret, r.bu || 0, r.disc, r.pct, (window.__app.meta.recvRates || {})['5X03']]; })()")
-    base = x5[0] - x5[1] - x5[2]; d1 = base * 0.06; d2 = (base - d1) * 0.01
-    ok(x5[3] == math.floor(d1 + d2 + 0.5) and x5[4] == '6+1' and x5[5] == '6+1', f"折率打「6+1」→（應收−退貨−補價）×6% = {d1:.2f}，再 ×1% = {d2:.2f}，四捨五入 {x5[3]}；記住這位客人的折率")
+    base = x5[0] - x5[1] - x5[2]; d1 = base * 0.06; d2 = (base - math.floor(d1 + 0.5)) * 0.01
+    auto = math.floor(d1 + 0.5) + math.floor(d2 + 0.5)
+    ok(x5[3] == auto and x5[4] == '6+1' and x5[5] == '6+1', f"折率打「6+1」→ 第一次 {d1:.2f}、第二次 {d2:.2f}，各自四捨五入後相加 = {x5[3]}；記住這位客人的折率")
+    note5 = (await pg.text_content('#recvBody tr:has-text("5X03") .disc-note')).replace('\u200b', '')
+    ok(f"實際 {d1:,.2f}+{d2:,.2f}" in note5, f'折讓下面兩次都寫出來：{note5}')
+    lo, hi = math.floor(d1) + math.floor(d2), math.ceil(d1) + math.ceil(d2)
+    for val, good in ((lo, True), (hi, True), (hi + 1, False), (lo - 1, False)):
+        r5 = pg.locator('#recvBody tr:has-text("5X03")')
+        await r5.locator('input[data-k=disc]').fill(str(val)); await r5.locator('input[data-k=disc]').press('Tab'); await pg.wait_for_timeout(250)
+        bad = await pg.locator('#recvBody tr:has-text("5X03") .bad-cell').count()
+        ok((bad == 0) == good, f"6+1 自己打 {val}（兩次去尾相加 {lo}、兩次進位相加 {hi}）→ {'算對' if good else '標紅'}")
+    r5 = pg.locator('#recvBody tr:has-text("5X03")')
+    await r5.locator('input[data-k=disc]').fill(''); await r5.locator('input[data-k=disc]').press('Tab'); await pg.wait_for_timeout(250)
     await pg.locator('#recvBody tr:has-text("5X03") [data-del]').click(); await pg.wait_for_timeout(400)
     ok(await pg.locator('#recvBody tr[data-id]:has-text("5X03")').count() == 0, '刪除一筆（客戶歷史在表格下面，點表格時表格不會跳動）')
     await pg.fill('#rcNew', '5X03'); await pg.wait_for_timeout(200)

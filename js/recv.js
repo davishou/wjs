@@ -44,20 +44,25 @@
   const payBad = (r) => !!hasPay(r) && Math.abs(payTotal(r) - v(r, 'paid')) >= 0.5;
   // 折率：'6+1' → [6, 1]
   const parsePct = (t) => String(t || '').replace(/%/g, '').split(/[+＋,，、]/).map((x) => parseFloat(x)).filter((x) => Number.isFinite(x) && x > 0).slice(0, 2);
-  // 實際的折讓金額（不先四捨五入）
+  // 實際的折讓金額（算到小數，不先去尾數）。6+1（2026-11-19 使用者要求）：
+  //   第一次 = 基數 × 6%，第二次 =（基數 − 第一次四捨五入後）× 1%；自動算 = 兩次各自四捨五入再相加。
+  //   自己打的：兩次都去掉小數再相加、或兩次都進位再相加都算對（中間的數字 = 一個去尾一個進位，也就是自動算的那個，也算對）。
+  // 只有一個 %（例如 6）：基數 × 6%，去掉小數或進位都算對，自動算 = 四捨五入。
+  const fl = (x) => Math.floor(x + 1e-9), ce = (x) => Math.ceil(x - 1e-9), rd = (x) => Math.round(x + 1e-9);
   function discExact(r) {
     const p = parsePct(r.pct); if (!p.length) return null;
     const base = v(r, 'ar') - v(r, 'ret') - v(r, 'bu');
-    const e1 = base * p[0] / 100, e2 = p[1] ? (base - e1) * p[1] / 100 : 0;
-    return { total: e1 + e2, parts: p[1] ? [e1, e2] : null };
+    const e1 = base * p[0] / 100;
+    if (!p[1]) return { total: e1, parts: null, lo: fl(e1), hi: ce(e1), auto: rd(e1) };
+    const e2 = (base - rd(e1)) * p[1] / 100;
+    return { total: e1 + e2, parts: [e1, e2], lo: fl(e1) + fl(e2), hi: ce(e1) + ce(e2), auto: rd(e1) + rd(e2) };
   }
-  // 自己打的折讓：去掉小數或進位都算對
   function discOk(r) {
     const x = discExact(r); if (!x) return true;
-    const d = v(r, 'disc'), t = x.total;
-    return d === Math.floor(t + 1e-9) || d === Math.ceil(t - 1e-9) || Math.abs(d - t) < 0.005;
+    const d = v(r, 'disc');
+    return (Number.isInteger(d) && d >= Math.min(x.lo, x.hi) && d <= Math.max(x.lo, x.hi)) || Math.abs(d - x.total) < 0.005;
   }
-  function applyPct(r) { const x = discExact(r); if (!x) return; r.disc = Math.round(x.total); delete r.discParts; }
+  function applyPct(r) { const x = discExact(r); if (!x) return; r.disc = x.auto; delete r.discParts; }
   // 調整項目清單：⊕（加的）、⊖（減的）分開，使用者可以自己增刪（2026-11-11 第三次）。存在 S.meta.recvItemSets = { plus: [], minus: [] }
   // 第一次：預設照原本 Excel 的正負號分（前先入、前溢入、保留、不足、運金 → 加；溢入、多入 → 減）；之前自己打的新項目，用過減的放減、其他放加。
   function itemLists() {
@@ -336,12 +341,13 @@
     window.__recv = { ym, rows: rows.map((r) => ({ code: r.code, ...calc(r), group: gd.get(gkey(r)) })) }; // 測試用
   }
 
-  // 折讓下面的小字：實際金額（小數第二位）；自己打的不是「去掉小數」或「進位」就標紅
+  // 折讓下面的小字：實際金額（小數第二位，6+1 兩次都寫出來）；自己打的不在可以的範圍就標紅
   function discNote(r, ctx) {
     const x = discExact(r); if (!x) return '';
     const f2 = (n) => NF2.format(n);
     const ok = discOk(r);
-    return `<small class="disc-note ${ok ? '' : 'bad'}" title="${x.parts ? `第一次 ${f2(x.parts[0])}＋第二次 ${f2(x.parts[1])}` : ''}">實際 ${f2(x.total)}${ok ? '' : `，可填 ${Math.floor(x.total + 1e-9)} 或 ${Math.ceil(x.total - 1e-9)}`}</small>`;
+    const can = x.lo === x.hi ? `${x.lo}` : x.parts && x.hi - x.lo > 1 ? `${x.lo}～${x.hi}` : `${x.lo} 或 ${x.hi}`;
+    return `<small class="disc-note ${ok ? '' : 'bad'}" title="${x.parts ? `第一次 ${f2(x.parts[0])}＋第二次 ${f2(x.parts[1])}；兩次都去掉小數 = ${x.lo}，都進位 = ${x.hi}` : ''}">實際 ${x.parts ? `${f2(x.parts[0])}<wbr>+${f2(x.parts[1])}` : f2(x.total)}${ok ? '' : `，可填 ${can}`}</small>`;
   }
   const chkHtml = (r, gd, ctx) => {
     const c = calc(r), gdiff = gd ? gd.get(gkey(r)) || 0 : c.diff;
